@@ -1,0 +1,11 @@
+# Prefect with compatible griffe
+griffe==1.13.0
+prefect==2.14.21
+
+# Snowflake connector
+snowflake-connector-python==3.17.4
+
+# Flask for backend API
+Flask==3.0.0
+Flask-CORS==4.0.0
+python-dotenv==1.0.0
