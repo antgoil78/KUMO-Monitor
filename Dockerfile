@@ -17,7 +17,6 @@ WORKDIR /app
 RUN python -m pip install --upgrade pip setuptools wheel
 
 RUN pip install --no-cache-dir \
-    prefect==2.14.21 \
     snowflake-connector-python==3.17.4 \
     Flask==3.0.0 \
     Flask-CORS==4.0.0 \
