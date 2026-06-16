@@ -1,8 +1,6 @@
 #!/bin/bash
 set -e
 
-export PREFECT_TELEMETRY_ENABLED=false
-export PREFECT_API_URL="http://127.0.0.1:4200/api"
 export FLASK_APP=backend/app.py
 export FLASK_ENV=production
 
