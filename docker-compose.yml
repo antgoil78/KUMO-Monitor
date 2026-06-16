@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  kumo-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kumo-monitor:latest
+    container_name: kumo-monitor
+    ports:
+      - "5000:5000"
+      - "3000:3000"
+    environment:
+      SNOWFLAKE_USER: ${SNOWFLAKE_USER}
+      SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD}
+    volumes:
+      - ./frontend:/app/frontend
+      - ./backend:/app/backend
+    restart: unless-stopped
