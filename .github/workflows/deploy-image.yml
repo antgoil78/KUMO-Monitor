@@ -1,0 +1,33 @@
+name: Build and Push KUMO-Monitor Container
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Snowflake registry
+        run: echo "${{ secrets.SNOWFLAKE_PASSWORD }}" | docker login vymkbmw-ov24823.registry.snowflakecomputing.com -u ${{ secrets.SNOWFLAKE_USER }} --password-stdin
+
+      - name: Build Docker image
+        run: |
+          docker build \
+          --build-arg SNOWFLAKE_USER=${{ secrets.SNOWFLAKE_USER }} \
+          --build-arg SNOWFLAKE_PASSWORD=${{ secrets.SNOWFLAKE_PASSWORD }} \
+          -t kumo-monitor:latest .
+
+      - name: Tag and push to Snowflake
+        run: |
+          IMAGE_URI=vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_dev/kumo/kumo_repository/kumo-monitor:latest
+          docker tag kumo-monitor:latest $IMAGE_URI
+          docker push $IMAGE_URI
