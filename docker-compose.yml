@@ -6,13 +6,20 @@ services:
       context: .
       dockerfile: Dockerfile
     image: kumo-monitor:latest
-    container_name: kumo-monitor 
+    container_name: kumo-monitor
     ports:
       - "5000:5000"
     environment:
-      SNOWFLAKE_USER: ${SNOWFLAKE_USER}
-      SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD}
-    volumes:
-      - ./frontend:/app/frontend
-      - ./backend:/app/backend
+      KUMO_USE_MOCK: ${KUMO_USE_MOCK:-false}
+      KUMO_REFRESH_SECONDS: ${KUMO_REFRESH_SECONDS:-5}
+      KUMO_DB: ${KUMO_DB:-KUMO_ADMIN}
+      KUMO_SCHEMA: ${KUMO_SCHEMA:-WORKFLOW_MANAGER}
+      KUMO_PROGRESS_TABLE: ${KUMO_PROGRESS_TABLE:-KUMO_TST.META.EXECUTION_PROGRESS}
+      SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT:-}
+      SNOWFLAKE_USER: ${SNOWFLAKE_USER:-}
+      SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD:-}
+      SNOWFLAKE_ROLE: ${SNOWFLAKE_ROLE:-}
+      SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE:-}
+      SNOWFLAKE_DATABASE: ${SNOWFLAKE_DATABASE:-KUMO_ADMIN}
+      SNOWFLAKE_SCHEMA: ${SNOWFLAKE_SCHEMA:-WORKFLOW_MANAGER}
     restart: unless-stopped
