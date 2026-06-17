@@ -1,13 +1,14 @@
 {
-  "name": "simple-fullstack-docker-frontend",
-  "version": "1.0.0",
+  "name": "kumo-monitor",
+  "version": "0.1.0",
   "private": true,
-  "description": "Minimal frontend build used by the Docker multi-stage build.",
+  "type": "module",
   "scripts": {
-    "build": "node build.js",
-    "start": "node dev-server.js"
+    "dev": "vite --host 0.0.0.0 --port 3000",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 3000"
   },
-    "dependencies": {
+  "dependencies": {
     "@vitejs/plugin-react": "4.3.4",
     "vite": "5.4.21",
     "react": "18.3.1",
