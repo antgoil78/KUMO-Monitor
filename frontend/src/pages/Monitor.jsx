@@ -4,47 +4,80 @@ import StatusBadge, { statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import { elapsedDuration, formatDateTime } from '../utils/time.js'
 
-const statusOptions = ['SUCCESS', 'FAILED', 'RUNNING', 'QUEUED', '-']
+const statusOptions = [
+  { value: '', label: 'All statuses' },
+  { value: 'SUCCESS', label: 'Success' },
+  { value: 'FAILED', label: 'Failed' },
+  { value: 'RUNNING', label: 'Running' },
+  { value: 'QUEUED', label: 'Queued' },
+  { value: '-', label: 'No status' }
+]
 
-function KpiCard({ label, value, tone }) {
+function SummaryItem({ tone, icon, label, value }) {
   return (
-    <div className={`kpi-card ${tone || ''}`}>
-      <div className="kpi-value">{value}</div>
-      <div className="kpi-label">{label}</div>
+    <span className={`summary-item ${tone || ''}`}>
+      <span className="summary-icon">{icon}</span>
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </span>
+  )
+}
+
+function RunningProgress({ workflow }) {
+  const s = String(workflow.lastStatus || '').toUpperCase()
+  const isRunning = ['RUNNING', 'IN_PROGRESS', 'EXECUTING'].includes(s)
+  const isQueued = ['QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED'].includes(s)
+
+  if (!isRunning && !isQueued && !workflow.progress) return null
+
+  return (
+    <div className="inline-progress">
+      <ProgressBar progress={workflow.progress} status={workflow.lastStatus} />
     </div>
   )
 }
 
 function WorkflowRow({ workflow, nowMs, onRun }) {
   const disabled = !workflow.workflowEnabled
+  const depth = Number(workflow.indent || 0)
+  const type = String(workflow.workflowType || 'DBT').toUpperCase()
+  const isRoot = depth === 0
+
   return (
-    <tr className={disabled ? 'disabled-row' : ''}>
+    <tr className={`${disabled ? 'disabled-row' : ''} ${isRoot ? 'root-row' : 'child-row'}`}>
       <td className="workflow-cell">
-        <div className="workflow-name" style={{ paddingLeft: `${(workflow.indent || 0) * 24}px` }}>
-          {workflow.indent > 0 && <span className="child-arrow">↳</span>}
-          <span>{workflow.workflowName}</span>
-          <span className="type-chip">{workflow.workflowType || 'DBT'}</span>
-        </div>
-        <div className="workflow-meta">
-          {workflow.workflowGroup || 'Ungrouped'}
-          {workflow.lastRunId ? <span>Run ID: {workflow.lastRunId}</span> : null}
+        <div className={`workflow-tree depth-${Math.min(depth, 6)}`} style={{ '--depth': depth }}>
+          {depth > 0 && <span className="tree-branch" aria-hidden="true" />}
+          <span className={`workflow-title ${isRoot ? 'root' : 'child'}`}>{workflow.workflowName}</span>
+          <span className={`type-chip ${type.toLowerCase()}`}>{type}</span>
         </div>
       </td>
-      <td><StatusBadge status={workflow.lastStatus} /></td>
-      <td>{formatDateTime(workflow.lastStartTime)}</td>
-      <td>{elapsedDuration(workflow.lastStartTime, workflow.lastEndTime, workflow.lastStatus, nowMs)}</td>
+      <td className="status-cell">
+        <StatusBadge status={workflow.lastStatus} />
+      </td>
+      <td className="muted-cell">{formatDateTime(workflow.lastStartTime)}</td>
+      <td className="duration-cell">
+        <span>{elapsedDuration(workflow.lastStartTime, workflow.lastEndTime, workflow.lastStatus, nowMs)}</span>
+        <RunningProgress workflow={workflow} />
+      </td>
       <td className="schedule-cell">
         {workflow.taskEnabled ? (
           <>
             <code>{workflow.scheduleCron || '-'}</code>
             <span>{workflow.scheduleTimezone || 'UTC'}</span>
           </>
-        ) : '-'}
+        ) : <span className="muted-dash">—</span>}
       </td>
-      <td>{workflow.taskEnabled ? formatDateTime(workflow.nextRunTime) : '-'}</td>
-      <td><ProgressBar progress={workflow.progress} status={workflow.lastStatus} /></td>
+      <td className="muted-cell">{workflow.taskEnabled ? formatDateTime(workflow.nextRunTime) : '—'}</td>
       <td className="row-actions">
-        <button className="small-button primary" disabled={disabled} onClick={() => onRun(workflow)}>Run</button>
+        <details className="row-menu">
+          <summary aria-label={`Actions for ${workflow.workflowName}`}>⋮⌄</summary>
+          <div className="row-menu-panel">
+            <button disabled={disabled} onClick={() => onRun(workflow)}>Run workflow</button>
+            <button disabled>History</button>
+            <button disabled>Edit</button>
+          </div>
+        </details>
       </td>
     </tr>
   )
@@ -55,7 +88,7 @@ export default function Monitor() {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('')
-  const [statuses, setStatuses] = useState([])
+  const [statusFilter, setStatusFilter] = useState('')
   const [nowMs, setNowMs] = useState(Date.now())
   const [actionMessage, setActionMessage] = useState(null)
 
@@ -95,10 +128,10 @@ export default function Monitor() {
     return workflows.filter(w => {
       const matchesName = !f || [w.workflowName, w.workflowGroup, w.workflowType, w.lastRunId].some(v => String(v || '').toLowerCase().includes(f))
       const st = String(w.lastStatus || '-').toUpperCase()
-      const matchesStatus = statuses.length === 0 || statuses.includes(st)
+      const matchesStatus = !statusFilter || statusFilter === st
       return matchesName && matchesStatus
     })
-  }, [workflows, filter, statuses])
+  }, [workflows, filter, statusFilter])
 
   async function runWorkflow(workflow) {
     setActionMessage(null)
@@ -112,69 +145,63 @@ export default function Monitor() {
   }
 
   return (
-    <section className="page">
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">KUMO Monitor</p>
-          <h1>Monitor</h1>
-          <p className="page-subtitle">Latest and current workflow status. Data refreshes automatically.</p>
-        </div>
-        <div className="header-actions">
-          <div className={`engine-pill ${statusKind(engine.status)}`}>
-            <span className="pulse-dot" />
-            Engine: <strong>{engine.status || 'UNKNOWN'}</strong>
-          </div>
-          <button className="button" onClick={() => load(true)}>Refresh now</button>
-        </div>
+    <section className="page monitor-page">
+      <div className="monitor-heading">
+        <h1>Workflow Monitor</h1>
+        <button className="ghost-refresh" onClick={() => load(true)}>Refresh now</button>
       </div>
 
       {error && <div className="alert error">{error}</div>}
       {payload?.error && <div className="alert warning">Backend fallback: {payload.error}</div>}
       {actionMessage && <div className="alert info">{actionMessage}</div>}
 
-      <div className="kpi-grid">
-        <KpiCard label="Total" value={summary.total} />
-        <KpiCard label="Success" value={summary.success} tone="success" />
-        <KpiCard label="Failed" value={summary.failed} tone="failed" />
-        <KpiCard label="Running" value={summary.running} tone="running" />
-        <KpiCard label="Queued" value={summary.queued} tone="queued" />
-      </div>
-
-      <div className="toolbar">
+      <div className="monitor-toolbar">
         <input
           value={filter}
           onChange={e => setFilter(e.target.value)}
           placeholder="Filter workflows..."
           className="search-input"
         />
-        <div className="status-filter">
-          {statusOptions.map(st => (
-            <button
-              key={st}
-              className={`filter-chip ${statuses.includes(st) ? 'active' : ''}`}
-              onClick={() => setStatuses(prev => prev.includes(st) ? prev.filter(x => x !== st) : [...prev, st])}
-            >
-              {st}
-            </button>
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          className="status-select"
+        >
+          {statusOptions.map(option => (
+            <option key={option.value || 'all'} value={option.value}>{option.label}</option>
           ))}
-        </div>
-        <span className="updated-at">Updated: {formatDateTime(payload?.generatedAt)}</span>
+        </select>
       </div>
 
-      <div className="table-card">
+      <div className="monitor-summary-strip">
+        <span className={`engine-inline ${statusKind(engine.status)}`}>
+          <span className="engine-dot" />
+          <span>Engine:</span>
+          <strong>{engine.status || 'UNKNOWN'}</strong>
+        </span>
+        <span className="summary-separator" />
+        <SummaryItem tone="success" icon="✓" label="success" value={summary.success} />
+        <SummaryItem tone="failed" icon="×" label="failed" value={summary.failed} />
+        <SummaryItem tone="running" icon="▶" label="running" value={summary.running} />
+        <SummaryItem tone="queued" icon="●" label="queued" value={summary.queued} />
+        <span className="summary-separator" />
+        <span className="summary-total"><strong>{summary.total}</strong> total</span>
+        <span className="summary-updated">Updated: {formatDateTime(payload?.generatedAt)}</span>
+      </div>
+
+      <div className="table-card monitor-table-card">
         {loading ? <div className="empty-state">Loading monitor data...</div> : null}
         {!loading && filtered.length === 0 ? <div className="empty-state">No workflows match the current filters.</div> : null}
         {filtered.length > 0 && (
-          <table className="workflow-table">
+          <table className="workflow-table monitor-table">
             <thead>
               <tr>
                 <th>Workflow</th>
                 <th>Status</th>
-                <th>Last run</th>
+                <th>Last Run</th>
                 <th>Duration</th>
                 <th>Schedule</th>
-                <th>Next run</th>
-                <th>Progress</th>
+                <th>Next Run</th>
                 <th></th>
               </tr>
             </thead>
