@@ -9,7 +9,6 @@ services:
     container_name: kumo-monitor 
     ports:
       - "5000:5000"
-      - "3000:3000"
     environment:
       SNOWFLAKE_USER: ${SNOWFLAKE_USER}
       SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD}
