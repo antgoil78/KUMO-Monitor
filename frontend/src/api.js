@@ -20,6 +20,7 @@ async function requestJson(url, options = {}) {
 
 export const api = {
   health: () => requestJson('/api/health'),
+  snowflakePing: () => requestJson('/api/snowflake/ping'),
   monitor: () => requestJson('/api/monitor'),
   refreshMonitor: () => requestJson('/api/monitor/refresh', { method: 'POST' }),
   runWorkflow: (workflowId) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/run`, {
