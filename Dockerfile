@@ -39,6 +39,5 @@ RUN chmod +x /app/entrypoint.sh
 COPY --from=react-builder /app/frontend/build /app/backend/static
 
 EXPOSE 5000
-EXPOSE 3000
 
 ENTRYPOINT ["/app/entrypoint.sh"]
