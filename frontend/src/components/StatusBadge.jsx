@@ -5,6 +5,14 @@ const groups = {
   failed: ['FAILED', 'FAILURE', 'ERROR']
 }
 
+const iconByKind = {
+  success: '✓',
+  running: '▶',
+  queued: '●',
+  failed: '×',
+  muted: '—'
+}
+
 export function statusKind(status) {
   const s = String(status || '-').toUpperCase()
   if (groups.success.includes(s)) return 'success'
@@ -15,6 +23,12 @@ export function statusKind(status) {
 }
 
 export default function StatusBadge({ status }) {
-  const s = String(status || '-').toUpperCase()
-  return <span className={`status-badge ${statusKind(s)}`}>{s}</span>
+  const s = String(status || '—').toUpperCase().replace('-', '—')
+  const kind = statusKind(s)
+  return (
+    <span className={`status-badge ${kind}`}>
+      <span className="status-icon">{iconByKind[kind]}</span>
+      <span>{s}</span>
+    </span>
+  )
 }
