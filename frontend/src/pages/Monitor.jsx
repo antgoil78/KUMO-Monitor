@@ -93,7 +93,7 @@ function RowActions({ workflow, isOpen, onOpen, onClose, onAction, disabledRun }
   )
 }
 
-function WorkflowRow({ workflow, nowMs, onAction, openMenuId, setOpenMenuId, pendingRun }) {
+function WorkflowRow({ workflow, nowMs, onManage, pendingRun }) {
   const disabled = !workflow.workflowEnabled
   const depth = Number(workflow.indent || 0)
   const type = String(workflow.workflowType || 'DBT').toUpperCase()
@@ -102,7 +102,7 @@ function WorkflowRow({ workflow, nowMs, onAction, openMenuId, setOpenMenuId, pen
   const busy = isWorkflowBusy(view.lastStatus)
 
   return (
-    <tr className={`${disabled ? 'disabled-row' : ''} ${isRoot ? 'root-row' : 'child-row'} depth-row-${Math.min(depth, 6)}`}>
+    <tr className={`${disabled ? 'disabled-row' : ''} ${isRoot ? 'root-row' : 'child-row'} depth-row-${Math.min(depth, 6)} ${busy ? 'busy-row' : ''}`}>
       <td className="workflow-cell">
         <div className={`workflow-tree depth-${Math.min(depth, 6)}`} style={{ '--depth': depth }}>
           {depth > 0 && <span className="tree-branch" aria-hidden="true" />}
@@ -121,14 +121,15 @@ function WorkflowRow({ workflow, nowMs, onAction, openMenuId, setOpenMenuId, pen
       </td>
       <td className="muted-cell">{workflow.taskEnabled ? formatDateTime(workflow.nextRunTime) : '—'}</td>
       <td className="row-actions">
-        <RowActions
-          workflow={view}
-          isOpen={openMenuId === workflow.workflowId}
-          onOpen={() => setOpenMenuId(workflow.workflowId)}
-          onClose={() => setOpenMenuId(null)}
-          onAction={onAction}
-          disabledRun={busy}
-        />
+        <button
+          className="row-manage-button"
+          aria-label={`Manage ${workflow.workflowName}`}
+          onClick={() => onManage(view)}
+        >
+          <span className="manage-dot" />
+          <span>Manage</span>
+          <strong>›</strong>
+        </button>
       </td>
     </tr>
   )
@@ -357,6 +358,66 @@ function DagModal({ workflow, onClose }) {
   )
 }
 
+function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
+  const view = pendingRun ? { ...workflow, lastStatus: 'INITIATING', lastRunId: pendingRun.runId || workflow.lastRunId } : workflow
+  const wfEnabled = Boolean(view.workflowEnabled)
+  const taskEnabled = Boolean(view.taskEnabled)
+  const isDbt = String(view.workflowType || '').toUpperCase() === 'DBT'
+  const busy = isWorkflowBusy(view.lastStatus)
+
+  async function choose(action) {
+    onClose()
+    await onAction(action, view)
+  }
+
+  return (
+    <Modal title="Workflow actions" subtitle={view.workflowName} onClose={onClose}>
+      <div className="action-modal-head">
+        <div>
+          <span className="modal-eyebrow">Current status</span>
+          <StatusBadge status={view.lastStatus} />
+        </div>
+        {view.lastRunId && <code>{view.lastRunId}</code>}
+      </div>
+
+      <div className="action-grid">
+        <button className="action-tile primary" disabled={!wfEnabled || busy} onClick={() => choose('run')}>
+          <span className="action-icon">▶</span>
+          <strong>{busy ? 'Workflow active' : 'Run workflow'}</strong>
+          <small>{busy ? 'Run is disabled while initiating, queued or running.' : 'Create a manual run request.'}</small>
+        </button>
+        {isDbt && (
+          <button className="action-tile" onClick={() => choose('dag')}>
+            <span className="action-icon">⌘</span>
+            <strong>Show DAG run</strong>
+            <small>Open latest DBT execution progress.</small>
+          </button>
+        )}
+        <button className="action-tile" onClick={() => choose('history')}>
+          <span className="action-icon">◷</span>
+          <strong>History</strong>
+          <small>View recent workflow executions.</small>
+        </button>
+        <button className="action-tile" onClick={() => choose('edit')}>
+          <span className="action-icon">✎</span>
+          <strong>Edit workflow</strong>
+          <small>Change metadata, schedule, dependencies and notifications.</small>
+        </button>
+        <button className="action-tile" onClick={() => choose('toggle-workflow')}>
+          <span className="action-icon">{wfEnabled ? 'Ⅱ' : '▶'}</span>
+          <strong>{wfEnabled ? 'Disable workflow' : 'Enable workflow'}</strong>
+          <small>{wfEnabled ? 'Also prevents future manual runs.' : 'Allow workflow runs again.'}</small>
+        </button>
+        <button className="action-tile" disabled={!wfEnabled && !taskEnabled} onClick={() => choose('toggle-schedule')}>
+          <span className="action-icon">◴</span>
+          <strong>{taskEnabled ? 'Disable schedule' : 'Enable schedule'}</strong>
+          <small>{taskEnabled ? 'Keep workflow but stop timed triggers.' : 'Resume scheduled execution.'}</small>
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 export default function Monitor() {
   const [payload, setPayload] = useState(null)
   const [error, setError] = useState(null)
@@ -462,12 +523,13 @@ export default function Monitor() {
 
   return (
     <section className="page monitor-page">
-      <div className="page-title-row monitor-title-row">
+      <div className="page-hero monitor-hero">
         <div>
           <p className="breadcrumb">Pages / Monitor</p>
-          <h1>Workflow Monitor</h1>
+          <h1 className="page-heading">Workflow Monitor</h1>
+          <p className="page-subtitle">Live operational control for KUMO workflow runs, schedules and dependencies.</p>
         </div>
-        <button className="ghost-refresh" onClick={() => load(true)}>Refresh now</button>
+        <button className="button refresh-button" onClick={() => load(true)}>↻ Refresh now</button>
       </div>
 
       {error && <div className="alert error">{error}</div>}
@@ -481,15 +543,21 @@ export default function Monitor() {
         </select>
       </div>
 
-      <div className="monitor-summary-strip vision-status-strip">
-        <span className={`engine-inline ${statusKind(engine.status)}`}><span className="engine-dot" /><span>Engine</span><strong>{engine.status || 'UNKNOWN'}</strong></span>
-        <span className="summary-separator" />
-        <SummaryItem tone="success" icon="✓" label="success" value={summary.success} />
-        <SummaryItem tone="failed" icon="×" label="failed" value={summary.failed} />
-        <SummaryItem tone="running" icon="▶" label="running/init" value={summary.running} />
-        <SummaryItem tone="queued" icon="●" label="queued" value={summary.queued} />
-        <span className="summary-separator" />
-        <span className="summary-total"><strong>{summary.total}</strong> total</span>
+      <div className="monitor-system-strip">
+        <div className={`system-engine-card ${statusKind(engine.status)}`}>
+          <span className="system-pulse" />
+          <div>
+            <span>Engine</span>
+            <strong>{engine.status || 'UNKNOWN'}</strong>
+          </div>
+        </div>
+        <div className="system-counts">
+          <SummaryItem tone="success" icon="✓" label="success" value={summary.success} />
+          <SummaryItem tone="failed" icon="×" label="failed" value={summary.failed} />
+          <SummaryItem tone="running" icon="▶" label="running/init" value={summary.running} />
+          <SummaryItem tone="queued" icon="●" label="queued" value={summary.queued} />
+          <span className="summary-total"><strong>{summary.total}</strong> total</span>
+        </div>
         <span className="summary-updated">Updated {formatDateTime(payload?.generatedAt)}</span>
       </div>
 
@@ -499,11 +567,12 @@ export default function Monitor() {
         {filtered.length > 0 && (
           <table className="workflow-table monitor-table">
             <thead><tr><th>Workflow</th><th>Status</th><th>Last Run</th><th>Duration</th><th>Schedule</th><th>Next Run</th><th></th></tr></thead>
-            <tbody>{filtered.map(w => <WorkflowRow key={`${w.workflowId}-${w.lastRunId || 'none'}`} workflow={w} nowMs={nowMs} onAction={handleAction} openMenuId={openMenuId} setOpenMenuId={setOpenMenuId} pendingRun={pendingRuns[w.workflowId]} />)}</tbody>
+            <tbody>{filtered.map(w => <WorkflowRow key={`${w.workflowId}-${w.lastRunId || 'none'}`} workflow={w} nowMs={nowMs} onManage={(workflow) => setModal({ type: 'actions', workflow })} pendingRun={pendingRuns[w.workflowId]} />)}</tbody>
           </table>
         )}
       </div>
 
+      {modal?.type === 'actions' && <ActionsModal workflow={modal.workflow} pendingRun={pendingRuns[modal.workflow.workflowId]} onClose={() => setModal(null)} onAction={handleAction} />}
       {modal?.type === 'history' && <HistoryModal workflow={modal.workflow} onClose={() => setModal(null)} />}
       {modal?.type === 'dag' && <DagModal workflow={modal.workflow} onClose={() => setModal(null)} />}
       {modal?.type === 'edit' && <EditModal workflowId={modal.workflow.workflowId} onClose={() => setModal(null)} onSaved={() => load(true)} notify={notify} />}

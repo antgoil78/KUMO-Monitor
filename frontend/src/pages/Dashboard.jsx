@@ -42,6 +42,35 @@ function HealthCheck({ label, detail, ok, tone }) {
   )
 }
 
+function CurrentUserCard({ session, role, warehouse }) {
+  const displayName = session?.displayName || session?.userName || 'KUMO user'
+  const callerRightsActive = Boolean(session?.callerRightsActive)
+  const userName = session?.userName || 'UNKNOWN'
+  const activeRole = session?.roleName || role || 'Unknown role'
+  const mode = session?.mode || 'unknown'
+  const callerActive = Boolean(session?.callerRightsActive)
+  const tokenPresent = Boolean(session?.callerTokenPresent)
+
+  return (
+    <div className="vision-card identity-card">
+      <div className="identity-avatar">{displayName.slice(0, 1).toUpperCase()}</div>
+      <div className="identity-content">
+        <span className="eyebrow">Current logged-in user</span>
+        <h3>{displayName}</h3>
+        <dl>
+          <div><dt>Username</dt><dd>{userName}</dd></div>
+          <div><dt>Role</dt><dd>{activeRole}</dd></div>
+          <div><dt>Warehouse</dt><dd>{warehouse}</dd></div>
+          <div><dt>Session mode</dt><dd>{mode}</dd></div>
+        </dl>
+        <span className={`identity-mode ${callerActive ? 'success' : tokenPresent ? 'queued' : 'failed'}`}>
+          {callerActive ? 'Caller rights active' : tokenPresent ? 'Caller token received' : 'Service user mode'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function WorkflowActivity({ workflow }) {
   if (!workflow) return null
   const kind = statusKind(workflow.lastStatus)
@@ -143,6 +172,7 @@ export default function Dashboard() {
   const warehouse = ping?.snowflake?.WAREHOUSE_NAME || ping?.snowflake?.warehouse_name || 'Not selected'
   const role = session?.roleName || ping?.snowflake?.ROLE_NAME || ping?.snowflake?.role_name || 'Unknown role'
   const displayName = session?.displayName || session?.userName || 'KUMO user'
+  const callerRightsActive = Boolean(session?.callerRightsActive)
   const engineKind = statusKind(engine.status)
   const engineOk = ['success', 'running'].includes(engineKind)
   const cacheFresh = Boolean(payload?.generatedAt)
@@ -154,9 +184,15 @@ export default function Dashboard() {
           <p className="breadcrumb">Pages / Dashboard</p>
           <h1>Dashboard</h1>
         </div>
-        <div className="topbar-status">
-          <span className={`topbar-dot ${snowflakeOk ? 'success' : mockMode ? 'queued' : 'failed'}`} />
-          <span title={ping?.error || ''}>{mockMode ? 'Mock mode' : snowflakeOk ? 'Snowflake connected' : 'Snowflake check failed'}</span>
+        <div className="dashboard-top-actions">
+          <div className="topbar-user" title={`${displayName} · ${role}`}>
+            <span>{displayName.slice(0, 1).toUpperCase()}</span>
+            <div><strong>{displayName}</strong><small>{role}</small></div>
+          </div>
+          <div className="topbar-status">
+            <span className={`topbar-dot ${snowflakeOk ? 'success' : mockMode ? 'queued' : 'failed'}`} />
+            <span title={ping?.error || ''}>{mockMode ? 'Mock mode' : snowflakeOk ? 'Snowflake connected' : 'Snowflake check failed'}</span>
+          </div>
         </div>
       </div>
 
@@ -198,7 +234,7 @@ export default function Dashboard() {
         />
       </div>
 
-      <div className="dashboard-layout">
+      <div className="dashboard-layout session-layout">
         <div className="vision-card welcome-card">
           <div className="welcome-content">
             <span className="eyebrow">KUMO Monitor</span>
@@ -211,6 +247,7 @@ export default function Dashboard() {
               <span className={`glass-pill ${engineOk ? 'success' : 'failed'}`}>Engine {engine.status || 'UNKNOWN'}</span>
               <span className="glass-pill">{summary.total || 0} workflows</span>
               <span className="glass-pill">{role}</span>
+              <span className={`glass-pill ${callerRightsActive ? 'success' : 'failed'}`}>{callerRightsActive ? 'Real user context' : 'Service context'}</span>
             </div>
           </div>
           <div className="orb-stage" aria-hidden="true">
@@ -219,6 +256,8 @@ export default function Dashboard() {
             <div className="orb-ring ring-two" />
           </div>
         </div>
+
+        <CurrentUserCard session={session} role={role} warehouse={warehouse} />
 
         <div className="vision-card satisfaction-card">
           <div className="card-title-row">
