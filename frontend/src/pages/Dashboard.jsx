@@ -92,24 +92,28 @@ export default function Dashboard() {
   const [payload, setPayload] = useState(null)
   const [health, setHealth] = useState(null)
   const [ping, setPing] = useState(null)
+  const [session, setSession] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
 
   async function load() {
     setError(null)
-    const [monitorResult, healthResult, pingResult] = await Promise.allSettled([
+    const [monitorResult, healthResult, pingResult, sessionResult] = await Promise.allSettled([
       api.monitor(),
       api.health(),
-      api.snowflakePing()
+      api.snowflakePing(),
+      api.session()
     ])
 
     const monitorData = resolveSettled(monitorResult)
     const healthData = resolveSettled(healthResult)
     const pingData = resolveSettled(pingResult)
+    const sessionData = resolveSettled(sessionResult)
 
     setPayload(monitorData)
     setHealth(healthData)
     setPing(pingData)
+    setSession(sessionData)
 
     const failed = [monitorResult, healthResult].filter(r => r.status === 'rejected')
     if (failed.length) setError(failed.map(r => r.reason?.message || String(r.reason)).join(' | '))
@@ -137,7 +141,8 @@ export default function Dashboard() {
   const mockMode = Boolean(health?.mock)
   const snowflakeOk = Boolean(ping?.ok)
   const warehouse = ping?.snowflake?.WAREHOUSE_NAME || ping?.snowflake?.warehouse_name || 'Not selected'
-  const role = ping?.snowflake?.ROLE_NAME || ping?.snowflake?.role_name || 'Unknown role'
+  const role = session?.roleName || ping?.snowflake?.ROLE_NAME || ping?.snowflake?.role_name || 'Unknown role'
+  const displayName = session?.displayName || session?.userName || 'KUMO user'
   const engineKind = statusKind(engine.status)
   const engineOk = ['success', 'running'].includes(engineKind)
   const cacheFresh = Boolean(payload?.generatedAt)
@@ -151,7 +156,7 @@ export default function Dashboard() {
         </div>
         <div className="topbar-status">
           <span className={`topbar-dot ${snowflakeOk ? 'success' : mockMode ? 'queued' : 'failed'}`} />
-          <span>{mockMode ? 'Mock mode' : snowflakeOk ? 'Snowflake connected' : 'Snowflake degraded'}</span>
+          <span title={ping?.error || ''}>{mockMode ? 'Mock mode' : snowflakeOk ? 'Snowflake connected' : 'Snowflake check failed'}</span>
         </div>
       </div>
 
@@ -197,10 +202,10 @@ export default function Dashboard() {
         <div className="vision-card welcome-card">
           <div className="welcome-content">
             <span className="eyebrow">KUMO Monitor</span>
-            <h2>Welcome back, Andreas</h2>
+            <h2>Welcome back, {displayName}</h2>
             <p>
               Your workflow estate is being monitored in Snowpark Container Services.
-              Start with the health checks, then jump into Monitor when a run needs attention.
+              You are currently using the Snowflake role shown below.
             </p>
             <div className="welcome-actions">
               <span className={`glass-pill ${engineOk ? 'success' : 'failed'}`}>Engine {engine.status || 'UNKNOWN'}</span>
