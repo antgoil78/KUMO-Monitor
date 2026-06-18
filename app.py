@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
 import config
 import kumo_repository as repo
 from monitor_cache import monitor_cache
