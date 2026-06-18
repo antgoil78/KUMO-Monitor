@@ -20,6 +20,7 @@ async function requestJson(url, options = {}) {
 
 export const api = {
   health: () => requestJson('/api/health'),
+  session: () => requestJson('/api/session'),
   snowflakePing: () => requestJson('/api/snowflake/ping'),
   monitor: () => requestJson('/api/monitor'),
   refreshMonitor: () => requestJson('/api/monitor/refresh', { method: 'POST' }),
@@ -27,6 +28,23 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ triggerSource: 'MANUAL' })
   }),
+  workflowDetail: (workflowId) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`),
+  updateWorkflow: (workflowId, payload) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  }),
+  cloneWorkflow: (workflowId) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/clone`, { method: 'POST' }),
+  deleteWorkflow: (workflowId) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`, { method: 'DELETE' }),
+  setWorkflowEnabled: (workflowId, enabled) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/workflow-enabled`, {
+    method: 'POST',
+    body: JSON.stringify({ enabled })
+  }),
+  setScheduleEnabled: (workflowId, enabled) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/schedule-enabled`, {
+    method: 'POST',
+    body: JSON.stringify({ enabled })
+  }),
+  workflowHistory: (workflowId, limit = 100) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/history?limit=${limit}`),
+  workflowDag: (workflowId) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/dag`),
   history: (limit = 200) => requestJson(`/api/history?limit=${limit}`),
   notifications: () => requestJson('/api/notifications')
 }
