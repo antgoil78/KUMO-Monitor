@@ -1,6 +1,6 @@
 const groups = {
   success: ['SUCCESS', 'SUCCEEDED', 'COMPLETED', 'OK'],
-  running: ['RUNNING', 'IN_PROGRESS', 'EXECUTING'],
+  running: ['RUNNING', 'IN_PROGRESS', 'EXECUTING', 'INITIATING'],
   queued: ['QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED'],
   failed: ['FAILED', 'FAILURE', 'ERROR']
 }
@@ -20,6 +20,10 @@ export function statusKind(status) {
   if (groups.queued.includes(s)) return 'queued'
   if (groups.failed.includes(s)) return 'failed'
   return 'muted'
+}
+
+export function isWorkflowBusy(status) {
+  return ['running', 'queued'].includes(statusKind(status))
 }
 
 export default function StatusBadge({ status }) {
