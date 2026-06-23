@@ -1388,3 +1388,20 @@ pre, code, kbd, samp, .run-id-note code, .schedule-cell code {
 @keyframes kumoSpin {
   to { transform: rotate(360deg); }
 }
+
+/* Cross-user workflow run locks */
+.run-lock-note {
+  display: block;
+  margin-top: 4px;
+  color: #7dd3fc;
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+  opacity: 0.9;
+}
+
+.alert.compact {
+  margin: 0 0 12px 0;
+  padding: 8px 10px;
+  font-size: 12px;
+}

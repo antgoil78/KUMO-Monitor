@@ -1,15 +1,30 @@
 async function requestJson(url, options = {}) {
-  const response = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options
-  })
+  const { timeoutMs = 45000, ...fetchOptions } = options
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs)
+
+  let response
+  try {
+    response = await fetch(url, {
+      headers: { 'Content-Type': 'application/json', ...(fetchOptions.headers || {}) },
+      signal: controller.signal,
+      ...fetchOptions
+    })
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s: ${url}`)
+    }
+    throw err
+  } finally {
+    window.clearTimeout(timer)
+  }
 
   const text = await response.text()
   let data = null
   try {
     data = text ? JSON.parse(text) : null
   } catch (err) {
-    throw new Error(`Expected JSON from ${url}, got HTTP ${response.status}: ${text.slice(0, 220).replace(/\s+/g, ' ')}`)
+    throw new Error(`Expected JSON from ${url}, got: ${text.slice(0, 160)}`)
   }
 
   if (!response.ok) {
@@ -25,11 +40,12 @@ export const api = {
   snowflakePing: () => requestJson('/api/snowflake/ping'),
   monitor: () => requestJson('/api/monitor'),
   refreshMonitor: () => requestJson('/api/monitor/refresh', { method: 'POST' }),
-  runWorkflow: (workflowId) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/run`, {
+  workflowRunLocks: () => requestJson('/api/workflow-run-locks', { timeoutMs: 12000 }),
+  runWorkflow: (workflowId, workflowName = '') => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/run`, {
     method: 'POST',
-    body: JSON.stringify({ triggerSource: 'MANUAL' })
+    body: JSON.stringify({ triggerSource: 'MANUAL', workflowName })
   }),
-  workflowDetail: (workflowId) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`),
+  workflowDetail: (workflowId, options = {}) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`, options),
   updateWorkflow: (workflowId, payload) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`, {
     method: 'PATCH',
     body: JSON.stringify(payload)
