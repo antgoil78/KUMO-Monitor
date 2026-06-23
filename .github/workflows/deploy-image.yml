@@ -1,33 +1,96 @@
-name: Build and Push KUMO-Monitor Container
+name: Build and Push KUMO Monitor Container
 
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SNOWFLAKE_REGISTRY: vymkbmw-ov24823.registry.snowflakecomputing.com
+  IMAGE_URI: vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_admin/kumo_monitor/monitor_repository/kumo-monitor:latest
+  LOCAL_IMAGE_NAME: kumo-monitor:latest
 
 jobs:
   build-and-push:
+    name: Build and Push Docker Image
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Show repository structure
+        run: |
+          pwd
+          find . -maxdepth 3 -type f | sort
+
+      - name: Validate backend Python files
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import py_compile
+          import traceback
+          import sys
+
+          failed = False
+          null_byte = bytes([0])
+
+          for path in sorted(Path("backend").rglob("*.py")):
+              data = path.read_bytes()
+
+              if null_byte in data:
+                  print("NULL BYTE FOUND:", path)
+                  print("Null byte count:", data.count(null_byte))
+                  print("First null byte at position:", data.index(null_byte))
+                  failed = True
+                  continue
+
+              try:
+                  py_compile.compile(str(path), doraise=True)
+                  print("OK:", path)
+              except Exception:
+                  print("FAILED:", path)
+                  traceback.print_exc()
+                  failed = True
+
+          if failed:
+              sys.exit(1)
+          PY
+
+      - name: Validate frontend build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to Snowflake registry
-        run: echo "${{ secrets.SNOWFLAKE_PASSWORD }}" | docker login vymkbmw-ov24823.registry.snowflakecomputing.com -u ${{ secrets.SNOWFLAKE_USER }} --password-stdin
+        run: |
+          echo "${{ secrets.SNOWFLAKE_PASSWORD }}" | docker login "${SNOWFLAKE_REGISTRY}" \
+            -u "${{ secrets.SNOWFLAKE_USER }}" \
+            --password-stdin
 
       - name: Build Docker image
         run: |
           docker build \
-          --build-arg SNOWFLAKE_USER=${{ secrets.SNOWFLAKE_USER }} \
-          --build-arg SNOWFLAKE_PASSWORD=${{ secrets.SNOWFLAKE_PASSWORD }} \
-          -t kumo-monitor:latest .
+            --progress=plain \
+            -t "${LOCAL_IMAGE_NAME}" .
 
-      - name: Tag and push to Snowflake
+      - name: Tag Docker image
         run: |
-          IMAGE_URI=vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_admin/kumo_monitor/monitor_repository/kumo-monitor:latest
-          docker tag kumo-monitor:latest $IMAGE_URI
-          docker push $IMAGE_URI
+          docker tag "${LOCAL_IMAGE_NAME}" "${IMAGE_URI}"
+
+      - name: Push Docker image to Snowflake
+        run: |
+          docker push "${IMAGE_URI}"
+
+      - name: Print pushed image
+        run: |
+          echo "Pushed image:"
+          echo "${IMAGE_URI}"
