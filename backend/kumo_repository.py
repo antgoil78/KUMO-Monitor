@@ -2,6 +2,8 @@ import json
 import uuid
 from datetime import datetime, timezone
 
+from snowflake.connector import DictCursor
+
 import config
 import snowflake_client as sf
 from utils import normalize_rows, row_get, sql_escape, parse_variant_array, next_run, format_task_name
@@ -768,26 +770,71 @@ def _admin_execute(sql, params=None):
 
 
 def get_workflow_detail(workflow_id):
-    wf_rows = normalize_rows(_admin_query(f"SELECT * FROM {config.T_WORKFLOWS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id}))
-    if not wf_rows:
-        raise ValueError("Workflow not found")
-    task_rows = normalize_rows(_admin_query(f"SELECT * FROM {config.T_TASKS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id}))
+    """Return all data needed by the Edit Workflow modal.
+
+    Performance note:
+    The first implementation used _admin_query() for each lookup. In SPCS that
+    means opening several Snowflake connections for one modal load, which made
+    the Edit dialog take 15-25 seconds. This version opens one service-context
+    connection and executes the small lookup queries sequentially on that same
+    session.
+    """
+
+    def fetch(cur, sql, params=None, required=False):
+        try:
+            cur.execute(sql, params or {})
+            return normalize_rows(cur.fetchall())
+        except Exception:
+            if required:
+                raise
+            return []
+
+    with sf.connection(use_warehouse=True, include_context=True, force_service=True) as conn:
+        cur = conn.cursor(DictCursor)
+        try:
+            wf_rows = fetch(
+                cur,
+                f"SELECT * FROM {config.T_WORKFLOWS} WHERE WORKFLOW_ID = %(workflow_id)s",
+                {"workflow_id": workflow_id},
+                required=True,
+            )
+            if not wf_rows:
+                raise ValueError("Workflow not found")
+
+            task_rows = fetch(
+                cur,
+                f"SELECT * FROM {config.T_TASKS} WHERE WORKFLOW_ID = %(workflow_id)s",
+                {"workflow_id": workflow_id},
+            )
+
+            notif_rows = fetch(
+                cur,
+                f"SELECT * FROM {config.T_NOTIFICATIONS} WHERE WORKFLOW_ID = %(workflow_id)s",
+                {"workflow_id": workflow_id},
+            )
+
+            # Options are needed for on-success/on-fail dependencies. Keep this
+            # in the same connection to avoid a separate SPCS OAuth handshake.
+            option_rows = fetch(
+                cur,
+                f"""
+                SELECT WORKFLOW_ID, WORKFLOW_GROUP, WORKFLOW_NAME
+                FROM {config.T_WORKFLOWS}
+                ORDER BY WORKFLOW_GROUP, WORKFLOW_NAME
+                """,
+            )
+
+            email_group_rows = fetch(
+                cur,
+                f"SELECT GROUP_NAME FROM {config.DB}.{config.SCHEMA}.EMAIL_GROUPS ORDER BY GROUP_NAME",
+            )
+        finally:
+            cur.close()
+
     wf = wf_rows[0]
     task = task_rows[0] if task_rows else {}
-
-    notif = {}
-    try:
-        rows = normalize_rows(_admin_query(f"SELECT * FROM {config.T_NOTIFICATIONS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id}))
-        notif = rows[0] if rows else {}
-    except Exception:
-        notif = {}
-
-    options = normalize_rows(_admin_query(f"SELECT WORKFLOW_ID, WORKFLOW_GROUP, WORKFLOW_NAME FROM {config.T_WORKFLOWS} ORDER BY WORKFLOW_GROUP, WORKFLOW_NAME"))
-    email_groups = []
-    try:
-        email_groups = [r.get("GROUP_NAME") for r in normalize_rows(_admin_query(f"SELECT GROUP_NAME FROM {config.DB}.{config.SCHEMA}.EMAIL_GROUPS ORDER BY GROUP_NAME")) if r.get("GROUP_NAME")]
-    except Exception:
-        pass
+    notif = notif_rows[0] if notif_rows else {}
+    email_groups = [r.get("GROUP_NAME") for r in email_group_rows if r.get("GROUP_NAME")]
 
     return {
         "workflowId": workflow_id,
@@ -815,12 +862,15 @@ def get_workflow_detail(workflow_id):
             "environment": notif.get("ENVIRONMENT") or "PROD",
         },
         "workflowOptions": [
-            {"workflowId": r.get("WORKFLOW_ID"), "label": f"{r.get('WORKFLOW_GROUP') or 'Ungrouped'} / {r.get('WORKFLOW_NAME') or ''}"}
-            for r in options if r.get("WORKFLOW_ID") != workflow_id
+            {
+                "workflowId": r.get("WORKFLOW_ID"),
+                "label": f"{r.get('WORKFLOW_GROUP') or 'Ungrouped'} / {r.get('WORKFLOW_NAME') or ''}",
+            }
+            for r in option_rows
+            if r.get("WORKFLOW_ID") != workflow_id
         ],
         "emailGroups": email_groups,
     }
-
 
 def toggle_workflow(workflow_id, enabled):
     _execute(

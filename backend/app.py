@@ -504,13 +504,14 @@ def workflow_detail(workflow_id):
             "workflowOptions": [{"workflowId": w["workflowId"], "label": f"{w['workflowGroup']} / {w['workflowName']}"} for w in MOCK_MONITOR["workflows"] if w["workflowId"] != workflow_id],
             "emailGroups": ["Ops", "Data Platform"],
         })
-    actor = _actor_context()
+    # Keep this endpoint fast. It is used only to populate the Edit modal.
+    # Do not resolve actor context or write audit rows here; those extra Snowflake
+    # connections made the modal take 15-25 seconds. Save/clone/delete/toggle/run
+    # actions are still audited.
     try:
         result = {"ok": True, **repo.get_workflow_detail(workflow_id)}
-        _record_interaction("VIEW_WORKFLOW_DETAIL", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, response={"ok": True})
         return jsonify(result)
     except Exception as exc:
-        _record_interaction("VIEW_WORKFLOW_DETAIL", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, status="FAILED", success=False, error_message=str(exc))
         return _json_error(exc, 404)
 
 
