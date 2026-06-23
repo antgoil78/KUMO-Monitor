@@ -701,15 +701,26 @@ def _extract_run_id_from_call_result(rows):
     return None
 
 
-def latest_run_id_for_workflow(workflow_id):
+def latest_run_id_for_workflow(workflow_id, active_only=False):
+    """Return latest RUN_ID for a workflow.
+
+    active_only=True is intentionally used by the run-lock path so we never attach
+    a new UI lock to an old terminal run id. That old-terminal attachment was the
+    reason a freshly-started workflow could jump back to its previous saved status.
+    """
     h_types = describe_table(config.T_HISTORY)
     order_expr = "COALESCE(REQUESTED_AT, START_TIME, END_TIME)" if "REQUESTED_AT" in h_types else "COALESCE(START_TIME, END_TIME)"
+    active_filter = ""
+    if active_only:
+        active = ", ".join([f"'{s}'" for s in sorted(ACTIVE_RUN_STATUSES)])
+        active_filter = f"AND UPPER(COALESCE(STATUS, '')) IN ({active})"
     try:
         rows = normalize_rows(_query(
             f"""
             SELECT RUN_ID
             FROM {config.T_HISTORY}
             WHERE WORKFLOW_ID = %(workflow_id)s
+              {active_filter}
             ORDER BY {order_expr} DESC NULLS LAST, RUN_ID DESC
             LIMIT 1
             """,
@@ -721,10 +732,11 @@ def latest_run_id_for_workflow(workflow_id):
 
 
 def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requested_by=None):
-    """Original Streamlit-compatible queue insert path.
+    """Direct Streamlit-compatible queue insert path.
 
-    Important: DB status remains QUEUED. The React UI may show INITIATING optimistically,
-    but the dispatcher/procedures should see the same persisted status as the old Streamlit app.
+    This is the fallback path. It persists QUEUED in history and queue. The UI
+    lock may show INITIATING/QUEUED immediately, but Snowflake still receives the
+    same queue rows expected by the dispatcher.
     """
     h_types = describe_table(config.T_HISTORY)
     q_types = describe_table(config.T_QUEUE)
@@ -777,14 +789,13 @@ def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requeste
 
 
 def _request_run_via_procedure(workflow_id, trigger_source="MANUAL", requested_by=None):
-    """Use the same stored procedure path that scheduled tasks use.
+    """Use the same stored-procedure path that the scheduler uses.
 
-    The scheduler task in your Streamlit app calls:
-      SP_WORKFLOW_REQUEST_RUN(workflow_id, 'SCHEDULED', NULL, 0, NULL)
-
-    Manual runs should use the same path where possible, because it is the safest way
-    to match your existing dispatcher/orchestration behavior.
+    This is the preferred/default path. A key safety rule: if the procedure does
+    not return a RUN_ID, do not return an old terminal RUN_ID from history. That
+    breaks the app-level lock cleanup and makes the UI look like the run vanished.
     """
+    before_latest = latest_run_id_for_workflow(workflow_id, active_only=False)
     params = {
         "workflow_id": workflow_id,
         "trigger_source": trigger_source,
@@ -794,16 +805,25 @@ def _request_run_via_procedure(workflow_id, trigger_source="MANUAL", requested_b
         f"CALL {config.DB}.{config.SCHEMA}.SP_WORKFLOW_REQUEST_RUN(%(workflow_id)s, %(trigger_source)s, %(requested_by)s, 0, NULL)",
         params,
     )
-    return _extract_run_id_from_call_result(rows) or latest_run_id_for_workflow(workflow_id)
+    run_id = _extract_run_id_from_call_result(rows)
+    if run_id:
+        return run_id
+
+    # Give the procedure a chance to write history, but only accept a new active
+    # run id. Never attach the UI lock to an old SUCCESS/FAILED run.
+    active_run_id = latest_run_id_for_workflow(workflow_id, active_only=True)
+    if active_run_id and active_run_id != before_latest:
+        return active_run_id
+    return None
 
 
 def request_run(workflow_id, trigger_source="MANUAL", requested_by=None):
     """Create/start a manual workflow run.
 
-    Default behavior is the original Streamlit-compatible queue insert path.
-    Set KUMO_MANUAL_RUN_MODE=procedure if you want to call SP_WORKFLOW_REQUEST_RUN first.
+    procedure = call SP_WORKFLOW_REQUEST_RUN first, then fallback to queue insert.
+    queue = direct insert into WORKFLOW_HISTORY and WORKFLOW_RUN_QUEUE.
     """
-    mode = getattr(config, "KUMO_MANUAL_RUN_MODE", "queue")
+    mode = getattr(config, "KUMO_MANUAL_RUN_MODE", "procedure")
     if mode == "queue":
         return _request_run_via_queue_insert(workflow_id, trigger_source, requested_by)
 
@@ -811,11 +831,12 @@ def request_run(workflow_id, trigger_source="MANUAL", requested_by=None):
         run_id = _request_run_via_procedure(workflow_id, trigger_source, requested_by)
         if run_id:
             return run_id
-        # Procedure ran but did not return/record a visible run id. Use queue fallback as a safety net.
-        return _request_run_via_queue_insert(workflow_id, trigger_source, requested_by)
     except Exception:
-        # If the proc signature differs in an older environment, preserve the old Streamlit behavior.
-        return _request_run_via_queue_insert(workflow_id, trigger_source, requested_by)
+        # Fall back below. This keeps older environments working if the stored
+        # procedure signature differs.
+        pass
+
+    return _request_run_via_queue_insert(workflow_id, trigger_source, requested_by)
 
 
 def task_name_for_workflow(workflow_id):

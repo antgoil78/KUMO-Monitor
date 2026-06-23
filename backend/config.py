@@ -25,9 +25,9 @@ SNOWFLAKE_DATABASE = os.getenv("SNOWFLAKE_DATABASE", DB)
 SNOWFLAKE_SCHEMA = os.getenv("SNOWFLAKE_SCHEMA", SCHEMA)
 
 # Manual run behavior:
-# queue = Streamlit-compatible manual path: insert WORKFLOW_HISTORY + WORKFLOW_RUN_QUEUE rows.
 # procedure = call SP_WORKFLOW_REQUEST_RUN first, then fallback to queue insert if needed.
-KUMO_MANUAL_RUN_MODE = os.getenv("KUMO_MANUAL_RUN_MODE", "queue").strip().lower()
+# queue = direct Streamlit-compatible path: insert WORKFLOW_HISTORY + WORKFLOW_RUN_QUEUE rows.
+KUMO_MANUAL_RUN_MODE = os.getenv("KUMO_MANUAL_RUN_MODE", "procedure").strip().lower()
 
 # Application audit / user registry tables
 T_APP_USER_SESSIONS = f"{DB}.{SCHEMA}.APP_USER_SESSIONS"

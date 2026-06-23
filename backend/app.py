@@ -510,7 +510,10 @@ def run_workflow(workflow_id):
             requested_by=requested_by,
         )
         lock = repo.mark_workflow_run_lock_queued(workflow_id, lock.get("lockId"), run_id) or lock
-        monitor_cache.refresh(force=True)
+        # Do not force a full monitor refresh here. It is slower and may briefly
+        # return the previous persisted status before the dispatcher/history has
+        # caught up. The run-lock endpoint gives the UI the immediate cross-user
+        # status instead.
         response = {"ok": True, "runId": run_id, "status": "QUEUED", "lock": lock, "actor": actor}
         _record_interaction("RUN_WORKFLOW", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, run_id=run_id, payload=payload, response=response)
         return jsonify(response)
