@@ -1118,3 +1118,221 @@ pre, code, kbd, samp, .run-id-note code, .schedule-cell code {
   background: rgba(1,181,116,0.12);
   border: 1px solid rgba(1,181,116,0.22);
 }
+
+/* --------------------------------------------------------------------------
+   KUMO Monitor page refinement: Vision UI-inspired table density and actions
+   -------------------------------------------------------------------------- */
+.monitor-page,
+.monitor-page * {
+  font-family: var(--font-sans) !important;
+}
+
+.monitor-page .page-hero.monitor-hero {
+  align-items: center;
+  padding: 14px 16px;
+  margin: 0 0 14px;
+  border: 1px solid rgba(105,139,255,0.16);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 14% 0%, rgba(0,117,255,0.22), transparent 28%),
+    linear-gradient(145deg, rgba(9,23,55,0.82), rgba(4,13,35,0.68));
+  box-shadow: 0 24px 64px rgba(0,0,0,0.25), inset 0 1px rgba(255,255,255,0.06);
+}
+
+.monitor-page .page-heading {
+  font-size: clamp(25px, 2.15vw, 34px) !important;
+  line-height: 1.06 !important;
+  font-weight: 900 !important;
+  letter-spacing: -0.035em !important;
+  color: #fff !important;
+}
+
+.monitor-page .breadcrumb {
+  color: #8296bb;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.monitor-page .page-subtitle {
+  margin-top: 6px;
+  max-width: 760px;
+  color: #8fa6c9;
+}
+
+.monitor-page .monitor-system-strip {
+  min-height: 58px;
+  grid-template-columns: minmax(160px, 0.32fr) minmax(420px, 1fr) auto;
+  padding: 9px;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 0% 50%, rgba(0,117,255,0.23), transparent 34%),
+    linear-gradient(135deg, rgba(9,23,55,0.96), rgba(4,13,35,0.82));
+  border: 1px solid rgba(105,139,255,0.18);
+  box-shadow: 0 22px 70px rgba(0,0,0,0.30), inset 0 1px rgba(255,255,255,0.06);
+}
+
+.monitor-page .system-engine-card {
+  background: rgba(3, 9, 31, 0.56);
+  border: 1px solid rgba(1,232,255,0.13);
+  box-shadow: inset 0 1px rgba(255,255,255,0.05);
+}
+
+.monitor-page .system-counts {
+  gap: 7px;
+}
+
+.monitor-page .monitor-system-strip .summary-item,
+.monitor-page .monitor-system-strip .summary-total {
+  min-height: 32px;
+  padding: 0 11px;
+  border-radius: 13px;
+  background: rgba(255,255,255,0.045);
+  border: 1px solid rgba(255,255,255,0.07);
+  box-shadow: inset 0 1px rgba(255,255,255,0.035);
+}
+
+.monitor-page .monitor-system-strip .summary-updated {
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.monitor-page .monitor-table-card {
+  overflow-x: auto;
+  overflow-y: visible;
+  border-radius: 20px;
+  background:
+    linear-gradient(145deg, rgba(9,23,55,0.90), rgba(4,13,35,0.78));
+  border: 1px solid rgba(105,139,255,0.18);
+  box-shadow: 0 22px 72px rgba(0,0,0,0.28), inset 0 1px rgba(255,255,255,0.05);
+}
+
+.monitor-page .workflow-table {
+  min-width: 1040px;
+  table-layout: fixed;
+}
+
+.monitor-page .monitor-table th:nth-child(1) { width: 27%; }
+.monitor-page .monitor-table th:nth-child(2) { width: 112px; }
+.monitor-page .monitor-table th:nth-child(3) { width: 12%; }
+.monitor-page .monitor-table th:nth-child(4) { width: 13%; }
+.monitor-page .monitor-table th:nth-child(5) { width: 10%; }
+.monitor-page .monitor-table th:nth-child(6) { width: 16%; }
+.monitor-page .monitor-table th:nth-child(7) { width: 13%; }
+
+.monitor-page .workflow-table th,
+.monitor-page .workflow-table td {
+  padding-left: 12px;
+  padding-right: 12px;
+  vertical-align: middle;
+}
+
+.monitor-page .workflow-table th {
+  height: 38px;
+  color: #7284a5;
+  text-transform: none;
+}
+
+.monitor-page .workflow-table td {
+  height: 38px;
+  color: #9fb0cc;
+}
+
+.monitor-page .workflow-cell {
+  min-width: 0;
+}
+
+.monitor-page .workflow-tree {
+  min-width: 0;
+  max-width: 100%;
+  gap: 6px;
+  --indent-size: 18px;
+}
+
+.monitor-page .workflow-title {
+  min-width: 0;
+  max-width: calc(100% - 42px);
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.monitor-page .workflow-title.root {
+  font-size: 12px;
+}
+
+.monitor-page .workflow-title.child {
+  font-size: 11.5px;
+}
+
+.monitor-page .row-actions {
+  text-align: left;
+  padding-left: 8px;
+  padding-right: 8px;
+  white-space: nowrap;
+}
+
+.monitor-page .row-manage-button {
+  width: 92px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 12px;
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  background: linear-gradient(135deg, rgba(0,117,255,0.45), rgba(1,232,255,0.12));
+  border-color: rgba(1,232,255,0.28);
+  box-shadow: 0 10px 22px rgba(0,117,255,0.13), inset 0 1px rgba(255,255,255,0.07);
+}
+
+.monitor-page .row-manage-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(1,232,255,0.62);
+}
+
+.monitor-page .manage-dot {
+  width: 6px;
+  height: 6px;
+}
+
+.monitor-page .status-cell {
+  white-space: nowrap;
+}
+
+.monitor-page .schedule-cell {
+  min-width: 0;
+}
+
+.monitor-page .schedule-cell code {
+  max-width: 78px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.monitor-page .action-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.modal-actions.left {
+  justify-content: flex-start;
+  padding: 0 22px 22px;
+}
+
+@media (max-width: 1220px) {
+  .monitor-page .workflow-table { min-width: 980px; }
+  .monitor-page .monitor-table th:nth-child(1) { width: 25%; }
+  .monitor-page .monitor-table th:nth-child(2) { width: 106px; }
+  .monitor-page .row-manage-button { width: 86px; }
+}
+
+@media (max-width: 980px) {
+  .monitor-page .monitor-system-strip {
+    grid-template-columns: 1fr;
+  }
+  .monitor-page .workflow-table {
+    min-width: 980px;
+  }
+}
