@@ -100,9 +100,11 @@ function WorkflowRow({ workflow, nowMs, onManage, pendingRun }) {
   const isRoot = depth === 0
   const pendingExpired = pendingRun && Date.now() - Number(pendingRun.startedAt || Date.now()) > 120000
   const backendBusy = isWorkflowBusy(workflow.lastStatus)
-  const overlayPending = pendingRun && !pendingExpired && !backendBusy
+  const locked = Boolean(workflow.runLocked || workflow.runLock)
+  const overlayPending = pendingRun && !pendingExpired && !backendBusy && !locked
   const view = overlayPending ? { ...workflow, lastStatus: pendingRun.status || 'INITIATING', lastRunId: pendingRun.runId || workflow.lastRunId, progress: { percent: null } } : workflow
-  const busy = isWorkflowBusy(view.lastStatus)
+  const runLock = view.runLock || null
+  const busy = isWorkflowBusy(view.lastStatus) || Boolean(view.runLocked)
 
   return (
     <tr className={`${disabled ? 'disabled-row' : ''} ${isRoot ? 'root-row' : 'child-row'} depth-row-${Math.min(depth, 6)} ${busy ? 'busy-row' : ''}`}>
@@ -124,7 +126,10 @@ function WorkflowRow({ workflow, nowMs, onManage, pendingRun }) {
           <span>Manage</span>
         </button>
       </td>
-      <td className="status-cell"><StatusBadge status={view.lastStatus} /></td>
+      <td className="status-cell">
+        <StatusBadge status={view.lastStatus} />
+        {view.runLocked && <span className="run-lock-note">Locked by {view.runLock?.requestedBy || 'another user'}</span>}
+      </td>
       <td className="muted-cell">{formatDateTime(view.lastStartTime)}</td>
       <td className="duration-cell">
         <span>{elapsedDuration(view.lastStartTime, view.lastEndTime, view.lastStatus, nowMs)}</span>
@@ -401,11 +406,12 @@ function DagModal({ workflow, onClose }) {
 }
 
 function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
-  const view = pendingRun ? { ...workflow, lastStatus: 'INITIATING', lastRunId: pendingRun.runId || workflow.lastRunId } : workflow
+  const view = pendingRun ? { ...workflow, lastStatus: pendingRun.status || 'INITIATING', lastRunId: pendingRun.runId || workflow.lastRunId } : workflow
   const wfEnabled = Boolean(view.workflowEnabled)
   const taskEnabled = Boolean(view.taskEnabled)
   const isDbt = String(view.workflowType || '').toUpperCase() === 'DBT'
-  const busy = isWorkflowBusy(view.lastStatus)
+  const runLock = view.runLock || null
+  const busy = isWorkflowBusy(view.lastStatus) || Boolean(view.runLocked)
 
   async function choose(action) {
     await onAction(action, view)
@@ -421,11 +427,13 @@ function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
         {view.lastRunId && <code>{view.lastRunId}</code>}
       </div>
 
+      {runLock && <div className="alert info compact">This workflow is locked for a pending run. Run ID: <code>{runLock.runId || 'pending'}</code></div>}
+
       <div className="action-grid">
         <button className="action-tile primary" disabled={!wfEnabled || busy} onClick={() => choose('run')}>
           <span className="action-icon">▶</span>
           <strong>{busy ? 'Workflow active' : 'Run workflow'}</strong>
-          <small>{busy ? 'Run is disabled while initiating, queued or running.' : 'Create a manual run request.'}</small>
+          <small>{runLock ? `Requested by ${runLock.requestedBy || 'another user'}` : (busy ? 'Run is disabled while initiating, queued or running.' : 'Create a manual run request.')}</small>
         </button>
         {isDbt && (
           <button className="action-tile" onClick={() => choose('dag')}>
@@ -469,6 +477,7 @@ export default function Monitor() {
   const [actionMessage, setActionMessage] = useState(null)
   const [openMenuId, setOpenMenuId] = useState(null)
   const [pendingRuns, setPendingRuns] = useState({})
+  const [globalLocks, setGlobalLocks] = useState([])
   const [modal, setModal] = useState(null)
 
   async function load(force = false) {
@@ -508,7 +517,22 @@ export default function Monitor() {
     }
   }
 
-  useEffect(() => { load(false) }, [])
+  async function loadLocks() {
+    try {
+      const data = await api.workflowRunLocks()
+      setGlobalLocks(data.locks || [])
+    } catch (err) {
+      // Do not block the monitor page if the lock poll has a transient failure.
+      // The normal monitor payload still contains persisted workflow status.
+      console.warn('Could not refresh workflow run locks', err)
+    }
+  }
+
+  useEffect(() => { load(false); loadLocks() }, [])
+  useEffect(() => {
+    const id = setInterval(() => loadLocks(), 1000)
+    return () => clearInterval(id)
+  }, [])
   useEffect(() => {
     const intervalMs = payload?.refreshIntervalMs || 5000
     const id = setInterval(() => load(false), intervalMs)
@@ -520,13 +544,40 @@ export default function Monitor() {
   }, [])
 
   const workflows = payload?.workflows || []
+  const lockByWorkflow = useMemo(() => {
+    const map = {}
+    for (const lock of globalLocks || []) {
+      if (lock?.workflowId) map[lock.workflowId] = lock
+    }
+    return map
+  }, [globalLocks])
+
   const workflowsWithPending = workflows.map(w => {
+    const lock = lockByWorkflow[w.workflowId]
+    let view = w
+
+    if (lock) {
+      const actualStatus = String(w.lastStatus || '').toUpperCase()
+      const sameRun = lock.runId && String(w.lastRunId || '') === String(lock.runId)
+      const actualRunning = sameRun && ['RUNNING', 'IN_PROGRESS', 'EXECUTING', 'STARTING'].includes(actualStatus)
+      view = {
+        ...w,
+        runLocked: true,
+        runLock: lock,
+        lastStatus: actualRunning ? w.lastStatus : (lock.status || 'QUEUED'),
+        lastRunId: lock.runId || w.lastRunId,
+        lastRequestedAt: lock.requestedAt || w.lastRequestedAt,
+        lastRequestedBy: lock.requestedBy || w.lastRequestedBy,
+        progress: actualRunning ? w.progress : { percent: null }
+      }
+    }
+
     const pending = pendingRuns[w.workflowId]
-    if (!pending) return w
-    const actualBusy = isWorkflowBusy(w.lastStatus)
+    if (!pending || view.runLocked) return view
+    const actualBusy = isWorkflowBusy(view.lastStatus)
     const expired = Date.now() - Number(pending.startedAt || Date.now()) > 120000
-    if (actualBusy || expired) return w
-    return { ...w, lastStatus: pending.status || 'INITIATING', lastRunId: pending.runId || w.lastRunId, progress: { percent: null } }
+    if (actualBusy || expired) return view
+    return { ...view, lastStatus: pending.status || 'INITIATING', lastRunId: pending.runId || view.lastRunId, progress: { percent: null } }
   })
   const summary = useMemo(() => {
     const total = workflowsWithPending.length
@@ -564,10 +615,18 @@ export default function Monitor() {
     try {
       if (action === 'run') {
         setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: 'pending', status: 'INITIATING' } }))
-        const result = await api.runWorkflow(workflow.workflowId)
-        setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: result.runId || 'pending', status: 'QUEUED' } }))
-        notify(`Initiated ${workflow.workflowName}. Run ID: ${result.runId || 'pending'}. Waiting for dispatcher pickup...`)
-        await load(true)
+        const result = await api.runWorkflow(workflow.workflowId, workflow.workflowName)
+        if (result.lock) {
+          setGlobalLocks(prev => {
+            const next = new Map((prev || []).map(lock => [lock.workflowId, lock]))
+            next.set(result.lock.workflowId, result.lock)
+            return Array.from(next.values())
+          })
+        }
+        setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: result.runId || 'pending', status: result.status || 'QUEUED' } }))
+        notify(`Queued ${workflow.workflowName}. Run ID: ${result.runId || 'pending'}. Waiting for dispatcher pickup...`)
+        Promise.resolve(loadLocks()).catch(() => {})
+        Promise.resolve(load(true)).catch(err => notify(`Refresh failed after run request: ${err.message}`))
       }
       if (action === 'toggle-workflow') {
         await api.setWorkflowEnabled(workflow.workflowId, !workflow.workflowEnabled)
