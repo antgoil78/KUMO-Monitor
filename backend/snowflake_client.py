@@ -14,7 +14,7 @@ _ingress_user_token = ContextVar("sf_ingress_user_token", default=None)
 
 
 def set_ingress_user_token(token):
-    """Store the caller token for the current Flask request context."""
+    """Store the Snowflake caller token for the current Flask request context."""
     token = str(token or "").strip() or None
     return _ingress_user_token.set(token)
 
@@ -29,7 +29,6 @@ def caller_token_present():
 
 
 def _read_spcs_token():
-    """Return the SPCS service OAuth token if this code is running inside Snowpark Container Services."""
     try:
         with open(SPCS_TOKEN_FILE, "r", encoding="utf-8") as token_file:
             token = token_file.read().strip()
@@ -39,7 +38,6 @@ def _read_spcs_token():
 
 
 def _is_spcs_configured():
-    """Snowflake injects these values into SPCS containers."""
     return bool(
         os.getenv("SNOWFLAKE_HOST")
         and os.getenv("SNOWFLAKE_ACCOUNT")
@@ -48,7 +46,6 @@ def _is_spcs_configured():
 
 
 def _is_password_configured():
-    """Fallback for local runs outside SPCS."""
     return bool(config.SNOWFLAKE_ACCOUNT and config.SNOWFLAKE_USER and config.SNOWFLAKE_PASSWORD)
 
 
@@ -65,7 +62,6 @@ def is_configured():
 
 
 def _quote_identifier_path(identifier):
-    """Quote a Snowflake identifier or identifier path, e.g. DB.SCHEMA.WH."""
     parts = [p.strip() for p in str(identifier or "").split(".") if p.strip()]
     if not parts:
         return None
@@ -78,7 +74,13 @@ def _quote_identifier_path(identifier):
     return ".".join(quoted)
 
 
-def _connection_kwargs():
+def _connection_kwargs(include_context=True, include_warehouse=True):
+    """Build connector kwargs.
+
+    include_context=False is used for /api/session because CURRENT_USER/CURRENT_ROLE
+    should not require database/schema/warehouse privileges. This prevents a missing
+    warehouse/caller grant from hiding the actual signed-in user.
+    """
     mode = connection_mode()
     if mode == "not-configured":
         raise RuntimeError(
@@ -97,11 +99,13 @@ def _connection_kwargs():
             "account": os.getenv("SNOWFLAKE_ACCOUNT"),
             "token": token,
             "authenticator": "oauth",
-            "database": config.SNOWFLAKE_DATABASE,
-            "schema": config.SNOWFLAKE_SCHEMA,
         }
-        # In caller-rights mode Snowflake activates the caller's default role.
-        # Passing a role can make the session misleading or fail, so only pass role for service-user/password mode.
+        if include_context:
+            if config.SNOWFLAKE_DATABASE:
+                kwargs["database"] = config.SNOWFLAKE_DATABASE
+            if config.SNOWFLAKE_SCHEMA:
+                kwargs["schema"] = config.SNOWFLAKE_SCHEMA
+        # In caller-rights mode, let Snowflake activate the caller's default role.
         if mode == "spcs-service-oauth" and config.SNOWFLAKE_ROLE:
             kwargs["role"] = config.SNOWFLAKE_ROLE
     else:
@@ -109,23 +113,28 @@ def _connection_kwargs():
             "account": config.SNOWFLAKE_ACCOUNT,
             "user": config.SNOWFLAKE_USER,
             "password": config.SNOWFLAKE_PASSWORD,
-            "database": config.SNOWFLAKE_DATABASE,
-            "schema": config.SNOWFLAKE_SCHEMA,
         }
+        if include_context:
+            if config.SNOWFLAKE_DATABASE:
+                kwargs["database"] = config.SNOWFLAKE_DATABASE
+            if config.SNOWFLAKE_SCHEMA:
+                kwargs["schema"] = config.SNOWFLAKE_SCHEMA
         if config.SNOWFLAKE_ROLE:
             kwargs["role"] = config.SNOWFLAKE_ROLE
 
-    if config.SNOWFLAKE_WAREHOUSE:
+    if include_warehouse and config.SNOWFLAKE_WAREHOUSE:
         kwargs["warehouse"] = config.SNOWFLAKE_WAREHOUSE
 
     return kwargs
 
 
 @contextmanager
-def connection():
-    conn = snowflake.connector.connect(**_connection_kwargs())
+def connection(use_warehouse=True, include_context=True):
+    conn = snowflake.connector.connect(**_connection_kwargs(include_context=include_context, include_warehouse=use_warehouse))
     try:
-        wh = _quote_identifier_path(config.SNOWFLAKE_WAREHOUSE)
+        # Some connector/session combinations do not activate the warehouse even when
+        # warehouse=... is passed. Force it for data queries only, not for /api/session.
+        wh = _quote_identifier_path(config.SNOWFLAKE_WAREHOUSE) if use_warehouse else None
         if wh:
             cur = conn.cursor()
             try:
@@ -137,8 +146,8 @@ def connection():
         conn.close()
 
 
-def query(sql, params=None):
-    with connection() as conn:
+def query(sql, params=None, use_warehouse=True, include_context=True):
+    with connection(use_warehouse=use_warehouse, include_context=include_context) as conn:
         cur = conn.cursor(DictCursor)
         try:
             cur.execute(sql, params or {})
@@ -147,8 +156,8 @@ def query(sql, params=None):
             cur.close()
 
 
-def execute(sql, params=None):
-    with connection() as conn:
+def execute(sql, params=None, use_warehouse=True, include_context=True):
+    with connection(use_warehouse=use_warehouse, include_context=include_context) as conn:
         cur = conn.cursor(DictCursor)
         try:
             cur.execute(sql, params or {})
@@ -160,8 +169,13 @@ def execute(sql, params=None):
             cur.close()
 
 
+def query_one(sql, params=None, use_warehouse=True, include_context=True):
+    rows = query(sql, params=params, use_warehouse=use_warehouse, include_context=include_context)
+    return dict(rows[0]) if rows else {}
+
+
 def ping():
-    rows = query(
+    return query_one(
         """
         SELECT
           CURRENT_ACCOUNT() AS ACCOUNT_NAME,
@@ -172,11 +186,28 @@ def ping():
           CURRENT_WAREHOUSE() AS WAREHOUSE_NAME
         """
     )
-    return dict(rows[0]) if rows else {}
+
+
+def _basic_session_context():
+    # Do not select a warehouse here. The current-user query must work even if the
+    # caller has no USAGE/CALLER USAGE on the configured warehouse yet.
+    return query_one(
+        """
+        SELECT
+          CURRENT_ACCOUNT() AS ACCOUNT_NAME,
+          CURRENT_USER() AS USER_NAME,
+          CURRENT_ROLE() AS ROLE_NAME,
+          CURRENT_WAREHOUSE() AS WAREHOUSE_NAME,
+          CURRENT_DATABASE() AS DATABASE_NAME,
+          CURRENT_SCHEMA() AS SCHEMA_NAME
+        """,
+        use_warehouse=False,
+        include_context=False,
+    )
 
 
 def _lookup_user_profile(user_name):
-    """Best-effort profile lookup. May fail if the active role cannot SHOW USERS."""
+    """Best-effort profile lookup. Never make /api/session depend on this."""
     first_name = ""
     last_name = ""
     display_name = ""
@@ -184,28 +215,28 @@ def _lookup_user_profile(user_name):
         return first_name, last_name, display_name
 
     try:
-        pattern = user_name.replace("'", "''")
-        rows = query(f"SHOW USERS LIKE '{pattern}'")
+        pattern = str(user_name).replace("'", "''")
+        rows = query(f"SHOW USERS LIKE '{pattern}'", use_warehouse=False, include_context=False)
         if rows:
             row = {str(k).upper(): v for k, v in dict(rows[0]).items()}
             first_name = str(row.get("FIRST_NAME") or "").strip()
             last_name = str(row.get("LAST_NAME") or "").strip()
             display_name = str(row.get("DISPLAY_NAME") or "").strip()
     except Exception:
+        # Many caller roles cannot SHOW USERS. That is fine; use CURRENT_USER instead.
         pass
 
     return first_name, last_name, display_name
 
 
 def session_context():
-    """Best-effort current browser user context for the UI and audit logging.
+    """Current browser user context for UI and audit logging.
 
-    With caller's rights enabled, CURRENT_USER/CURRENT_ROLE reflect the signed-in Snowflake user.
-    Without caller's rights, Snowflake returns the service user and service-owner role.
+    Uses a warehouse-free query so missing warehouse grants cannot mask the caller user.
     """
-    ctx = ping()
-    user_name = str(ctx.get("USER_NAME") or ctx.get("user_name") or "")
-    role_name = str(ctx.get("ROLE_NAME") or ctx.get("role_name") or "")
+    ctx = _basic_session_context()
+    user_name = str(ctx.get("USER_NAME") or ctx.get("user_name") or "").strip()
+    role_name = str(ctx.get("ROLE_NAME") or ctx.get("role_name") or "").strip()
     first_name, last_name, snowflake_display_name = _lookup_user_profile(user_name)
 
     configured_name = os.getenv("KUMO_DISPLAY_NAME", "").strip()
@@ -215,13 +246,16 @@ def session_context():
     if not display_name:
         display_name = os.getenv("KUMO_USER_NAME", "").strip() or user_name or "KUMO user"
 
+    # If no active warehouse is selected in the basic session, show the configured one.
+    warehouse_name = str(ctx.get("WAREHOUSE_NAME") or "").strip() or config.SNOWFLAKE_WAREHOUSE or "Not selected"
+
     return {
         "displayName": display_name,
         "firstName": first_name,
         "lastName": last_name,
-        "userName": user_name,
-        "roleName": role_name,
-        "warehouseName": str(ctx.get("WAREHOUSE_NAME") or ""),
+        "userName": user_name or "UNKNOWN",
+        "roleName": role_name or "Unknown role",
+        "warehouseName": warehouse_name,
         "mode": connection_mode(),
         "callerRightsActive": connection_mode() == "spcs-caller-oauth",
         "callerTokenPresent": caller_token_present(),
