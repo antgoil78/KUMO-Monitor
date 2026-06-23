@@ -424,10 +424,10 @@ def _request_run_via_procedure(workflow_id, trigger_source="MANUAL", requested_b
 def request_run(workflow_id, trigger_source="MANUAL", requested_by=None):
     """Create/start a manual workflow run.
 
-    Default behavior is procedure-first, then queue-insert fallback. Set
-    KUMO_MANUAL_RUN_MODE=queue if you want to force the legacy Streamlit insert-only path.
+    Default behavior is the original Streamlit-compatible queue insert path.
+    Set KUMO_MANUAL_RUN_MODE=procedure if you want to call SP_WORKFLOW_REQUEST_RUN first.
     """
-    mode = getattr(config, "KUMO_MANUAL_RUN_MODE", "procedure")
+    mode = getattr(config, "KUMO_MANUAL_RUN_MODE", "queue")
     if mode == "queue":
         return _request_run_via_queue_insert(workflow_id, trigger_source, requested_by)
 
@@ -733,25 +733,43 @@ def save_notifications(workflow_id, notifications):
     )
 
 
+def _admin_query(sql, params=None):
+    """Use service context for app administration reads.
+
+    The monitor itself can run under caller rights, but edit dialogs and action
+    metadata should not hang or fail just because the browser user's role lacks
+    metadata visibility on helper tables such as notifications or email groups.
+    """
+    if hasattr(sf, "query_service"):
+        return sf.query_service(sql, params or {}, use_warehouse=True, include_context=True)
+    return sf.query(sql, params or {})
+
+
+def _admin_execute(sql, params=None):
+    if hasattr(sf, "execute_service"):
+        return sf.execute_service(sql, params or {}, use_warehouse=True, include_context=True)
+    return sf.execute(sql, params or {})
+
+
 def get_workflow_detail(workflow_id):
-    wf_rows = normalize_rows(sf.query(f"SELECT * FROM {config.T_WORKFLOWS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id}))
+    wf_rows = normalize_rows(_admin_query(f"SELECT * FROM {config.T_WORKFLOWS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id}))
     if not wf_rows:
         raise ValueError("Workflow not found")
-    task_rows = normalize_rows(sf.query(f"SELECT * FROM {config.T_TASKS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id}))
+    task_rows = normalize_rows(_admin_query(f"SELECT * FROM {config.T_TASKS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id}))
     wf = wf_rows[0]
     task = task_rows[0] if task_rows else {}
 
     notif = {}
     try:
-        rows = normalize_rows(sf.query(f"SELECT * FROM {config.T_NOTIFICATIONS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id}))
+        rows = normalize_rows(_admin_query(f"SELECT * FROM {config.T_NOTIFICATIONS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id}))
         notif = rows[0] if rows else {}
     except Exception:
         notif = {}
 
-    options = normalize_rows(sf.query(f"SELECT WORKFLOW_ID, WORKFLOW_GROUP, WORKFLOW_NAME FROM {config.T_WORKFLOWS} ORDER BY WORKFLOW_GROUP, WORKFLOW_NAME"))
+    options = normalize_rows(_admin_query(f"SELECT WORKFLOW_ID, WORKFLOW_GROUP, WORKFLOW_NAME FROM {config.T_WORKFLOWS} ORDER BY WORKFLOW_GROUP, WORKFLOW_NAME"))
     email_groups = []
     try:
-        email_groups = [r.get("GROUP_NAME") for r in normalize_rows(sf.query(f"SELECT GROUP_NAME FROM {config.DB}.{config.SCHEMA}.EMAIL_GROUPS ORDER BY GROUP_NAME")) if r.get("GROUP_NAME")]
+        email_groups = [r.get("GROUP_NAME") for r in normalize_rows(_admin_query(f"SELECT GROUP_NAME FROM {config.DB}.{config.SCHEMA}.EMAIL_GROUPS ORDER BY GROUP_NAME")) if r.get("GROUP_NAME")]
     except Exception:
         pass
 
