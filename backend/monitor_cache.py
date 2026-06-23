@@ -1,3 +1,5 @@
+import hashlib
+import json
 import threading
 from datetime import datetime, timezone
 
@@ -5,6 +7,7 @@ import config
 from mock_data import MOCK_MONITOR
 import snowflake_client as sf
 import kumo_repository as repo
+from realtime_events import realtime_broker
 
 
 class MonitorCache:
@@ -15,6 +18,7 @@ class MonitorCache:
         self._stop_event = threading.Event()
         self._thread = None
         self._last_error = None
+        self._last_signature = None
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -43,16 +47,56 @@ class MonitorCache:
     def refresh(self, force=False):
         try:
             payload = self._build_payload()
+            should_publish = False
+            signature = self._signature(payload)
             with self._lock:
                 self._payload = payload
                 self._last_error = None
+                if signature != self._last_signature:
+                    self._last_signature = signature
+                    should_publish = True
+            if should_publish:
+                realtime_broker.publish("monitor_update", payload)
             return payload
         except Exception as exc:
             fallback = self._error_payload(exc)
+            should_publish = False
+            signature = self._signature(fallback)
             with self._lock:
                 self._payload = fallback
                 self._last_error = str(exc)
+                if signature != self._last_signature:
+                    self._last_signature = signature
+                    should_publish = True
+            if should_publish:
+                realtime_broker.publish("monitor_update", fallback)
             return fallback
+
+    def _signature(self, payload):
+        """Return a stable signature for fields that change the visible monitor state."""
+        workflows = payload.get("workflows") or []
+        significant = {
+            "engine": (payload.get("engine") or {}).get("status"),
+            "workflows": sorted([
+                {
+                    "workflowId": w.get("workflowId"),
+                    "workflowName": w.get("workflowName"),
+                    "workflowGroup": w.get("workflowGroup"),
+                    "workflowType": w.get("workflowType"),
+                    "workflowEnabled": w.get("workflowEnabled"),
+                    "taskEnabled": w.get("taskEnabled"),
+                    "lastRunId": w.get("lastRunId"),
+                    "lastStatus": w.get("lastStatus"),
+                    "lastStartTime": w.get("lastStartTime"),
+                    "lastEndTime": w.get("lastEndTime"),
+                    "lastRequestedAt": w.get("lastRequestedAt"),
+                    "lastRequestedBy": w.get("lastRequestedBy"),
+                }
+                for w in workflows
+            ], key=lambda row: str(row.get("workflowId") or "")),
+        }
+        raw = json.dumps(significant, default=str, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _build_payload(self):
         if config.USE_MOCK or not sf.is_configured():
