@@ -36,3 +36,8 @@ T_APP_USER_INTERACTIONS = f"{DB}.{SCHEMA}.APP_USER_INTERACTIONS"
 # Audit behavior
 KUMO_AUDIT_ENABLED = os.getenv("KUMO_AUDIT_ENABLED", "true").strip().lower() in ("1", "true", "yes", "y")
 KUMO_APP_VERSION = os.getenv("KUMO_APP_VERSION", "dev")
+
+# Application-level workflow run locks. Used for immediate cross-user UI state
+# while the dispatcher/procedures catch up in WORKFLOW_HISTORY / WORKFLOW_RUN_QUEUE.
+T_APP_WORKFLOW_RUN_LOCKS = f"{DB}.{SCHEMA}.APP_WORKFLOW_RUN_LOCKS"
+KUMO_RUN_LOCK_TTL_MINUTES = int(os.getenv("KUMO_RUN_LOCK_TTL_MINUTES", "360"))

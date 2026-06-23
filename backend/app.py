@@ -416,6 +416,16 @@ def refresh_monitor():
     return jsonify(monitor_cache.refresh(force=True))
 
 
+@app.route("/api/workflow-run-locks")
+def workflow_run_locks():
+    if config.USE_MOCK or not sf.is_configured():
+        return jsonify({"ok": True, "locks": []})
+    try:
+        return jsonify({"ok": True, "locks": repo.load_active_run_locks()})
+    except Exception as exc:
+        return _json_error(exc, 500)
+
+
 def _actor_context():
     if config.USE_MOCK or not sf.is_configured():
         return {
@@ -459,20 +469,56 @@ def run_workflow(workflow_id):
     )
 
     if config.USE_MOCK or not sf.is_configured():
-        response = {"ok": True, "runId": "mock-run", "actor": actor, "message": "Mock mode: run request accepted"}
+        response = {"ok": True, "runId": "mock-run", "status": "QUEUED", "actor": actor, "message": "Mock mode: run request accepted"}
         _record_interaction("RUN_WORKFLOW", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, run_id="mock-run", payload=payload, response=response)
         return jsonify(response)
+
+    lock = None
+    try:
+        lock = repo.acquire_workflow_run_lock(
+            workflow_id=workflow_id,
+            workflow_name=payload.get("workflowName") or workflow_id,
+            actor=actor,
+            client_ip=_client_ip(),
+            user_agent=_user_agent(),
+        )
+    except repo.WorkflowAlreadyActive as exc:
+        response = {
+            "ok": False,
+            "blocked": True,
+            "error": str(exc),
+            "lock": exc.lock,
+        }
+        _record_interaction(
+            "RUN_WORKFLOW_BLOCKED",
+            actor=actor,
+            entity_type="WORKFLOW",
+            entity_id=workflow_id,
+            workflow_id=workflow_id,
+            status="BLOCKED",
+            success=False,
+            error_message=str(exc),
+            payload=payload,
+            response=response,
+        )
+        return jsonify(response), 409
+
     try:
         run_id = repo.request_run(
             workflow_id=workflow_id,
             trigger_source=payload.get("triggerSource", "MANUAL"),
             requested_by=requested_by,
         )
+        lock = repo.mark_workflow_run_lock_queued(workflow_id, lock.get("lockId"), run_id) or lock
         monitor_cache.refresh(force=True)
-        response = {"ok": True, "runId": run_id, "actor": actor}
+        response = {"ok": True, "runId": run_id, "status": "QUEUED", "lock": lock, "actor": actor}
         _record_interaction("RUN_WORKFLOW", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, run_id=run_id, payload=payload, response=response)
         return jsonify(response)
     except Exception as exc:
+        try:
+            repo.release_workflow_run_lock(lock_id=(lock or {}).get("lockId"), workflow_id=workflow_id, status="FAILED", reason="REQUEST_FAILED", error_message=str(exc))
+        except Exception:
+            pass
         _record_interaction("RUN_WORKFLOW", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, status="FAILED", success=False, error_message=str(exc), payload=payload)
         return _json_error(exc, 500)
 

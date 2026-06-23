@@ -53,6 +53,364 @@ def object_exists(full_name):
         return False
 
 
+ACTIVE_RUN_STATUSES = {
+    "INITIATING", "QUEUED", "PENDING", "REQUESTED", "SCHEDULED",
+    "RUNNING", "IN_PROGRESS", "EXECUTING", "STARTING"
+}
+TERMINAL_RUN_STATUSES = {
+    "SUCCESS", "SUCCEEDED", "COMPLETED", "OK",
+    "FAILED", "FAILURE", "ERROR", "CANCELLED", "CANCELED", "SKIPPED"
+}
+
+
+class WorkflowAlreadyActive(RuntimeError):
+    def __init__(self, lock):
+        self.lock = lock or {}
+        workflow_name = self.lock.get("workflowName") or self.lock.get("workflowId") or "Workflow"
+        status = self.lock.get("status") or "ACTIVE"
+        requested_by = self.lock.get("requestedBy") or "another user"
+        super().__init__(f"{workflow_name} is already {status}. Requested by {requested_by}.")
+
+
+def _run_lock_table_available():
+    return bool(getattr(config, "T_APP_WORKFLOW_RUN_LOCKS", None)) and object_exists(config.T_APP_WORKFLOW_RUN_LOCKS)
+
+
+def _lock_payload(row):
+    r = {str(k).upper(): v for k, v in dict(row).items()}
+    return {
+        "lockId": r.get("LOCK_ID"),
+        "workflowId": r.get("WORKFLOW_ID"),
+        "workflowName": r.get("WORKFLOW_NAME"),
+        "runId": r.get("RUN_ID"),
+        "status": r.get("STATUS") or "QUEUED",
+        "requestedBy": r.get("REQUESTED_BY") or r.get("REQUESTED_BY_USER") or "UNKNOWN",
+        "requestedByUser": r.get("REQUESTED_BY_USER") or "",
+        "requestedByRole": r.get("REQUESTED_BY_ROLE") or "",
+        "requestedAt": r.get("REQUESTED_AT"),
+        "lastSeenAt": r.get("LAST_SEEN_AT"),
+        "lockExpiresAt": r.get("LOCK_EXPIRES_AT"),
+        "message": r.get("MESSAGE") or "",
+    }
+
+
+def cleanup_workflow_run_locks():
+    """Release UI locks once history reaches a terminal state, and expire stale locks."""
+    if not _run_lock_table_available():
+        return
+    terminal = ", ".join([f"'{s}'" for s in sorted(TERMINAL_RUN_STATUSES)])
+    try:
+        _execute(
+            f"""
+            UPDATE {config.T_APP_WORKFLOW_RUN_LOCKS} l
+            SET
+              STATUS = UPPER(h.STATUS),
+              RELEASED_AT = COALESCE(h.END_TIME, CURRENT_TIMESTAMP()),
+              RELEASE_REASON = 'HISTORY_TERMINAL',
+              MESSAGE = 'Released from workflow history terminal status',
+              UPDATED_AT = CURRENT_TIMESTAMP()
+            FROM {config.T_HISTORY} h
+            WHERE l.RELEASED_AT IS NULL
+              AND l.RUN_ID IS NOT NULL
+              AND h.RUN_ID = l.RUN_ID
+              AND UPPER(COALESCE(h.STATUS, '')) IN ({terminal})
+            """
+        )
+    except Exception:
+        pass
+
+    try:
+        _execute(
+            f"""
+            UPDATE {config.T_APP_WORKFLOW_RUN_LOCKS}
+            SET
+              STATUS = 'EXPIRED',
+              RELEASED_AT = CURRENT_TIMESTAMP(),
+              RELEASE_REASON = 'TTL_EXPIRED',
+              MESSAGE = 'Released by TTL expiry',
+              UPDATED_AT = CURRENT_TIMESTAMP()
+            WHERE RELEASED_AT IS NULL
+              AND LOCK_EXPIRES_AT < CURRENT_TIMESTAMP()
+            """
+        )
+    except Exception:
+        pass
+
+
+def load_active_run_locks(limit=500):
+    if not _run_lock_table_available():
+        return []
+    cleanup_workflow_run_locks()
+    limit = max(1, min(int(limit or 500), 2000))
+    rows = _query(
+        f"""
+        SELECT
+          LOCK_ID,
+          WORKFLOW_ID,
+          WORKFLOW_NAME,
+          RUN_ID,
+          STATUS,
+          REQUESTED_BY,
+          REQUESTED_BY_USER,
+          REQUESTED_BY_ROLE,
+          REQUESTED_AT,
+          LAST_SEEN_AT,
+          LOCK_EXPIRES_AT,
+          MESSAGE
+        FROM {config.T_APP_WORKFLOW_RUN_LOCKS}
+        WHERE RELEASED_AT IS NULL
+          AND LOCK_EXPIRES_AT >= CURRENT_TIMESTAMP()
+        QUALIFY ROW_NUMBER() OVER (
+          PARTITION BY WORKFLOW_ID
+          ORDER BY REQUESTED_AT DESC NULLS LAST, UPDATED_AT DESC NULLS LAST
+        ) = 1
+        ORDER BY REQUESTED_AT DESC NULLS LAST
+        LIMIT {limit}
+        """
+    )
+    return [_lock_payload(row) for row in rows]
+
+
+def active_run_lock_for_workflow(workflow_id):
+    workflow_id = str(workflow_id or "").strip()
+    if not workflow_id or not _run_lock_table_available():
+        return None
+    cleanup_workflow_run_locks()
+    rows = _query(
+        f"""
+        SELECT
+          LOCK_ID,
+          WORKFLOW_ID,
+          WORKFLOW_NAME,
+          RUN_ID,
+          STATUS,
+          REQUESTED_BY,
+          REQUESTED_BY_USER,
+          REQUESTED_BY_ROLE,
+          REQUESTED_AT,
+          LAST_SEEN_AT,
+          LOCK_EXPIRES_AT,
+          MESSAGE
+        FROM {config.T_APP_WORKFLOW_RUN_LOCKS}
+        WHERE WORKFLOW_ID = %(workflow_id)s
+          AND RELEASED_AT IS NULL
+          AND LOCK_EXPIRES_AT >= CURRENT_TIMESTAMP()
+        ORDER BY REQUESTED_AT DESC NULLS LAST, UPDATED_AT DESC NULLS LAST
+        LIMIT 1
+        """,
+        {"workflow_id": workflow_id},
+    )
+    return _lock_payload(rows[0]) if rows else None
+
+
+def active_history_run_for_workflow(workflow_id):
+    """Fallback guard based on persisted workflow history if the UI lock table is missing/stale."""
+    active = ", ".join([f"'{s}'" for s in sorted(ACTIVE_RUN_STATUSES)])
+    h_types = describe_table(config.T_HISTORY)
+    order_expr = "COALESCE(REQUESTED_AT, START_TIME, END_TIME)" if "REQUESTED_AT" in h_types else "COALESCE(START_TIME, END_TIME)"
+    requested_at_expr = "REQUESTED_AT" if "REQUESTED_AT" in h_types else "NULL"
+    requested_by_expr = "REQUESTED_BY" if "REQUESTED_BY" in h_types else "NULL"
+    try:
+        rows = _query(
+            f"""
+            SELECT
+              WORKFLOW_ID,
+              RUN_ID,
+              STATUS,
+              {requested_at_expr} AS REQUESTED_AT,
+              {requested_by_expr} AS REQUESTED_BY
+            FROM {config.T_HISTORY}
+            WHERE WORKFLOW_ID = %(workflow_id)s
+              AND UPPER(COALESCE(STATUS, '')) IN ({active})
+            ORDER BY {order_expr} DESC NULLS LAST, RUN_ID DESC
+            LIMIT 1
+            """,
+            {"workflow_id": workflow_id},
+        )
+        if not rows:
+            return None
+        r = {str(k).upper(): v for k, v in dict(rows[0]).items()}
+        return {
+            "lockId": None,
+            "workflowId": r.get("WORKFLOW_ID"),
+            "workflowName": None,
+            "runId": r.get("RUN_ID"),
+            "status": r.get("STATUS") or "QUEUED",
+            "requestedBy": r.get("REQUESTED_BY") or "UNKNOWN",
+            "requestedAt": r.get("REQUESTED_AT"),
+            "message": "Active run found in workflow history",
+        }
+    except Exception:
+        return None
+
+
+def acquire_workflow_run_lock(workflow_id, workflow_name=None, actor=None, client_ip=None, user_agent=None):
+    """Create an immediate application-level run lock before queue/history catches up."""
+    workflow_id = str(workflow_id or "").strip()
+    if not workflow_id:
+        raise ValueError("workflow_id is required")
+
+    existing = active_run_lock_for_workflow(workflow_id) or active_history_run_for_workflow(workflow_id)
+    if existing:
+        if workflow_name and not existing.get("workflowName"):
+            existing["workflowName"] = workflow_name
+        raise WorkflowAlreadyActive(existing)
+
+    if not _run_lock_table_available():
+        return {
+            "lockId": str(uuid.uuid4()),
+            "workflowId": workflow_id,
+            "workflowName": workflow_name,
+            "status": "INITIATING",
+            "requestedBy": (actor or {}).get("displayName") or (actor or {}).get("userName") or "UNKNOWN",
+            "requestedAt": datetime.now(timezone.utc).isoformat(),
+            "message": "In-memory lock only because APP_WORKFLOW_RUN_LOCKS is missing",
+        }
+
+    lock_id = str(uuid.uuid4())
+    actor = actor or {}
+    params = {
+        "lock_id": lock_id,
+        "workflow_id": workflow_id,
+        "workflow_name": workflow_name or workflow_id,
+        "status": "INITIATING",
+        "requested_by": actor.get("displayName") or actor.get("userName") or "UNKNOWN",
+        "requested_by_user": actor.get("userName") or "UNKNOWN",
+        "requested_by_role": actor.get("roleName") or "Unknown role",
+        "session_mode": actor.get("mode") or sf.connection_mode(),
+        "client_ip": client_ip or "",
+        "user_agent": (user_agent or "")[:1000],
+        "ttl_minutes": int(getattr(config, "KUMO_RUN_LOCK_TTL_MINUTES", 360)),
+        "extra_json": json.dumps({"actor": actor}, default=str),
+    }
+    _execute(
+        f"""
+        INSERT INTO {config.T_APP_WORKFLOW_RUN_LOCKS} (
+          LOCK_ID,
+          WORKFLOW_ID,
+          WORKFLOW_NAME,
+          STATUS,
+          REQUESTED_BY,
+          REQUESTED_BY_USER,
+          REQUESTED_BY_ROLE,
+          SESSION_MODE,
+          REQUESTED_AT,
+          LAST_SEEN_AT,
+          LOCK_EXPIRES_AT,
+          CLIENT_IP,
+          USER_AGENT,
+          MESSAGE,
+          EXTRA,
+          UPDATED_AT
+        )
+        SELECT
+          %(lock_id)s,
+          %(workflow_id)s,
+          %(workflow_name)s,
+          %(status)s,
+          %(requested_by)s,
+          %(requested_by_user)s,
+          %(requested_by_role)s,
+          %(session_mode)s,
+          CURRENT_TIMESTAMP(),
+          CURRENT_TIMESTAMP(),
+          DATEADD('minute', %(ttl_minutes)s, CURRENT_TIMESTAMP()),
+          %(client_ip)s,
+          %(user_agent)s,
+          'Manual run request accepted by UI',
+          PARSE_JSON(%(extra_json)s),
+          CURRENT_TIMESTAMP()
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM {config.T_APP_WORKFLOW_RUN_LOCKS}
+          WHERE WORKFLOW_ID = %(workflow_id)s
+            AND RELEASED_AT IS NULL
+            AND LOCK_EXPIRES_AT >= CURRENT_TIMESTAMP()
+        )
+        """,
+        params,
+    )
+
+    lock = active_run_lock_for_workflow(workflow_id)
+    if not lock or str(lock.get("lockId")) != lock_id:
+        raise WorkflowAlreadyActive(lock or active_history_run_for_workflow(workflow_id))
+    return lock
+
+
+def mark_workflow_run_lock_queued(workflow_id, lock_id, run_id):
+    if not lock_id or not _run_lock_table_available():
+        return active_run_lock_for_workflow(workflow_id)
+    _execute(
+        f"""
+        UPDATE {config.T_APP_WORKFLOW_RUN_LOCKS}
+        SET
+          RUN_ID = %(run_id)s,
+          STATUS = 'QUEUED',
+          LAST_SEEN_AT = CURRENT_TIMESTAMP(),
+          MESSAGE = 'Queued. Waiting for dispatcher pickup.',
+          UPDATED_AT = CURRENT_TIMESTAMP()
+        WHERE LOCK_ID = %(lock_id)s
+          AND WORKFLOW_ID = %(workflow_id)s
+          AND RELEASED_AT IS NULL
+        """,
+        {"workflow_id": workflow_id, "lock_id": lock_id, "run_id": run_id},
+    )
+    return active_run_lock_for_workflow(workflow_id)
+
+
+def release_workflow_run_lock(lock_id=None, workflow_id=None, status="RELEASED", reason="RELEASED", error_message=None):
+    if not _run_lock_table_available():
+        return
+    where = []
+    params = {"status": status, "reason": reason, "error_message": error_message or ""}
+    if lock_id:
+        where.append("LOCK_ID = %(lock_id)s")
+        params["lock_id"] = lock_id
+    if workflow_id:
+        where.append("WORKFLOW_ID = %(workflow_id)s")
+        params["workflow_id"] = workflow_id
+    if not where:
+        return
+    _execute(
+        f"""
+        UPDATE {config.T_APP_WORKFLOW_RUN_LOCKS}
+        SET
+          STATUS = %(status)s,
+          RELEASED_AT = CURRENT_TIMESTAMP(),
+          RELEASE_REASON = %(reason)s,
+          ERROR_MESSAGE = %(error_message)s,
+          UPDATED_AT = CURRENT_TIMESTAMP()
+        WHERE RELEASED_AT IS NULL
+          AND {' AND '.join(where)}
+        """,
+        params,
+    )
+
+
+def apply_active_run_locks(workflows):
+    locks = {str(lock.get("workflowId")): lock for lock in load_active_run_locks()}
+    if not locks:
+        return workflows
+    out = []
+    for workflow in workflows:
+        item = dict(workflow)
+        lock = locks.get(str(item.get("workflowId")))
+        if lock:
+            actual_status = str(item.get("lastStatus") or "").upper()
+            lock_status = str(lock.get("status") or "QUEUED").upper()
+            same_run = lock.get("runId") and str(item.get("lastRunId") or "") == str(lock.get("runId"))
+            if not (same_run and actual_status in ("RUNNING", "IN_PROGRESS", "EXECUTING", "STARTING")):
+                item["lastStatus"] = lock_status
+                if lock.get("runId"):
+                    item["lastRunId"] = lock.get("runId")
+                item["lastRequestedAt"] = lock.get("requestedAt") or item.get("lastRequestedAt")
+                item["lastRequestedBy"] = lock.get("requestedBy") or item.get("lastRequestedBy")
+            item["runLocked"] = True
+            item["runLock"] = lock
+        out.append(item)
+    return out
+
+
 def load_history(limit=200):
     limit = max(1, min(int(limit or 200), 2000))
     h_types = describe_table(config.T_HISTORY)
@@ -206,7 +564,7 @@ def load_monitor_rows():
     ORDER BY w.WORKFLOW_GROUP, w.WORKFLOW_NAME
     """
     rows = normalize_rows(_query(q))
-    return _order_and_enrich(rows)
+    return apply_active_run_locks(_order_and_enrich(rows))
 
 
 def _order_and_enrich(rows):
