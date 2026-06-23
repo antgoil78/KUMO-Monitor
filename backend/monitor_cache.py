@@ -1,5 +1,4 @@
 import threading
-import time
 from datetime import datetime, timezone
 
 import config
@@ -21,7 +20,11 @@ class MonitorCache:
         if self._thread and self._thread.is_alive():
             return
         self.refresh(force=True)
-        self._thread = threading.Thread(target=self._loop, name="kumo-monitor-refresh", daemon=True)
+        self._thread = threading.Thread(
+            target=self._loop,
+            name="kumo-monitor-refresh",
+            daemon=True,
+        )
         self._thread.start()
 
     def _loop(self):
@@ -59,7 +62,7 @@ class MonitorCache:
             return payload
 
         workflows = repo.load_monitor_rows()
-        payload = {
+        return {
             "source": "snowflake",
             "engine": repo.get_engine_state(),
             "summary": repo.build_summary(workflows),
@@ -68,7 +71,6 @@ class MonitorCache:
             "refreshIntervalMs": self.refresh_seconds * 1000,
             "error": None,
         }
-        return payload
 
     def _error_payload(self, exc):
         payload = dict(MOCK_MONITOR)
