@@ -32,6 +32,8 @@ ENV SNOWFLAKE_PASSWORD=$SNOWFLAKE_PASSWORD
 
 # Copy backend files
 COPY backend/ /app/backend/
+RUN python -m compileall -q /app/backend
+
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
