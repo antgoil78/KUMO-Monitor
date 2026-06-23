@@ -65,3 +65,25 @@ export const api = {
   history: (limit = 200) => requestJson(`/api/history?limit=${limit}`),
   notifications: () => requestJson('/api/notifications')
 }
+
+
+export function createKumoEventSource(onEvent, onError) {
+  if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
+    return null
+  }
+  const source = new window.EventSource('/api/events')
+  const eventTypes = ['connected', 'monitor_update', 'workflow_run_requested', 'workflow_run_queued', 'workflow_run_failed']
+
+  function handle(event) {
+    try {
+      const payload = event.data ? JSON.parse(event.data) : null
+      onEvent?.(payload || { type: event.type, data: {} })
+    } catch (err) {
+      onError?.(err)
+    }
+  }
+
+  eventTypes.forEach(type => source.addEventListener(type, handle))
+  source.onerror = () => onError?.(new Error('Realtime event stream disconnected'))
+  return source
+}

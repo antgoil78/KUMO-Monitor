@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api } from '../api.js'
+import { api, createKumoEventSource } from '../api.js'
 import StatusBadge, { statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import { formatDateTime } from '../utils/time.js'
@@ -11,6 +11,42 @@ function resolveSettled(result, fallback = null) {
 function percent(value, total) {
   if (!total) return 0
   return Math.round((value / total) * 100)
+}
+
+function normalizeStatus(status, fallback = 'INITIATING') {
+  const value = String(status || '').trim().toUpperCase()
+  return value || fallback
+}
+
+function buildSummary(workflows) {
+  const rows = workflows || []
+  return {
+    total: rows.length,
+    success: rows.filter(w => statusKind(w.lastStatus) === 'success').length,
+    failed: rows.filter(w => statusKind(w.lastStatus) === 'failed').length,
+    running: rows.filter(w => statusKind(w.lastStatus) === 'running').length,
+    queued: rows.filter(w => statusKind(w.lastStatus) === 'queued').length
+  }
+}
+
+function applyRealtimeRun(payload, data) {
+  if (!payload?.workflows?.length || !data?.workflowId) return payload
+  const workflowId = String(data.workflowId)
+  const runId = data.runId || data.lock?.runId || ''
+  const status = normalizeStatus(data.status || data.lock?.status)
+  const workflows = payload.workflows.map(workflow => {
+    if (String(workflow.workflowId) !== workflowId) return workflow
+    return {
+      ...workflow,
+      lastStatus: status,
+      lastRunId: runId || workflow.lastRunId,
+      lastRequestedAt: data.requestedAt || data.lock?.requestedAt || workflow.lastRequestedAt,
+      lastRequestedBy: data.requestedBy || data.lock?.requestedBy || data.actor?.displayName || workflow.lastRequestedBy,
+      runLocked: true,
+      runLock: { ...(workflow.runLock || {}), ...(data.lock || {}), status, runId }
+    }
+  })
+  return { ...payload, workflows, summary: buildSummary(workflows) }
 }
 
 function MetricCard({ label, value, delta, tone, icon, footer }) {
@@ -153,6 +189,21 @@ export default function Dashboard() {
     load()
     const id = setInterval(load, 10000)
     return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    const source = createKumoEventSource((event) => {
+      const type = event?.type
+      const data = event?.data || {}
+      if (type === 'monitor_update') {
+        setPayload(data)
+        return
+      }
+      if (['workflow_run_requested', 'workflow_run_queued'].includes(type)) {
+        setPayload(prev => applyRealtimeRun(prev, data))
+      }
+    }, () => {})
+    return () => source?.close()
   }, [])
 
   const workflows = payload?.workflows || []
