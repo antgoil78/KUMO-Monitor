@@ -232,48 +232,59 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
     setDetail(prev => ({ ...prev, notifications: { ...(prev.notifications || {}), [field]: value } }))
   }
 
+  function closeAndRefresh(message) {
+    notify(message)
+    onClose()
+
+    // Refresh the monitor after the modal has closed. Keeping this non-blocking
+    // prevents the modal from staying open while Snowflake refreshes data.
+    Promise.resolve(onSaved()).catch(err => {
+      notify(`Refresh failed after update: ${err.message}`)
+    })
+  }
+
   async function save() {
     setSaving(true)
     setError(null)
+    let completed = false
     try {
       await api.updateWorkflow(workflowId, detail)
-      notify('Workflow saved')
-      await onSaved()
-      onClose()
+      completed = true
+      closeAndRefresh('Workflow saved')
     } catch (err) {
       setError(err.message)
     } finally {
-      setSaving(false)
+      if (!completed) setSaving(false)
     }
   }
 
   async function clone() {
     setSaving(true)
     setError(null)
+    let completed = false
     try {
       await api.cloneWorkflow(workflowId)
-      notify('Workflow cloned and disabled')
-      await onSaved()
-      onClose()
+      completed = true
+      closeAndRefresh('Workflow cloned and disabled')
     } catch (err) {
       setError(err.message)
     } finally {
-      setSaving(false)
+      if (!completed) setSaving(false)
     }
   }
 
   async function remove() {
     setSaving(true)
     setError(null)
+    let completed = false
     try {
       await api.deleteWorkflow(workflowId)
-      notify('Workflow deleted')
-      await onSaved()
-      onClose()
+      completed = true
+      closeAndRefresh('Workflow deleted')
     } catch (err) {
       setError(err.message)
     } finally {
-      setSaving(false)
+      if (!completed) setSaving(false)
     }
   }
 
