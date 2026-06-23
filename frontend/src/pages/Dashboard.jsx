@@ -17,6 +17,8 @@ function firstWord(value) {
   return String(value || '').trim().split(/\s+/)[0] || 'there'
 }
 
+let dashboardCache = null
+
 function MetricCard({ label, value, delta, tone, icon, footer }) {
   return (
     <div className="vision-card metric-card">
@@ -129,48 +131,62 @@ function TinyBarChart({ workflows }) {
 }
 
 export default function Dashboard() {
-  const [payload, setPayload] = useState(null)
-  const [health, setHealth] = useState(null)
-  const [ping, setPing] = useState(null)
-  const [session, setSession] = useState(null)
-  const [activeUsers, setActiveUsers] = useState([])
+  const [payload, setPayload] = useState(dashboardCache?.payload || null)
+  const [health, setHealth] = useState(dashboardCache?.health || null)
+  const [ping, setPing] = useState(dashboardCache?.ping || null)
+  const [session, setSession] = useState(dashboardCache?.session || null)
+  const [activeUsers, setActiveUsers] = useState(dashboardCache?.activeUsers || [])
   const [error, setError] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!dashboardCache)
+  const [refreshing, setRefreshing] = useState(Boolean(dashboardCache))
 
-  async function load() {
+  async function load({ silent = false } = {}) {
+    if (silent) {
+      setRefreshing(true)
+    } else {
+      setLoading(true)
+    }
     setError(null)
-    const [monitorResult, healthResult, pingResult, sessionResult] = await Promise.allSettled([
+
+    const [monitorResult, healthResult, pingResult, sessionResult, activeUsersResult] = await Promise.allSettled([
       api.monitor(),
       api.health(),
       api.snowflakePing(),
-      api.session()
+      api.session(),
+      api.activeUsers()
     ])
 
-    const monitorData = resolveSettled(monitorResult)
-    const healthData = resolveSettled(healthResult)
-    const pingData = resolveSettled(pingResult)
-    const sessionData = resolveSettled(sessionResult)
+    const monitorData = resolveSettled(monitorResult, dashboardCache?.payload || null)
+    const healthData = resolveSettled(healthResult, dashboardCache?.health || null)
+    const pingData = resolveSettled(pingResult, dashboardCache?.ping || null)
+    const sessionData = resolveSettled(sessionResult, dashboardCache?.session || null)
+    const activePayload = resolveSettled(activeUsersResult, null)
+    const usersData = activePayload?.users || sessionData?.activeUsers || dashboardCache?.activeUsers || []
+
+    dashboardCache = {
+      payload: monitorData,
+      health: healthData,
+      ping: pingData,
+      session: sessionData,
+      activeUsers: usersData,
+      cachedAt: new Date().toISOString()
+    }
 
     setPayload(monitorData)
     setHealth(healthData)
     setPing(pingData)
     setSession(sessionData)
-
-    try {
-      const activePayload = await api.activeUsers()
-      setActiveUsers(activePayload?.users || [])
-    } catch (err) {
-      setActiveUsers(sessionData?.activeUsers || [])
-    }
+    setActiveUsers(usersData)
 
     const failed = [monitorResult, healthResult].filter(r => r.status === 'rejected')
     if (failed.length) setError(failed.map(r => r.reason?.message || String(r.reason)).join(' | '))
     setLoading(false)
+    setRefreshing(false)
   }
 
   useEffect(() => {
-    load()
-    const id = setInterval(load, 10000)
+    load({ silent: Boolean(dashboardCache) })
+    const id = setInterval(() => load({ silent: true }), 10000)
     return () => clearInterval(id)
   }, [])
 
@@ -218,6 +234,16 @@ export default function Dashboard() {
 
       {error && <div className="alert error">{error}</div>}
       {payload?.error && <div className="alert warning">Backend fallback: {payload.error}</div>}
+
+      {(loading || refreshing) && (
+        <div className={`dashboard-loading-panel ${refreshing && !loading ? 'compact' : ''}`}>
+          <div className="vision-spinner" />
+          <div>
+            <strong>{loading ? 'Updating dashboard…' : 'Refreshing dashboard…'}</strong>
+            <span>Collecting monitor status, Snowflake health and active user data.</span>
+          </div>
+        </div>
+      )}
 
       <div className="metric-grid vision-grid-4">
         <MetricCard
