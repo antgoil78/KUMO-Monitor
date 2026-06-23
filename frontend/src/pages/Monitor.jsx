@@ -110,6 +110,17 @@ function WorkflowRow({ workflow, nowMs, onManage, pendingRun }) {
           <span className={`type-chip ${type.toLowerCase()}`}>{type}</span>
         </div>
       </td>
+      <td className="row-actions">
+        <button
+          className="row-manage-button"
+          aria-label={`Manage ${workflow.workflowName}`}
+          title={`Manage ${workflow.workflowName}`}
+          onClick={() => onManage(view)}
+        >
+          <span className="manage-dot" />
+          <span>Manage</span>
+        </button>
+      </td>
       <td className="status-cell"><StatusBadge status={view.lastStatus} /></td>
       <td className="muted-cell">{formatDateTime(view.lastStartTime)}</td>
       <td className="duration-cell">
@@ -120,17 +131,6 @@ function WorkflowRow({ workflow, nowMs, onManage, pendingRun }) {
         {workflow.taskEnabled ? <><code>{workflow.scheduleCron || '-'}</code><span>{workflow.scheduleTimezone || 'UTC'}</span></> : <span className="muted-dash">—</span>}
       </td>
       <td className="muted-cell">{workflow.taskEnabled ? formatDateTime(workflow.nextRunTime) : '—'}</td>
-      <td className="row-actions">
-        <button
-          className="row-manage-button"
-          aria-label={`Manage ${workflow.workflowName}`}
-          onClick={() => onManage(view)}
-        >
-          <span className="manage-dot" />
-          <span>Manage</span>
-          <strong>›</strong>
-        </button>
-      </td>
     </tr>
   )
 }
@@ -191,13 +191,35 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
 
   useEffect(() => {
     let cancelled = false
-    setError(null)
-    api.workflowDetail(workflowId).then(data => {
-      if (!cancelled) setDetail(data)
-    }).catch(err => {
-      if (!cancelled) setError(err.message)
-    })
-    return () => { cancelled = true }
+    let timer = null
+
+    async function loadDetail() {
+      setError(null)
+      setDetail(null)
+      timer = window.setTimeout(() => {
+        if (!cancelled) {
+          setError('Workflow details are taking longer than expected. Check backend logs for /api/workflows/' + workflowId + ' or try again.')
+        }
+      }, 20000)
+
+      try {
+        const data = await api.workflowDetail(workflowId, { timeoutMs: 25000 })
+        if (!cancelled) {
+          setDetail(data)
+          setError(null)
+        }
+      } catch (err) {
+        if (!cancelled) setError(err.message)
+      } finally {
+        if (timer) window.clearTimeout(timer)
+      }
+    }
+
+    loadDetail()
+    return () => {
+      cancelled = true
+      if (timer) window.clearTimeout(timer)
+    }
   }, [workflowId])
 
   function patch(field, value) {
@@ -256,6 +278,12 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
     <Modal title="Edit workflow" subtitle={detail?.workflowName || workflowId} onClose={onClose} wide>
       {!detail && !error && <div className="empty-state">Loading workflow...</div>}
       {error && <div className="alert error">{error}</div>}
+      {error && !detail && (
+        <div className="modal-actions left">
+          <button className="button primary" onClick={() => { setError(null); setDetail(null); api.workflowDetail(workflowId, { timeoutMs: 25000 }).then(setDetail).catch(err => setError(err.message)) }}>Retry loading workflow</button>
+          <button className="button muted" onClick={onClose}>Close</button>
+        </div>
+      )}
       {detail && (
         <div className="edit-form">
           <div className="form-grid two">
@@ -366,7 +394,6 @@ function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
   const busy = isWorkflowBusy(view.lastStatus)
 
   async function choose(action) {
-    onClose()
     await onAction(action, view)
   }
 
@@ -437,12 +464,27 @@ export default function Monitor() {
       setPayload(data)
       setPendingRuns(prev => {
         const next = { ...prev }
+        const seen = new Set((data.workflows || []).map(wf => wf.workflowId))
+        const now = Date.now()
+
         for (const wf of data.workflows || []) {
-          if (next[wf.workflowId] && ['RUNNING', 'QUEUED', 'INITIATING', 'PENDING', 'REQUESTED', 'SCHEDULED'].includes(String(wf.lastStatus || '').toUpperCase())) {
-            continue
+          const pending = next[wf.workflowId]
+          if (!pending) continue
+
+          const status = String(wf.lastStatus || '').toUpperCase()
+          const actualBusy = ['RUNNING', 'IN_PROGRESS', 'EXECUTING', 'QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED'].includes(status)
+          const runVisible = pending.runId && pending.runId !== 'pending' && String(wf.lastRunId || '') === String(pending.runId)
+          const expired = now - Number(pending.startedAt || now) > 120000
+
+          if (actualBusy || runVisible || expired) {
+            delete next[wf.workflowId]
           }
-          delete next[wf.workflowId]
         }
+
+        for (const workflowId of Object.keys(next)) {
+          if (!seen.has(workflowId)) delete next[workflowId]
+        }
+
         return next
       })
     } catch (err) {
@@ -464,7 +506,14 @@ export default function Monitor() {
   }, [])
 
   const workflows = payload?.workflows || []
-  const workflowsWithPending = workflows.map(w => pendingRuns[w.workflowId] ? { ...w, lastStatus: 'INITIATING', lastRunId: pendingRuns[w.workflowId].runId || w.lastRunId } : w)
+  const workflowsWithPending = workflows.map(w => {
+    const pending = pendingRuns[w.workflowId]
+    if (!pending) return w
+    const actualBusy = isWorkflowBusy(w.lastStatus)
+    const expired = Date.now() - Number(pending.startedAt || Date.now()) > 120000
+    if (actualBusy || expired) return w
+    return { ...w, lastStatus: 'INITIATING', lastRunId: pending.runId || w.lastRunId, progress: { percent: null } }
+  })
   const summary = useMemo(() => {
     const total = workflowsWithPending.length
     const success = workflowsWithPending.filter(w => statusKind(w.lastStatus) === 'success').length
@@ -497,12 +546,13 @@ export default function Monitor() {
     if (action === 'dag') return setModal({ type: 'dag', workflow })
     if (action === 'edit') return setModal({ type: 'edit', workflow })
 
+    setModal(null)
     try {
       if (action === 'run') {
         setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: 'pending' } }))
         const result = await api.runWorkflow(workflow.workflowId)
         setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: result.runId } }))
-        notify(`Initiated ${workflow.workflowName}. Run ID: ${result.runId}`)
+        notify(`Initiated ${workflow.workflowName}. Run ID: ${result.runId || 'pending'}. Waiting for dispatcher pickup...`)
         await load(true)
       }
       if (action === 'toggle-workflow') {
@@ -566,7 +616,7 @@ export default function Monitor() {
         {!loading && filtered.length === 0 ? <div className="empty-state">No workflows match the current filters.</div> : null}
         {filtered.length > 0 && (
           <table className="workflow-table monitor-table">
-            <thead><tr><th>Workflow</th><th>Status</th><th>Last Run</th><th>Duration</th><th>Schedule</th><th>Next Run</th><th></th></tr></thead>
+            <thead><tr><th>Workflow</th><th>Manage</th><th>Status</th><th>Last Run</th><th>Duration</th><th>Schedule</th><th>Next Run</th></tr></thead>
             <tbody>{filtered.map(w => <WorkflowRow key={`${w.workflowId}-${w.lastRunId || 'none'}`} workflow={w} nowMs={nowMs} onManage={(workflow) => setModal({ type: 'actions', workflow })} pendingRun={pendingRuns[w.workflowId]} />)}</tbody>
           </table>
         )}
