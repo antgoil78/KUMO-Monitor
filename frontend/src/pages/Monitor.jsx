@@ -98,7 +98,10 @@ function WorkflowRow({ workflow, nowMs, onManage, pendingRun }) {
   const depth = Number(workflow.indent || 0)
   const type = String(workflow.workflowType || 'DBT').toUpperCase()
   const isRoot = depth === 0
-  const view = pendingRun ? { ...workflow, lastStatus: 'INITIATING', lastRunId: pendingRun.runId || workflow.lastRunId, progress: { percent: null } } : workflow
+  const pendingExpired = pendingRun && Date.now() - Number(pendingRun.startedAt || Date.now()) > 120000
+  const backendBusy = isWorkflowBusy(workflow.lastStatus)
+  const overlayPending = pendingRun && !pendingExpired && !backendBusy
+  const view = overlayPending ? { ...workflow, lastStatus: pendingRun.status || 'INITIATING', lastRunId: pendingRun.runId || workflow.lastRunId, progress: { percent: null } } : workflow
   const busy = isWorkflowBusy(view.lastStatus)
 
   return (
@@ -198,12 +201,12 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
       setDetail(null)
       timer = window.setTimeout(() => {
         if (!cancelled) {
-          setError('Workflow details are taking longer than expected. Check backend logs for /api/workflows/' + workflowId + ' or try again.')
+          setError('Workflow details are still loading. This is slower than expected; check backend logs for /api/workflows/' + workflowId + ' or try again.')
         }
-      }, 20000)
+      }, 35000)
 
       try {
-        const data = await api.workflowDetail(workflowId, { timeoutMs: 25000 })
+        const data = await api.workflowDetail(workflowId, { timeoutMs: 60000 })
         if (!cancelled) {
           setDetail(data)
           setError(null)
@@ -280,7 +283,7 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
       {error && <div className="alert error">{error}</div>}
       {error && !detail && (
         <div className="modal-actions left">
-          <button className="button primary" onClick={() => { setError(null); setDetail(null); api.workflowDetail(workflowId, { timeoutMs: 25000 }).then(setDetail).catch(err => setError(err.message)) }}>Retry loading workflow</button>
+          <button className="button primary" onClick={() => { setError(null); setDetail(null); api.workflowDetail(workflowId, { timeoutMs: 60000 }).then(setDetail).catch(err => setError(err.message)) }}>Retry loading workflow</button>
           <button className="button muted" onClick={onClose}>Close</button>
         </div>
       )}
@@ -512,7 +515,7 @@ export default function Monitor() {
     const actualBusy = isWorkflowBusy(w.lastStatus)
     const expired = Date.now() - Number(pending.startedAt || Date.now()) > 120000
     if (actualBusy || expired) return w
-    return { ...w, lastStatus: 'INITIATING', lastRunId: pending.runId || w.lastRunId, progress: { percent: null } }
+    return { ...w, lastStatus: pending.status || 'INITIATING', lastRunId: pending.runId || w.lastRunId, progress: { percent: null } }
   })
   const summary = useMemo(() => {
     const total = workflowsWithPending.length
@@ -549,9 +552,9 @@ export default function Monitor() {
     setModal(null)
     try {
       if (action === 'run') {
-        setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: 'pending' } }))
+        setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: 'pending', status: 'INITIATING' } }))
         const result = await api.runWorkflow(workflow.workflowId)
-        setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: result.runId } }))
+        setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: result.runId || 'pending', status: 'QUEUED' } }))
         notify(`Initiated ${workflow.workflowName}. Run ID: ${result.runId || 'pending'}. Waiting for dispatcher pickup...`)
         await load(true)
       }
