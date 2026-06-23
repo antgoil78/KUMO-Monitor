@@ -510,6 +510,8 @@ def run_workflow(workflow_id):
             requested_by=requested_by,
         )
         lock = repo.mark_workflow_run_lock_queued(workflow_id, lock.get("lockId"), run_id) or lock
+        if lock and not lock.get("runId"):
+            lock = {**lock, "runId": run_id, "status": "QUEUED", "message": "Queued. Waiting for dispatcher pickup."}
         # Do not force a full monitor refresh here. It is slower and may briefly
         # return the previous persisted status before the dispatcher/history has
         # caught up. The run-lock endpoint gives the UI the immediate cross-user

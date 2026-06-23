@@ -494,6 +494,7 @@ def load_monitor_rows():
     workflow_type_expr = "w.WORKFLOW_TYPE" if has_workflow_type else "'DBT'"
     sql_command_expr = "w.SQL_COMMAND" if has_sql_command else "NULL"
     order_expr = "COALESCE(hh.END_TIME, hh.START_TIME, hh.REQUESTED_AT)" if has_requested_at else "COALESCE(hh.END_TIME, hh.START_TIME)"
+    active_statuses = ", ".join([f"'{s}'" for s in sorted(ACTIVE_RUN_STATUSES)])
 
     extra_select = []
     if has_requested_at:
@@ -516,7 +517,10 @@ def load_monitor_rows():
       FROM {config.T_HISTORY} hh
       QUALIFY ROW_NUMBER() OVER (
         PARTITION BY hh.WORKFLOW_ID
-        ORDER BY {order_expr} DESC NULLS LAST, hh.RUN_ID DESC
+        ORDER BY
+          IFF(UPPER(COALESCE(hh.STATUS, '')) IN ({active_statuses}), 0, 1),
+          {order_expr} DESC NULLS LAST,
+          hh.RUN_ID DESC
       ) = 1
     ),
     ONE_TASK AS (
@@ -743,7 +747,7 @@ def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requeste
     run_id = str(uuid.uuid4())
 
     h_cols = ["RUN_ID", "WORKFLOW_ID", "STATUS"]
-    h_vals = ["%(run_id)s", "%(workflow_id)s", "'QUEUED'"]
+    h_vals = ["%(run_id)s", "%(workflow_id)s", "'INITIATING'"]
     params = {
         "run_id": run_id,
         "workflow_id": workflow_id,
@@ -823,18 +827,16 @@ def request_run(workflow_id, trigger_source="MANUAL", requested_by=None):
     procedure = call SP_WORKFLOW_REQUEST_RUN first, then fallback to queue insert.
     queue = direct insert into WORKFLOW_HISTORY and WORKFLOW_RUN_QUEUE.
     """
-    mode = getattr(config, "KUMO_MANUAL_RUN_MODE", "procedure")
-    if mode == "queue":
-        return _request_run_via_queue_insert(workflow_id, trigger_source, requested_by)
-
-    try:
-        run_id = _request_run_via_procedure(workflow_id, trigger_source, requested_by)
-        if run_id:
-            return run_id
-    except Exception:
-        # Fall back below. This keeps older environments working if the stored
-        # procedure signature differs.
-        pass
+    mode = getattr(config, "KUMO_MANUAL_RUN_MODE", "queue")
+    if mode == "procedure":
+        try:
+            run_id = _request_run_via_procedure(workflow_id, trigger_source, requested_by)
+            if run_id:
+                return run_id
+        except Exception:
+            # Fall back below. This keeps older environments working if the stored
+            # procedure signature differs.
+            pass
 
     return _request_run_via_queue_insert(workflow_id, trigger_source, requested_by)
 
