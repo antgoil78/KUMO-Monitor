@@ -1,6 +1,5 @@
 import os
 
-# Core KUMO metadata location
 DB = os.getenv("KUMO_DB", "KUMO_ADMIN")
 SCHEMA = os.getenv("KUMO_SCHEMA", "WORKFLOW_MANAGER")
 
@@ -11,17 +10,12 @@ T_QUEUE = f"{DB}.{SCHEMA}.WORKFLOW_RUN_QUEUE"
 T_LOGS = f"{DB}.{SCHEMA}.WORKFLOW_RUN_LOGS"
 T_NOTIFICATIONS = f"{DB}.{SCHEMA}.WORKFLOW_NOTIFICATIONS"
 
-# Snowflake object defaults
 DEFAULT_TASK_WAREHOUSE = os.getenv("KUMO_TASK_WAREHOUSE", "KUMO_ELT_GEN_1")
 PROGRESS_TABLE = os.getenv("KUMO_PROGRESS_TABLE", "KUMO_TST.META.EXECUTION_PROGRESS")
 RUN_LOG_TABLE = os.getenv("KUMO_RUN_LOG_TABLE", "KUMO_TST.META.RUN_LOG")
-
-# Runtime behavior
 REFRESH_SECONDS = int(os.getenv("KUMO_REFRESH_SECONDS", "5"))
-USE_MOCK = os.getenv("KUMO_USE_MOCK", "false").strip().lower() in ("1", "true", "yes", "y")
+USE_MOCK = os.getenv("KUMO_USE_MOCK", "false").lower() in ("1", "true", "yes", "y")
 
-# Snowflake connector settings
-# In SPCS, SNOWFLAKE_HOST, SNOWFLAKE_ACCOUNT and /snowflake/session/token are injected by Snowflake.
 SNOWFLAKE_ACCOUNT = os.getenv("SNOWFLAKE_ACCOUNT", "")
 SNOWFLAKE_USER = os.getenv("SNOWFLAKE_USER", "")
 SNOWFLAKE_PASSWORD = os.getenv("SNOWFLAKE_PASSWORD", "")
@@ -31,6 +25,14 @@ SNOWFLAKE_DATABASE = os.getenv("SNOWFLAKE_DATABASE", DB)
 SNOWFLAKE_SCHEMA = os.getenv("SNOWFLAKE_SCHEMA", SCHEMA)
 
 # Manual run behavior:
-# procedure = call SP_WORKFLOW_REQUEST_RUN first, then fallback to queue insert if needed.
+# procedure = call SP_WORKFLOW_REQUEST_RUN first (same path as scheduled task), then fallback to queue insert if needed.
 # queue = only insert WORKFLOW_HISTORY + WORKFLOW_RUN_QUEUE rows.
 KUMO_MANUAL_RUN_MODE = os.getenv("KUMO_MANUAL_RUN_MODE", "procedure").strip().lower()
+
+# Application audit / user registry tables
+T_APP_USER_SESSIONS = f"{DB}.{SCHEMA}.APP_USER_SESSIONS"
+T_APP_USER_INTERACTIONS = f"{DB}.{SCHEMA}.APP_USER_INTERACTIONS"
+
+# Audit behavior
+KUMO_AUDIT_ENABLED = os.getenv("KUMO_AUDIT_ENABLED", "true").strip().lower() in ("1", "true", "yes", "y")
+KUMO_APP_VERSION = os.getenv("KUMO_APP_VERSION", "dev")

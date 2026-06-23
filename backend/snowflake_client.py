@@ -74,7 +74,7 @@ def _quote_identifier_path(identifier):
     return ".".join(quoted)
 
 
-def _connection_kwargs(include_context=True, include_warehouse=True):
+def _connection_kwargs(include_context=True, include_warehouse=True, force_service=False):
     """Build connector kwargs.
 
     include_context=False is used for /api/session because CURRENT_USER/CURRENT_ROLE
@@ -82,6 +82,7 @@ def _connection_kwargs(include_context=True, include_warehouse=True):
     warehouse/caller grant from hiding the actual signed-in user.
     """
     mode = connection_mode()
+    use_caller_token = (mode == "spcs-caller-oauth") and (not force_service)
     if mode == "not-configured":
         raise RuntimeError(
             "Snowflake connection is not configured. In SPCS, Snowflake must provide "
@@ -92,7 +93,7 @@ def _connection_kwargs(include_context=True, include_warehouse=True):
 
     if mode in ("spcs-service-oauth", "spcs-caller-oauth"):
         service_token = _read_spcs_token()
-        ingress_user_token = _ingress_user_token.get()
+        ingress_user_token = _ingress_user_token.get() if use_caller_token else None
         token = f"{service_token}.{ingress_user_token}" if ingress_user_token else service_token
         kwargs = {
             "host": os.getenv("SNOWFLAKE_HOST"),
@@ -106,7 +107,8 @@ def _connection_kwargs(include_context=True, include_warehouse=True):
             if config.SNOWFLAKE_SCHEMA:
                 kwargs["schema"] = config.SNOWFLAKE_SCHEMA
         # In caller-rights mode, let Snowflake activate the caller's default role.
-        if mode == "spcs-service-oauth" and config.SNOWFLAKE_ROLE:
+        # When force_service=True, use the service owner role path for audit writes.
+        if (mode == "spcs-service-oauth" or force_service) and config.SNOWFLAKE_ROLE:
             kwargs["role"] = config.SNOWFLAKE_ROLE
     else:
         kwargs = {
@@ -129,8 +131,8 @@ def _connection_kwargs(include_context=True, include_warehouse=True):
 
 
 @contextmanager
-def connection(use_warehouse=True, include_context=True):
-    conn = snowflake.connector.connect(**_connection_kwargs(include_context=include_context, include_warehouse=use_warehouse))
+def connection(use_warehouse=True, include_context=True, force_service=False):
+    conn = snowflake.connector.connect(**_connection_kwargs(include_context=include_context, include_warehouse=use_warehouse, force_service=force_service))
     try:
         # Some connector/session combinations do not activate the warehouse even when
         # warehouse=... is passed. Force it for data queries only, not for /api/session.
@@ -146,8 +148,8 @@ def connection(use_warehouse=True, include_context=True):
         conn.close()
 
 
-def query(sql, params=None, use_warehouse=True, include_context=True):
-    with connection(use_warehouse=use_warehouse, include_context=include_context) as conn:
+def query(sql, params=None, use_warehouse=True, include_context=True, force_service=False):
+    with connection(use_warehouse=use_warehouse, include_context=include_context, force_service=force_service) as conn:
         cur = conn.cursor(DictCursor)
         try:
             cur.execute(sql, params or {})
@@ -156,8 +158,8 @@ def query(sql, params=None, use_warehouse=True, include_context=True):
             cur.close()
 
 
-def execute(sql, params=None, use_warehouse=True, include_context=True):
-    with connection(use_warehouse=use_warehouse, include_context=include_context) as conn:
+def execute(sql, params=None, use_warehouse=True, include_context=True, force_service=False):
+    with connection(use_warehouse=use_warehouse, include_context=include_context, force_service=force_service) as conn:
         cur = conn.cursor(DictCursor)
         try:
             cur.execute(sql, params or {})
@@ -169,9 +171,23 @@ def execute(sql, params=None, use_warehouse=True, include_context=True):
             cur.close()
 
 
-def query_one(sql, params=None, use_warehouse=True, include_context=True):
-    rows = query(sql, params=params, use_warehouse=use_warehouse, include_context=include_context)
+def query_one(sql, params=None, use_warehouse=True, include_context=True, force_service=False):
+    rows = query(sql, params=params, use_warehouse=use_warehouse, include_context=include_context, force_service=force_service)
     return dict(rows[0]) if rows else {}
+
+
+def query_service(sql, params=None, use_warehouse=True, include_context=True):
+    """Run a query as the service context, even when caller-rights token is present.
+
+    Use this for application-owned audit/session tables so every user does not
+    need direct DML privileges on APP_USER_SESSIONS / APP_USER_INTERACTIONS.
+    """
+    return query(sql, params=params, use_warehouse=use_warehouse, include_context=include_context, force_service=True)
+
+
+def execute_service(sql, params=None, use_warehouse=True, include_context=True):
+    """Execute DML as the service context, even when caller-rights token is present."""
+    return execute(sql, params=params, use_warehouse=use_warehouse, include_context=include_context, force_service=True)
 
 
 def ping():
