@@ -1,4 +1,6 @@
 import logging
+from datetime import datetime, timezone
+from threading import Lock
 from flask import Flask, jsonify, request, send_from_directory, g
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -16,6 +18,57 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 
 monitor_cache.start()
+
+_active_users_lock = Lock()
+_active_users = {}
+
+
+def _now_iso():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _user_key(session_info):
+    user_name = str(session_info.get("userName") or "").strip()
+    if user_name and user_name.upper() != "UNKNOWN":
+        return user_name.upper()
+    display_name = str(session_info.get("displayName") or "").strip()
+    return display_name.upper() if display_name else "UNKNOWN"
+
+
+def _register_active_user(session_info, source="session"):
+    key = _user_key(session_info)
+    if not key or key == "UNKNOWN":
+        return None
+
+    now = _now_iso()
+    item = {
+        "userName": session_info.get("userName") or key,
+        "displayName": session_info.get("displayName") or session_info.get("userName") or key,
+        "firstName": session_info.get("firstName") or "",
+        "lastName": session_info.get("lastName") or "",
+        "roleName": session_info.get("roleName") or "Unknown role",
+        "warehouseName": session_info.get("warehouseName") or "Not selected",
+        "mode": session_info.get("mode") or "unknown",
+        "callerRightsActive": bool(session_info.get("callerRightsActive")),
+        "callerTokenPresent": bool(session_info.get("callerTokenPresent")),
+        "source": source,
+    }
+
+    with _active_users_lock:
+        previous = _active_users.get(key, {})
+        item["firstSeenAt"] = previous.get("firstSeenAt") or now
+        item["lastSeenAt"] = now
+        item["hitCount"] = int(previous.get("hitCount") or 0) + 1
+        _active_users[key] = item
+
+    return item
+
+
+def _active_user_list():
+    with _active_users_lock:
+        rows = list(_active_users.values())
+    rows.sort(key=lambda r: r.get("lastSeenAt") or "", reverse=True)
+    return rows
 
 
 def _json_error(message, status=400):
@@ -85,7 +138,9 @@ def session_context():
             "callerTokenPresent": False,
         })
     try:
-        return jsonify({"ok": True, **sf.session_context()})
+        session_info = sf.session_context()
+        _register_active_user(session_info, source="session")
+        return jsonify({"ok": True, **session_info, "activeUsers": _active_user_list()})
     except Exception as exc:
         return jsonify({
             "ok": False,
@@ -100,6 +155,15 @@ def session_context():
             "callerRightsActive": sf.connection_mode() == "spcs-caller-oauth",
             "callerTokenPresent": sf.caller_token_present(),
         }), 200
+
+
+@app.route("/api/users/active")
+def active_users():
+    return jsonify({
+        "ok": True,
+        "users": _active_user_list(),
+        "count": len(_active_user_list()),
+    })
 
 
 @app.route("/api/snowflake/ping")
@@ -131,7 +195,9 @@ def _actor_context():
             "callerRightsActive": False,
         }
     try:
-        return sf.session_context()
+        actor = sf.session_context()
+        _register_active_user(actor, source="action")
+        return actor
     except Exception as exc:
         app.logger.warning("Could not resolve actor context: %s", exc)
         return {

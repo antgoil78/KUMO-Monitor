@@ -229,22 +229,53 @@ def _lookup_user_profile(user_name):
     return first_name, last_name, display_name
 
 
+def _derive_name_from_user(user_name):
+    """Create a friendly display name when Snowflake profile metadata is not visible.
+
+    Many caller roles can read CURRENT_USER() but cannot SHOW USERS. In that case
+    a Snowflake username such as ANDREAS.LARSSON is still enough for a useful UI
+    display name: Andreas Larsson.
+    """
+    raw = str(user_name or "").strip()
+    if not raw or raw.upper() == "UNKNOWN":
+        return "", "", ""
+
+    cleaned = raw.split("@")[0]
+    parts = [p for p in re.split(r"[._\-\s]+", cleaned) if p]
+    pretty = [p[:1].upper() + p[1:].lower() for p in parts]
+
+    if not pretty:
+        return "", "", raw
+
+    first_name = pretty[0]
+    last_name = " ".join(pretty[1:]) if len(pretty) > 1 else ""
+    display_name = " ".join(pretty)
+    return first_name, last_name, display_name
+
+
 def session_context():
     """Current browser user context for UI and audit logging.
 
     Uses a warehouse-free query so missing warehouse grants cannot mask the caller user.
+    Profile lookup is best-effort; if SHOW USERS is unavailable, we derive a
+    friendly name from CURRENT_USER().
     """
     ctx = _basic_session_context()
     user_name = str(ctx.get("USER_NAME") or ctx.get("user_name") or "").strip()
     role_name = str(ctx.get("ROLE_NAME") or ctx.get("role_name") or "").strip()
-    first_name, last_name, snowflake_display_name = _lookup_user_profile(user_name)
+
+    profile_first, profile_last, snowflake_display_name = _lookup_user_profile(user_name)
+    derived_first, derived_last, derived_display = _derive_name_from_user(user_name)
+
+    first_name = profile_first or derived_first
+    last_name = profile_last or derived_last
 
     configured_name = os.getenv("KUMO_DISPLAY_NAME", "").strip()
     display_name = configured_name or snowflake_display_name
-    if not display_name and (first_name or last_name):
-        display_name = f"{first_name} {last_name}".strip()
+    if not display_name and (profile_first or profile_last):
+        display_name = f"{profile_first} {profile_last}".strip()
     if not display_name:
-        display_name = os.getenv("KUMO_USER_NAME", "").strip() or user_name or "KUMO user"
+        display_name = derived_display or os.getenv("KUMO_USER_NAME", "").strip() or user_name or "KUMO user"
 
     # If no active warehouse is selected in the basic session, show the configured one.
     warehouse_name = str(ctx.get("WAREHOUSE_NAME") or "").strip() or config.SNOWFLAKE_WAREHOUSE or "Not selected"
