@@ -13,6 +13,10 @@ function percent(value, total) {
   return Math.round((value / total) * 100)
 }
 
+function firstWord(value) {
+  return String(value || '').trim().split(/\s+/)[0] || 'there'
+}
+
 function MetricCard({ label, value, delta, tone, icon, footer }) {
   return (
     <div className="vision-card metric-card">
@@ -42,30 +46,37 @@ function HealthCheck({ label, detail, ok, tone }) {
   )
 }
 
-function CurrentUserCard({ session, role, warehouse }) {
-  const displayName = session?.displayName || session?.userName || 'KUMO user'
-  const callerRightsActive = Boolean(session?.callerRightsActive)
-  const userName = session?.userName || 'UNKNOWN'
-  const activeRole = session?.roleName || role || 'Unknown role'
-  const mode = session?.mode || 'unknown'
-  const callerActive = Boolean(session?.callerRightsActive)
-  const tokenPresent = Boolean(session?.callerTokenPresent)
+function ActiveUsersCard({ users = [], currentUserName }) {
+  const normalized = Array.isArray(users) ? users : []
 
   return (
-    <div className="vision-card identity-card">
-      <div className="identity-avatar">{displayName.slice(0, 1).toUpperCase()}</div>
-      <div className="identity-content">
-        <span className="eyebrow">Current logged-in user</span>
-        <h3>{displayName}</h3>
-        <dl>
-          <div><dt>Username</dt><dd>{userName}</dd></div>
-          <div><dt>Role</dt><dd>{activeRole}</dd></div>
-          <div><dt>Warehouse</dt><dd>{warehouse}</dd></div>
-          <div><dt>Session mode</dt><dd>{mode}</dd></div>
-        </dl>
-        <span className={`identity-mode ${callerActive ? 'success' : tokenPresent ? 'queued' : 'failed'}`}>
-          {callerActive ? 'Caller rights active' : tokenPresent ? 'Caller token received' : 'Service user mode'}
-        </span>
+    <div className="vision-card identity-card active-users-card">
+      <div className="card-title-row identity-title-row">
+        <div>
+          <h3>Current logged-in users</h3>
+          <span>Application session registry</span>
+        </div>
+        <strong className="active-user-count">{normalized.length}</strong>
+      </div>
+
+      <div className="active-user-list">
+        {normalized.length === 0 ? (
+          <div className="soft-empty">No active users have been registered yet.</div>
+        ) : normalized.map(user => {
+          const displayName = user.displayName || user.userName || 'Unknown user'
+          const isCurrent = String(user.userName || '').toUpperCase() === String(currentUserName || '').toUpperCase()
+          return (
+            <div className={`active-user-row ${isCurrent ? 'current' : ''}`} key={user.userName || displayName}>
+              <div className="active-user-avatar">{displayName.slice(0, 1).toUpperCase()}</div>
+              <div className="active-user-main">
+                <strong>{displayName}</strong>
+                <span>{user.roleName || 'Unknown role'}</span>
+                <small>Last seen {formatDateTime(user.lastSeenAt)}</small>
+              </div>
+              {isCurrent && <em>You</em>}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -122,6 +133,7 @@ export default function Dashboard() {
   const [health, setHealth] = useState(null)
   const [ping, setPing] = useState(null)
   const [session, setSession] = useState(null)
+  const [activeUsers, setActiveUsers] = useState([])
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -143,6 +155,13 @@ export default function Dashboard() {
     setHealth(healthData)
     setPing(pingData)
     setSession(sessionData)
+
+    try {
+      const activePayload = await api.activeUsers()
+      setActiveUsers(activePayload?.users || [])
+    } catch (err) {
+      setActiveUsers(sessionData?.activeUsers || [])
+    }
 
     const failed = [monitorResult, healthResult].filter(r => r.status === 'rejected')
     if (failed.length) setError(failed.map(r => r.reason?.message || String(r.reason)).join(' | '))
@@ -172,6 +191,7 @@ export default function Dashboard() {
   const warehouse = ping?.snowflake?.WAREHOUSE_NAME || ping?.snowflake?.warehouse_name || 'Not selected'
   const role = session?.roleName || ping?.snowflake?.ROLE_NAME || ping?.snowflake?.role_name || 'Unknown role'
   const displayName = session?.displayName || session?.userName || 'KUMO user'
+  const welcomeName = session?.firstName || firstWord(displayName)
   const callerRightsActive = Boolean(session?.callerRightsActive)
   const engineKind = statusKind(engine.status)
   const engineOk = ['success', 'running'].includes(engineKind)
@@ -238,11 +258,18 @@ export default function Dashboard() {
         <div className="vision-card welcome-card">
           <div className="welcome-content">
             <span className="eyebrow">KUMO Monitor</span>
-            <h2>Welcome back, {displayName}</h2>
+            <h2>Welcome back, {welcomeName}</h2>
             <p>
               Your workflow estate is being monitored in Snowpark Container Services.
-              You are currently using the Snowflake role shown below.
+              Your current Snowflake identity and role are shown below.
             </p>
+            <div className="welcome-user-panel">
+              <div className="welcome-avatar">{displayName.slice(0, 1).toUpperCase()}</div>
+              <div>
+                <strong>{displayName}</strong>
+                <span>{session?.userName || 'UNKNOWN'} · {role}</span>
+              </div>
+            </div>
             <div className="welcome-actions">
               <span className={`glass-pill ${engineOk ? 'success' : 'failed'}`}>Engine {engine.status || 'UNKNOWN'}</span>
               <span className="glass-pill">{summary.total || 0} workflows</span>
@@ -257,7 +284,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <CurrentUserCard session={session} role={role} warehouse={warehouse} />
+        <ActiveUsersCard users={activeUsers} currentUserName={session?.userName} />
 
         <div className="vision-card satisfaction-card">
           <div className="card-title-row">
