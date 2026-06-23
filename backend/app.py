@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from threading import Lock
 from flask import Flask, jsonify, request, send_from_directory, g
 from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -641,8 +642,13 @@ def workflow_dag(workflow_id):
 def history():
     limit = request.args.get("limit", "200")
     if config.USE_MOCK or not sf.is_configured():
-        return jsonify({"source": "mock", "rows": MOCK_HISTORY})
-    return jsonify({"source": "snowflake", "rows": repo.load_history(limit)})
+        return jsonify({"ok": True, "source": "mock", "rows": MOCK_HISTORY})
+    try:
+        rows = repo.load_history(limit)
+        return jsonify({"ok": True, "source": "snowflake", "rows": rows})
+    except Exception as exc:
+        app.logger.exception("Failed to load history")
+        return jsonify({"ok": False, "source": "error", "error": str(exc), "rows": []}), 500
 
 
 @app.route("/api/notifications")
@@ -650,9 +656,9 @@ def notifications():
     if config.USE_MOCK or not sf.is_configured():
         return jsonify({"source": "mock", "rows": []})
     try:
-        rows = sf.query(f"SELECT * FROM {config.T_NOTIFICATIONS} ORDER BY WORKFLOW_ID")
+        rows = sf.query_service(f"SELECT * FROM {config.T_NOTIFICATIONS} ORDER BY WORKFLOW_ID", use_warehouse=True, include_context=True)
         from utils import normalize_rows
-        return jsonify({"source": "snowflake", "rows": normalize_rows(rows)})
+        return jsonify({"ok": True, "source": "snowflake", "rows": normalize_rows(rows)})
     except Exception as exc:
         return jsonify({"source": "error", "error": str(exc), "rows": []}), 200
 
@@ -660,6 +666,19 @@ def notifications():
 @app.route("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    if isinstance(error, HTTPException):
+        if request.path.startswith("/api/"):
+            return jsonify({"ok": False, "error": error.description, "type": error.__class__.__name__}), error.code
+        return error
+
+    app.logger.exception("Unhandled application error")
+    if request.path.startswith("/api/"):
+        return jsonify({"ok": False, "error": str(error), "type": error.__class__.__name__}), 500
+    return jsonify({"ok": False, "error": str(error), "type": error.__class__.__name__}), 500
 
 
 @app.errorhandler(404)

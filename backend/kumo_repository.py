@@ -9,6 +9,22 @@ from utils import normalize_rows, row_get, sql_escape, parse_variant_array, next
 _describe_cache = {}
 
 
+def _query(sql, params=None):
+    """Run KUMO metadata/admin queries through the SPCS service context.
+
+    Caller-rights is used to identify the browser user, but the KUMO admin
+    tables and workflow queue/history are application-owned objects. Using the
+    service context avoids every caller needing direct object privileges on
+    KUMO_ADMIN.WORKFLOW_MANAGER.
+    """
+    return sf.query_service(sql, params=params or {}, use_warehouse=True, include_context=True)
+
+
+def _execute(sql, params=None):
+    """Execute KUMO metadata/admin DML through the SPCS service context."""
+    return sf.execute_service(sql, params=params or {}, use_warehouse=True, include_context=True)
+
+
 def clear_cache():
     _describe_cache.clear()
 
@@ -16,7 +32,7 @@ def clear_cache():
 def describe_table(fqn):
     if fqn in _describe_cache:
         return _describe_cache[fqn]
-    rows = sf.query(f"DESC TABLE {fqn}")
+    rows = _query(f"DESC TABLE {fqn}")
     out = {}
     for row in rows:
         name = row_get(row, "name", "NAME")
@@ -29,7 +45,7 @@ def describe_table(fqn):
 
 def object_exists(full_name):
     try:
-        sf.query(f"SELECT 1 FROM {full_name} LIMIT 1")
+        _query(f"SELECT 1 FROM {full_name} LIMIT 1")
         return True
     except Exception:
         return False
@@ -39,7 +55,7 @@ def load_history(limit=200):
     limit = max(1, min(int(limit or 200), 2000))
     h_types = describe_table(config.T_HISTORY)
     order_expr = "COALESCE(REQUESTED_AT, START_TIME, END_TIME)" if "REQUESTED_AT" in h_types else "COALESCE(START_TIME, END_TIME)"
-    rows = sf.query(f"SELECT * FROM {config.T_HISTORY} ORDER BY {order_expr} DESC NULLS LAST LIMIT {limit}")
+    rows = _query(f"SELECT * FROM {config.T_HISTORY} ORDER BY {order_expr} DESC NULLS LAST LIMIT {limit}")
     return normalize_rows(rows)
 
 
@@ -47,7 +63,7 @@ def load_workflow_history(workflow_id, limit=100):
     limit = max(1, min(int(limit or 100), 1000))
     h_types = describe_table(config.T_HISTORY)
     order_expr = "COALESCE(REQUESTED_AT, START_TIME, END_TIME)" if "REQUESTED_AT" in h_types else "COALESCE(START_TIME, END_TIME)"
-    rows = sf.query(
+    rows = _query(
         f"""
         SELECT *
         FROM {config.T_HISTORY}
@@ -62,7 +78,7 @@ def load_workflow_history(workflow_id, limit=100):
 
 def load_tasks():
     try:
-        return normalize_rows(sf.query(f"SELECT * FROM {config.T_TASKS}"))
+        return normalize_rows(_query(f"SELECT * FROM {config.T_TASKS}"))
     except Exception:
         return []
 
@@ -75,7 +91,7 @@ def get_engine_state():
     for pattern in (f"{task_name}%", f"%{task_name}%"):
         for scope in (f"SCHEMA {config.DB}.{config.SCHEMA}", f"DATABASE {config.DB}", "ACCOUNT"):
             try:
-                rows = sf.query(f"SHOW TASKS LIKE '{pattern}' IN {scope}")
+                rows = _query(f"SHOW TASKS LIKE '{pattern}' IN {scope}")
                 if rows:
                     for row in rows:
                         d = rdict(row)
@@ -187,7 +203,7 @@ def load_monitor_rows():
     LEFT JOIN LAST_RUN lr ON lr.WORKFLOW_ID = w.WORKFLOW_ID
     ORDER BY w.WORKFLOW_GROUP, w.WORKFLOW_NAME
     """
-    rows = normalize_rows(sf.query(q))
+    rows = normalize_rows(_query(q))
     return _order_and_enrich(rows)
 
 
@@ -279,7 +295,7 @@ def load_progress_for_runs(run_ids):
     """
     out = {}
     try:
-        rows = normalize_rows(sf.query(q))
+        rows = normalize_rows(_query(q))
         for row in rows:
             total = int(row.get("TOTAL") or 0)
             done = int(row.get("DONE") or 0)
@@ -329,7 +345,7 @@ def latest_run_id_for_workflow(workflow_id):
     h_types = describe_table(config.T_HISTORY)
     order_expr = "COALESCE(REQUESTED_AT, START_TIME, END_TIME)" if "REQUESTED_AT" in h_types else "COALESCE(START_TIME, END_TIME)"
     try:
-        rows = normalize_rows(sf.query(
+        rows = normalize_rows(_query(
             f"""
             SELECT RUN_ID
             FROM {config.T_HISTORY}
@@ -376,7 +392,7 @@ def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requeste
         h_cols.append("UPDATED_AT")
         h_vals.append("SYSDATE()")
 
-    sf.execute(f"INSERT INTO {config.T_HISTORY} ({', '.join(h_cols)}) VALUES ({', '.join(h_vals)})", params)
+    _execute(f"INSERT INTO {config.T_HISTORY} ({', '.join(h_cols)}) VALUES ({', '.join(h_vals)})", params)
 
     if "WORKFLOW_ID" not in q_types or "RUN_ID" not in q_types:
         raise RuntimeError(f"{config.T_QUEUE} must have WORKFLOW_ID and RUN_ID columns")
@@ -396,7 +412,7 @@ def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requeste
         q_cols.append("REQUESTED_BY")
         q_vals.append("%(requested_by)s" if requested_by else "CURRENT_USER()")
 
-    sf.execute(f"INSERT INTO {config.T_QUEUE} ({', '.join(q_cols)}) VALUES ({', '.join(q_vals)})", params)
+    _execute(f"INSERT INTO {config.T_QUEUE} ({', '.join(q_cols)}) VALUES ({', '.join(q_vals)})", params)
     return run_id
 
 
@@ -414,7 +430,7 @@ def _request_run_via_procedure(workflow_id, trigger_source="MANUAL", requested_b
         "trigger_source": trigger_source,
         "requested_by": requested_by,
     }
-    rows = sf.execute(
+    rows = _execute(
         f"CALL {config.DB}.{config.SCHEMA}.SP_WORKFLOW_REQUEST_RUN(%(workflow_id)s, %(trigger_source)s, %(requested_by)s, 0, NULL)",
         params,
     )
@@ -459,7 +475,7 @@ def create_or_replace_sf_task(workflow_id, warehouse=None):
     if not sched_col:
         raise RuntimeError(f"{config.T_TASKS} must have SCHEDULE_CRON or SCHEDULE")
 
-    row = sf.query(
+    row = _query(
         f"""
         SELECT
           t.{sched_col} AS CRON,
@@ -486,12 +502,12 @@ def create_or_replace_sf_task(workflow_id, warehouse=None):
     scheduler_fqn = f"{task_fqn}_SCHEDULER"
 
     try:
-        sf.execute(f"DROP TASK IF EXISTS {task_fqn}")
+        _execute(f"DROP TASK IF EXISTS {task_fqn}")
     except Exception:
         pass
 
     if not schedule_enabled:
-        sf.execute(f"DROP TASK IF EXISTS {scheduler_fqn}")
+        _execute(f"DROP TASK IF EXISTS {scheduler_fqn}")
         return
 
     ddl = f"""
@@ -502,8 +518,8 @@ def create_or_replace_sf_task(workflow_id, warehouse=None):
     AS
       CALL {config.DB}.{config.SCHEMA}.SP_WORKFLOW_REQUEST_RUN('{sql_escape(workflow_id)}', 'SCHEDULED', NULL, 0, NULL)
     """
-    sf.execute(ddl)
-    sf.execute(f"ALTER TASK {scheduler_fqn} {'RESUME' if workflow_enabled else 'SUSPEND'}")
+    _execute(ddl)
+    _execute(f"ALTER TASK {scheduler_fqn} {'RESUME' if workflow_enabled else 'SUSPEND'}")
 
 
 def _ensure_json_array_str(value):
@@ -533,7 +549,7 @@ def upsert_task(workflow_id, schedule_cron, schedule_timezone, schedule_enabled,
 
     on_success_json = _ensure_json_array_str(on_success_json)
     on_fail_json = _ensure_json_array_str(on_fail_json)
-    exists = sf.query(f"SELECT COUNT(*) AS CNT FROM {config.T_TASKS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})[0]["CNT"] > 0
+    exists = _query(f"SELECT COUNT(*) AS CNT FROM {config.T_TASKS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})[0]["CNT"] > 0
 
     if exists:
         sets = [f"{sched_col} = %(schedule_cron)s"]
@@ -546,7 +562,7 @@ def upsert_task(workflow_id, schedule_cron, schedule_timezone, schedule_enabled,
             sets.append("ON_SUCCESS = PARSE_JSON(%(on_success)s)")
         if "ON_FAIL" in t_types:
             sets.append("ON_FAIL = PARSE_JSON(%(on_fail)s)")
-        sf.execute(f"UPDATE {config.T_TASKS} SET {', '.join(sets)} WHERE WORKFLOW_ID = %(workflow_id)s", params)
+        _execute(f"UPDATE {config.T_TASKS} SET {', '.join(sets)} WHERE WORKFLOW_ID = %(workflow_id)s", params)
     else:
         cols = ["WORKFLOW_ID", sched_col]
         vals = ["%(workflow_id)s", "%(schedule_cron)s"]
@@ -559,7 +575,7 @@ def upsert_task(workflow_id, schedule_cron, schedule_timezone, schedule_enabled,
             cols.append("ON_SUCCESS"); vals.append("PARSE_JSON(%(on_success)s)")
         if "ON_FAIL" in t_types:
             cols.append("ON_FAIL"); vals.append("PARSE_JSON(%(on_fail)s)")
-        sf.execute(f"INSERT INTO {config.T_TASKS} ({', '.join(cols)}) VALUES ({', '.join(vals)})", params)
+        _execute(f"INSERT INTO {config.T_TASKS} ({', '.join(cols)}) VALUES ({', '.join(vals)})", params)
 
     create_or_replace_sf_task(workflow_id)
 
@@ -630,7 +646,7 @@ def insert_workflow(payload):
     if "DBT_PROJECT_FQN" in wf_types:
         cols.append("DBT_PROJECT_FQN"); vals.append("%(dbt_project_fqn)s")
 
-    sf.execute(f"INSERT INTO {config.T_WORKFLOWS} ({', '.join(cols)}) VALUES ({', '.join(vals)})", params)
+    _execute(f"INSERT INTO {config.T_WORKFLOWS} ({', '.join(cols)}) VALUES ({', '.join(vals)})", params)
     upsert_task(workflow_id, data["scheduleCron"], data["scheduleTimezone"], data["taskEnabled"], data["onSuccess"], data["onFail"])
     save_notifications(workflow_id, data["notifications"])
     return workflow_id
@@ -685,7 +701,7 @@ def update_workflow_detail(workflow_id, payload):
     if "UPDATED_BY" in wf_types:
         sets.append("UPDATED_BY = CURRENT_USER()")
 
-    sf.execute(f"UPDATE {config.T_WORKFLOWS} SET {', '.join(sets)} WHERE WORKFLOW_ID = %(workflow_id)s", params)
+    _execute(f"UPDATE {config.T_WORKFLOWS} SET {', '.join(sets)} WHERE WORKFLOW_ID = %(workflow_id)s", params)
     upsert_task(workflow_id, data["scheduleCron"], data["scheduleTimezone"], data["taskEnabled"], data["onSuccess"], data["onFail"])
     save_notifications(workflow_id, data["notifications"])
     return get_workflow_detail(workflow_id)
@@ -704,7 +720,7 @@ def save_notifications(workflow_id, notifications):
         "email_integration": str(n.get("emailIntegration") or "MY_EMAIL_INT"),
         "environment": str(n.get("environment") or "PROD"),
     }
-    sf.execute(
+    _execute(
         f"""
         MERGE INTO {config.T_NOTIFICATIONS} t
         USING (
@@ -742,13 +758,13 @@ def _admin_query(sql, params=None):
     """
     if hasattr(sf, "query_service"):
         return sf.query_service(sql, params or {}, use_warehouse=True, include_context=True)
-    return sf.query(sql, params or {})
+    return _query(sql, params or {})
 
 
 def _admin_execute(sql, params=None):
     if hasattr(sf, "execute_service"):
         return sf.execute_service(sql, params or {}, use_warehouse=True, include_context=True)
-    return sf.execute(sql, params or {})
+    return _execute(sql, params or {})
 
 
 def get_workflow_detail(workflow_id):
@@ -807,12 +823,12 @@ def get_workflow_detail(workflow_id):
 
 
 def toggle_workflow(workflow_id, enabled):
-    sf.execute(
+    _execute(
         f"UPDATE {config.T_WORKFLOWS} SET IS_ENABLED = {'TRUE' if enabled else 'FALSE'} WHERE WORKFLOW_ID = %(workflow_id)s",
         {"workflow_id": workflow_id},
     )
     if not enabled:
-        sf.execute(
+        _execute(
             f"UPDATE {config.T_TASKS} SET IS_ENABLED = FALSE WHERE WORKFLOW_ID = %(workflow_id)s",
             {"workflow_id": workflow_id},
         )
@@ -822,10 +838,10 @@ def toggle_workflow(workflow_id, enabled):
 
 def toggle_schedule(workflow_id, enabled):
     if enabled:
-        wf = normalize_rows(sf.query(f"SELECT IS_ENABLED FROM {config.T_WORKFLOWS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id}))
+        wf = normalize_rows(_query(f"SELECT IS_ENABLED FROM {config.T_WORKFLOWS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id}))
         if wf and not bool(wf[0].get("IS_ENABLED")):
             raise ValueError("Cannot enable schedule when workflow is disabled")
-    row = normalize_rows(sf.query(f"SELECT * FROM {config.T_TASKS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id}))
+    row = normalize_rows(_query(f"SELECT * FROM {config.T_TASKS} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id}))
     task = row[0] if row else {}
     upsert_task(
         workflow_id,
@@ -841,10 +857,10 @@ def toggle_schedule(workflow_id, enabled):
 def delete_workflow(workflow_id):
     for table in [config.T_QUEUE, config.T_HISTORY, config.T_TASKS, config.T_WORKFLOWS]:
         if object_exists(table):
-            sf.execute(f"DELETE FROM {table} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
+            _execute(f"DELETE FROM {table} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
     for task_fqn in [task_name_for_workflow(workflow_id), f"{task_name_for_workflow(workflow_id)}_SCHEDULER"]:
         try:
-            sf.execute(f"DROP TASK IF EXISTS {task_fqn}")
+            _execute(f"DROP TASK IF EXISTS {task_fqn}")
         except Exception:
             pass
     return {"workflowId": workflow_id, "deleted": True}
@@ -860,7 +876,7 @@ def clone_workflow(workflow_id):
 
 
 def load_dag_run(workflow_id):
-    h = normalize_rows(sf.query(
+    h = normalize_rows(_query(
         f"""
         SELECT RUN_ID, STATUS
         FROM {config.T_HISTORY}
@@ -879,7 +895,7 @@ def load_dag_run(workflow_id):
     errors = []
     if config.PROGRESS_TABLE:
         try:
-            progress_rows = normalize_rows(sf.query(
+            progress_rows = normalize_rows(_query(
                 f"""
                 SELECT MODEL_NAME, MODEL_NAME_PARENT, STATUS, SRT
                 FROM {config.PROGRESS_TABLE}
@@ -892,7 +908,7 @@ def load_dag_run(workflow_id):
             progress_rows = []
     if config.RUN_LOG_TABLE:
         try:
-            errors = normalize_rows(sf.query(
+            errors = normalize_rows(_query(
                 f"""
                 SELECT LOG_DTTM, ORIGIN, MESSAGE
                 FROM {config.RUN_LOG_TABLE}
