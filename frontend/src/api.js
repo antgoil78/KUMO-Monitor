@@ -21,6 +21,7 @@ async function requestJson(url, options = {}) {
 export const api = {
   health: () => requestJson('/api/health'),
   session: () => requestJson('/api/session'),
+  activeUsers: () => requestJson('/api/users/active'),
   snowflakePing: () => requestJson('/api/snowflake/ping'),
   monitor: () => requestJson('/api/monitor'),
   refreshMonitor: () => requestJson('/api/monitor/refresh', { method: 'POST' }),
