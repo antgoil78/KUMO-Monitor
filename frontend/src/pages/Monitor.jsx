@@ -616,17 +616,28 @@ export default function Monitor() {
       if (action === 'run') {
         setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: 'pending', status: 'INITIATING' } }))
         const result = await api.runWorkflow(workflow.workflowId, workflow.workflowName)
-        if (result.lock) {
-          setGlobalLocks(prev => {
-            const next = new Map((prev || []).map(lock => [lock.workflowId, lock]))
-            next.set(result.lock.workflowId, result.lock)
-            return Array.from(next.values())
-          })
+        const immediateLock = result.lock || {
+          lockId: `local-${workflow.workflowId}-${Date.now()}`,
+          workflowId: workflow.workflowId,
+          workflowName: workflow.workflowName,
+          runId: result.runId || 'pending',
+          status: result.status || 'QUEUED',
+          requestedBy: result.actor?.displayName || result.actor?.userName || 'current user',
+          requestedAt: new Date().toISOString(),
+          message: 'Queued. Waiting for dispatcher pickup.'
         }
+        setGlobalLocks(prev => {
+          const next = new Map((prev || []).map(lock => [lock.workflowId, lock]))
+          next.set(immediateLock.workflowId, immediateLock)
+          return Array.from(next.values())
+        })
         setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: result.runId || 'pending', status: result.status || 'QUEUED' } }))
         notify(`Queued ${workflow.workflowName}. Run ID: ${result.runId || 'pending'}. Waiting for dispatcher pickup...`)
         Promise.resolve(loadLocks()).catch(() => {})
-        Promise.resolve(load(true)).catch(err => notify(`Refresh failed after run request: ${err.message}`))
+        window.setTimeout(() => {
+          Promise.resolve(loadLocks()).catch(() => {})
+          Promise.resolve(load(false)).catch(err => notify(`Refresh failed after run request: ${err.message}`))
+        }, 2500)
       }
       if (action === 'toggle-workflow') {
         await api.setWorkflowEnabled(workflow.workflowId, !workflow.workflowEnabled)
