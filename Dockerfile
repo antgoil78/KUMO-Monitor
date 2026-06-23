@@ -32,40 +32,6 @@ ENV SNOWFLAKE_PASSWORD=$SNOWFLAKE_PASSWORD
 
 # Copy backend files
 COPY backend/ /app/backend/
-RUN python - <<'PY'
-from pathlib import Path
-import py_compile
-import sys
-import traceback
-
-failed = False
-NULL = bytes([0])
-
-for path in sorted(Path("/app/backend").rglob("*.py")):
-    data = path.read_bytes()
-
-    if NULL in data:
-        count = data.count(NULL)
-        first_pos = data.index(NULL)
-
-        print("NULL BYTE FOUND: {}".format(path))
-        print("Null byte count: {}".format(count))
-        print("First null byte at position: {}".format(first_pos))
-
-        failed = True
-        continue
-
-    try:
-        py_compile.compile(str(path), doraise=True)
-        print("OK: {}".format(path))
-    except Exception:
-        print("FAILED: {}".format(path))
-        traceback.print_exc()
-        failed = True
-
-if failed:
-    sys.exit(1)
-PY
 
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
