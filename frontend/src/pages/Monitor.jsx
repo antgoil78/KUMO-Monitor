@@ -71,11 +71,22 @@ function upsertLock(locks, lock) {
   const nextStatus = normalizeStatus(lock.status, '')
   const previousRun = String(previous.runId || '')
   const nextRun = String(lock.runId || previousRun || '')
-  const status = previousStatus && nextStatus && previousRun === nextRun && (statusRank[previousStatus] || 0) > (statusRank[nextStatus] || 0)
-    ? previousStatus
-    : lock.status
-  next.set(lock.workflowId, { ...previous, ...lock, status })
+  const isDowngrade = previousStatus && nextStatus && previousRun === nextRun && (statusRank[previousStatus] || 0) > (statusRank[nextStatus] || 0)
+  const merged = isDowngrade
+    ? { ...lock, ...previous, status: previousStatus }
+    : { ...previous, ...lock, status: lock.status }
+  next.set(lock.workflowId, merged)
   return Array.from(next.values())
+}
+
+function mergeLockSnapshot(previousLocks, incomingLocks) {
+  const incoming = incomingLocks || []
+  if (!incoming.length) return []
+  const previousByWorkflow = new Map((previousLocks || []).map(item => [item.workflowId, item]))
+  return incoming.reduce((out, lock) => {
+    const previous = previousByWorkflow.get(lock.workflowId)
+    return upsertLock(out, previous ? upsertLock([previous], lock)[0] : lock)
+  }, [])
 }
 
 function reconcileLocksFromWorkflows(locks, workflows) {
@@ -89,7 +100,7 @@ function reconcileLocksFromWorkflows(locks, workflows) {
     }
 
     if (workflow.runLock) {
-      out.push({ ...lock, ...workflow.runLock })
+      out.push(upsertLock([lock], workflow.runLock)[0])
       return out
     }
 
@@ -613,7 +624,7 @@ export default function Monitor() {
   async function loadLocks() {
     try {
       const data = await api.workflowRunLocks()
-      setGlobalLocks(data.locks || [])
+      setGlobalLocks(prev => mergeLockSnapshot(prev, data.locks || []))
     } catch (err) {
       // Do not block the monitor page if the lock poll has a transient failure.
       // The normal monitor payload still contains persisted workflow status.
@@ -732,12 +743,18 @@ export default function Monitor() {
     }
 
     const pending = pendingRuns[w.workflowId]
-    if (!pending || view.runLocked) return view
+    if (!pending) return view
     const pendingStatus = normalizeStatus(pending.status, 'INITIATING')
     const pendingTerminal = terminalRunStatuses.has(pendingStatus)
+    const viewStatus = normalizeStatus(view.lastStatus, '-')
+    const pendingRunId = String(pending.runId || '')
+    const viewRunId = String(view.lastRunId || view.runLock?.runId || '')
+    const pendingSameRun = pendingRunId && pendingRunId !== 'pending' && viewRunId === pendingRunId
+    const pendingIsAhead = pendingSameRun && (statusRank[pendingStatus] || 0) > (statusRank[viewStatus] || 0)
+    if (view.runLocked && !pendingIsAhead) return view
     const actualBusy = isWorkflowBusy(view.lastStatus)
     const expired = Date.now() - Number(pending.startedAt || Date.now()) > 120000
-    if (!pendingTerminal && (actualBusy || expired)) return view
+    if (!pendingTerminal && ((actualBusy && !pendingIsAhead) || expired)) return view
     return {
       ...view,
       lastStatus: pendingStatus,

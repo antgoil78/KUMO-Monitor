@@ -5,7 +5,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from threading import Lock, Thread
-from flask import Flask, Response, jsonify, request, send_from_directory, g, stream_with_context
+from flask import Flask, Response, jsonify, request, send_from_directory, g, stream_with_context, has_request_context
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 from dotenv import load_dotenv
@@ -29,6 +29,8 @@ _active_users_lock = Lock()
 _active_users = {}
 _live_run_locks_lock = Lock()
 _live_run_locks = {}
+_shared_run_locks_lock = Lock()
+_shared_run_locks = {}
 _run_watchers_lock = Lock()
 _run_watchers = set()
 _TERMINAL_RUN_STATUSES = {
@@ -85,11 +87,28 @@ def _upsert_live_run_lock(lock):
         return dict(_live_run_locks[str(item["workflowId"])])
 
 
+def _persist_live_run_lock_async(lock, actor=None):
+    if config.USE_MOCK or not sf.is_configured() or not lock:
+        return
+    client_ip = _client_ip() if has_request_context() else ""
+    user_agent = _user_agent() if has_request_context() else ""
+
+    def worker():
+        try:
+            repo.upsert_workflow_run_lock(lock, actor=actor, client_ip=client_ip, user_agent=user_agent)
+        except Exception as exc:
+            app.logger.warning("Could not persist shared run lock: %s", exc)
+
+    Thread(target=worker, name="kumo-lock-persist", daemon=True).start()
+
+
 def _release_live_run_lock(workflow_id):
     if not workflow_id:
         return
     with _live_run_locks_lock:
         _live_run_locks.pop(str(workflow_id), None)
+    with _shared_run_locks_lock:
+        _shared_run_locks.pop(str(workflow_id), None)
 
 
 def _reconcile_live_run_locks(payload):
@@ -117,10 +136,45 @@ def _live_run_lock_list():
         for workflow_id, lock in list(_live_run_locks.items()):
             if now - float(lock.get("_updatedMonotonic") or now) > ttl_seconds:
                 _live_run_locks.pop(workflow_id, None)
-        return [
+        memory_locks = [
             {k: v for k, v in lock.items() if not str(k).startswith("_")}
             for lock in _live_run_locks.values()
         ]
+    with _shared_run_locks_lock:
+        shared_locks = list(_shared_run_locks.values())
+    merged = {str(lock.get("workflowId")): lock for lock in shared_locks if lock.get("workflowId")}
+    for lock in memory_locks:
+        if lock.get("workflowId"):
+            merged[str(lock.get("workflowId"))] = {**merged.get(str(lock.get("workflowId")), {}), **lock}
+    return list(merged.values())
+
+
+def _refresh_shared_run_locks_once():
+    if config.USE_MOCK or not sf.is_configured():
+        return
+    try:
+        locks = repo.load_active_run_locks()
+    except Exception as exc:
+        app.logger.warning("Could not refresh shared run locks: %s", exc)
+        return
+    with _shared_run_locks_lock:
+        _shared_run_locks.clear()
+        for lock in locks:
+            if lock.get("workflowId"):
+                _shared_run_locks[str(lock.get("workflowId"))] = lock
+
+
+def _start_shared_lock_sync():
+    def worker():
+        interval = max(2, int(getattr(config, "KUMO_SHARED_LOCK_SYNC_SECONDS", 5) or 5))
+        while True:
+            _refresh_shared_run_locks_once()
+            time.sleep(interval)
+
+    Thread(target=worker, name="kumo-shared-lock-sync", daemon=True).start()
+
+
+_start_shared_lock_sync()
 
 
 def _watch_run_status(workflow_id, workflow_name, run_id, actor, requested_by):
@@ -157,6 +211,7 @@ def _watch_run_status(workflow_id, workflow_name, run_id, actor, requested_by):
                         "lastEndTime": status_row.get("lastEndTime"),
                         "message": f"Run is {status}.",
                     })
+                    _persist_live_run_lock_async(current_lock, actor=actor)
                     realtime_broker.publish("workflow_run_status", {
                         "workflowId": workflow_id,
                         "workflowName": workflow_name,
@@ -169,6 +224,10 @@ def _watch_run_status(workflow_id, workflow_name, run_id, actor, requested_by):
                     })
                 if status in _TERMINAL_RUN_STATUSES:
                     _release_live_run_lock(workflow_id)
+                    try:
+                        repo.release_workflow_run_lock_for_run(workflow_id, run_id=run_id, status=status, reason="HISTORY_TERMINAL")
+                    except Exception as exc:
+                        app.logger.warning("Could not release shared run lock: %s", exc)
                     realtime_broker.publish("workflow_run_status", {
                         "workflowId": workflow_id,
                         "workflowName": workflow_name,
@@ -593,7 +652,7 @@ def workflow_run_locks():
         return jsonify({"ok": True, "locks": []})
     try:
         _reconcile_live_run_locks(monitor_cache.get())
-        return jsonify({"ok": True, "locks": _live_run_lock_list(), "source": "live-memory"})
+        return jsonify({"ok": True, "locks": _live_run_lock_list(), "source": "live-memory+shared"})
     except Exception as exc:
         return _json_error(exc, 500)
 
@@ -635,13 +694,60 @@ def _actor_context():
 def run_workflow(workflow_id):
     started_at = time.perf_counter()
     payload = request.get_json(silent=True) or {}
+    lock = None
+    workflow_name = payload.get("workflowName") or workflow_id
+    requested_by = payload.get("requestedBy") or "Current user"
+    provisional_actor = {
+        "displayName": requested_by,
+        "userName": "",
+        "roleName": "",
+        "callerRightsActive": sf.connection_mode() == "spcs-caller-oauth",
+        "callerTokenPresent": sf.caller_token_present(),
+    }
+    provisional_lock = {
+        "lockId": f"live-{uuid.uuid4()}",
+        "workflowId": workflow_id,
+        "workflowName": workflow_name,
+        "runId": None,
+        "status": "INITIATING",
+        "requestedBy": requested_by,
+        "requestedByUser": "",
+        "requestedByRole": "",
+        "requestedAt": _now_iso(),
+        "message": "Run request accepted. Waiting for queue insert.",
+    }
+    _upsert_live_run_lock(provisional_lock)
+    _persist_live_run_lock_async(provisional_lock, actor=provisional_actor)
+    realtime_broker.publish("workflow_run_requested", {
+        "workflowId": workflow_id,
+        "workflowName": workflow_name,
+        "runId": None,
+        "status": "INITIATING",
+        "lock": provisional_lock,
+        "actor": provisional_actor,
+        "requestedBy": requested_by,
+    })
+    app.logger.info(
+        "KUMO_RUN_TIMING workflow_id=%s step=initiating_published elapsed_ms=%d",
+        workflow_id,
+        int((time.perf_counter() - started_at) * 1000),
+    )
+
     actor = _actor_context()
     requested_by = (
         payload.get("requestedBy")
         or actor.get("displayName")
         or actor.get("userName")
+        or requested_by
         or "UNKNOWN"
     )
+    provisional_lock = _upsert_live_run_lock({
+        **provisional_lock,
+        "requestedBy": requested_by,
+        "requestedByUser": actor.get("userName") or "",
+        "requestedByRole": actor.get("roleName") or "",
+    }) or provisional_lock
+    _persist_live_run_lock_async(provisional_lock, actor=actor)
 
     app.logger.info(
         "KUMO_ACTION action=run_workflow workflow_id=%s actor=%s user=%s role=%s caller_rights=%s",
@@ -656,36 +762,6 @@ def run_workflow(workflow_id):
         response = {"ok": True, "runId": "mock-run", "status": "QUEUED", "actor": actor, "message": "Mock mode: run request accepted"}
         _record_interaction("RUN_WORKFLOW", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, run_id="mock-run", payload=payload, response=response)
         return jsonify(response)
-
-    lock = None
-    workflow_name = payload.get("workflowName") or workflow_id
-    provisional_lock = {
-        "lockId": f"live-{uuid.uuid4()}",
-        "workflowId": workflow_id,
-        "workflowName": workflow_name,
-        "runId": None,
-        "status": "INITIATING",
-        "requestedBy": requested_by,
-        "requestedByUser": actor.get("userName") or "",
-        "requestedByRole": actor.get("roleName") or "",
-        "requestedAt": _now_iso(),
-        "message": "Run request accepted. Waiting for queue insert.",
-    }
-    _upsert_live_run_lock(provisional_lock)
-    realtime_broker.publish("workflow_run_requested", {
-        "workflowId": workflow_id,
-        "workflowName": workflow_name,
-        "runId": None,
-        "status": "INITIATING",
-        "lock": provisional_lock,
-        "actor": actor,
-        "requestedBy": requested_by,
-    })
-    app.logger.info(
-        "KUMO_RUN_TIMING workflow_id=%s step=initiating_published elapsed_ms=%d",
-        workflow_id,
-        int((time.perf_counter() - started_at) * 1000),
-    )
 
     try:
         run_id = repo.request_run(
@@ -705,6 +781,7 @@ def run_workflow(workflow_id):
             "status": "QUEUED",
             "message": "Queued. Waiting for dispatcher pickup.",
         })
+        _persist_live_run_lock_async(lock, actor=actor)
         realtime_broker.publish("workflow_run_queued", {
             "workflowId": workflow_id,
             "workflowName": workflow_name,
@@ -724,6 +801,10 @@ def run_workflow(workflow_id):
         return jsonify(response)
     except Exception as exc:
         _release_live_run_lock(workflow_id)
+        try:
+            repo.release_workflow_run_lock_for_run(workflow_id, status="FAILED", reason="REQUEST_FAILED", error_message=str(exc))
+        except Exception:
+            pass
         realtime_broker.publish("workflow_run_failed", {
             "workflowId": workflow_id,
             "workflowName": workflow_name,

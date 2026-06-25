@@ -177,6 +177,143 @@ def load_active_run_locks(limit=500):
     return [_lock_payload(row) for row in rows]
 
 
+def upsert_workflow_run_lock(lock, actor=None, client_ip="", user_agent=""):
+    """Best-effort shared UI lock upsert for cross-instance/container visibility.
+
+    This is intentionally a single MERGE with no readback. The request path uses
+    in-process state for immediacy; this durable copy is for other instances and
+    browsers routed elsewhere by ingress.
+    """
+    if not lock or not lock.get("workflowId") or not _run_lock_table_available():
+        return
+
+    actor = actor or {}
+    status = str(lock.get("status") or "INITIATING").upper()
+    run_id = lock.get("runId") or ""
+    params = {
+        "lock_id": lock.get("lockId") or str(uuid.uuid4()),
+        "workflow_id": lock.get("workflowId"),
+        "workflow_name": lock.get("workflowName") or lock.get("workflowId"),
+        "run_id": run_id,
+        "status": status,
+        "requested_by": lock.get("requestedBy") or actor.get("displayName") or actor.get("userName") or "UNKNOWN",
+        "requested_by_user": lock.get("requestedByUser") or actor.get("userName") or "UNKNOWN",
+        "requested_by_role": lock.get("requestedByRole") or actor.get("roleName") or "Unknown role",
+        "session_mode": actor.get("mode") or sf.connection_mode(),
+        "client_ip": client_ip or "",
+        "user_agent": (user_agent or "")[:1000],
+        "ttl_minutes": int(getattr(config, "KUMO_RUN_LOCK_TTL_MINUTES", 360)),
+        "message": lock.get("message") or "",
+        "extra_json": json.dumps({"actor": actor, "lock": lock}, default=str),
+    }
+    _execute(
+        f"""
+        MERGE INTO {config.T_APP_WORKFLOW_RUN_LOCKS} t
+        USING (
+          SELECT
+            %(lock_id)s AS LOCK_ID,
+            %(workflow_id)s AS WORKFLOW_ID,
+            %(workflow_name)s AS WORKFLOW_NAME,
+            NULLIF(%(run_id)s, '') AS RUN_ID,
+            %(status)s AS STATUS,
+            %(requested_by)s AS REQUESTED_BY,
+            %(requested_by_user)s AS REQUESTED_BY_USER,
+            %(requested_by_role)s AS REQUESTED_BY_ROLE,
+            %(session_mode)s AS SESSION_MODE,
+            %(client_ip)s AS CLIENT_IP,
+            %(user_agent)s AS USER_AGENT,
+            %(message)s AS MESSAGE,
+            PARSE_JSON(%(extra_json)s) AS EXTRA
+        ) s
+        ON t.WORKFLOW_ID = s.WORKFLOW_ID
+           AND t.RELEASED_AT IS NULL
+           AND t.LOCK_EXPIRES_AT >= CURRENT_TIMESTAMP()
+        WHEN MATCHED THEN UPDATE SET
+          LOCK_ID = COALESCE(t.LOCK_ID, s.LOCK_ID),
+          WORKFLOW_NAME = s.WORKFLOW_NAME,
+          RUN_ID = COALESCE(s.RUN_ID, t.RUN_ID),
+          STATUS = s.STATUS,
+          REQUESTED_BY = s.REQUESTED_BY,
+          REQUESTED_BY_USER = s.REQUESTED_BY_USER,
+          REQUESTED_BY_ROLE = s.REQUESTED_BY_ROLE,
+          SESSION_MODE = s.SESSION_MODE,
+          LAST_SEEN_AT = CURRENT_TIMESTAMP(),
+          LOCK_EXPIRES_AT = DATEADD('minute', %(ttl_minutes)s, CURRENT_TIMESTAMP()),
+          CLIENT_IP = s.CLIENT_IP,
+          USER_AGENT = s.USER_AGENT,
+          MESSAGE = s.MESSAGE,
+          EXTRA = s.EXTRA,
+          UPDATED_AT = CURRENT_TIMESTAMP()
+        WHEN NOT MATCHED THEN INSERT (
+          LOCK_ID,
+          WORKFLOW_ID,
+          WORKFLOW_NAME,
+          RUN_ID,
+          STATUS,
+          REQUESTED_BY,
+          REQUESTED_BY_USER,
+          REQUESTED_BY_ROLE,
+          SESSION_MODE,
+          REQUESTED_AT,
+          LAST_SEEN_AT,
+          LOCK_EXPIRES_AT,
+          CLIENT_IP,
+          USER_AGENT,
+          MESSAGE,
+          EXTRA,
+          UPDATED_AT
+        ) VALUES (
+          s.LOCK_ID,
+          s.WORKFLOW_ID,
+          s.WORKFLOW_NAME,
+          s.RUN_ID,
+          s.STATUS,
+          s.REQUESTED_BY,
+          s.REQUESTED_BY_USER,
+          s.REQUESTED_BY_ROLE,
+          s.SESSION_MODE,
+          CURRENT_TIMESTAMP(),
+          CURRENT_TIMESTAMP(),
+          DATEADD('minute', %(ttl_minutes)s, CURRENT_TIMESTAMP()),
+          s.CLIENT_IP,
+          s.USER_AGENT,
+          s.MESSAGE,
+          s.EXTRA,
+          CURRENT_TIMESTAMP()
+        )
+        """,
+        params,
+    )
+
+
+def release_workflow_run_lock_for_run(workflow_id, run_id=None, status="RELEASED", reason="RELEASED", error_message=None):
+    if not workflow_id or not _run_lock_table_available():
+        return
+    params = {
+        "workflow_id": workflow_id,
+        "run_id": run_id or "",
+        "status": status,
+        "reason": reason,
+        "error_message": error_message or "",
+    }
+    run_filter = "AND (%(run_id)s = '' OR RUN_ID = %(run_id)s)"
+    _execute(
+        f"""
+        UPDATE {config.T_APP_WORKFLOW_RUN_LOCKS}
+        SET
+          STATUS = %(status)s,
+          RELEASED_AT = CURRENT_TIMESTAMP(),
+          RELEASE_REASON = %(reason)s,
+          ERROR_MESSAGE = %(error_message)s,
+          UPDATED_AT = CURRENT_TIMESTAMP()
+        WHERE RELEASED_AT IS NULL
+          AND WORKFLOW_ID = %(workflow_id)s
+          {run_filter}
+        """,
+        params,
+    )
+
+
 def active_run_lock_for_workflow(workflow_id):
     workflow_id = str(workflow_id or "").strip()
     if not workflow_id or not _run_lock_table_available():
