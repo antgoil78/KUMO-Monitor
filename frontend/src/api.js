@@ -7,6 +7,7 @@ async function requestJson(url, options = {}) {
   try {
     response = await fetch(url, {
       headers: { 'Content-Type': 'application/json', ...(fetchOptions.headers || {}) },
+      credentials: 'same-origin',
       signal: controller.signal,
       ...fetchOptions
     })
@@ -33,10 +34,6 @@ async function requestJson(url, options = {}) {
   return data
 }
 
-function isCsrfMismatch(error) {
-  return /csrf/i.test(String(error?.message || '')) && /mismatch|missing|token/i.test(String(error?.message || ''))
-}
-
 export const api = {
   health: () => requestJson('/api/health'),
   session: () => requestJson('/api/session'),
@@ -48,16 +45,8 @@ export const api = {
   realtimeState: () => requestJson('/api/realtime/state', { timeoutMs: 5000 }),
   runWorkflow: async (workflowId, workflowName = '') => {
     const encodedId = encodeURIComponent(workflowId)
-    try {
-      return await requestJson(`/api/workflows/${encodedId}/run`, {
-        method: 'POST',
-        body: JSON.stringify({ triggerSource: 'MANUAL', workflowName })
-      })
-    } catch (err) {
-      if (!isCsrfMismatch(err)) throw err
-      const params = new URLSearchParams({ triggerSource: 'MANUAL', workflowName })
-      return requestJson(`/api/workflows/${encodedId}/run-fallback?${params.toString()}`)
-    }
+    const params = new URLSearchParams({ triggerSource: 'MANUAL', workflowName, _: String(Date.now()) })
+    return requestJson(`/api/workflows/${encodedId}/run-fallback?${params.toString()}`)
   },
   workflowDetail: (workflowId, options = {}) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`, options),
   updateWorkflow: (workflowId, payload) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`, {
