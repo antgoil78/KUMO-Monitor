@@ -17,6 +17,25 @@ class RealtimeEventBroker:
     def __init__(self):
         self._lock = RLock()
         self._clients = set()
+        self._client_count_callback = None
+
+    def set_client_count_callback(self, callback):
+        with self._lock:
+            self._client_count_callback = callback
+
+    def client_count(self):
+        with self._lock:
+            return len(self._clients)
+
+    def _notify_client_count(self, count):
+        callback = None
+        with self._lock:
+            callback = self._client_count_callback
+        if callback:
+            try:
+                callback(count)
+            except Exception:
+                pass
 
     def publish(self, event_type, data=None):
         event = {
@@ -52,11 +71,15 @@ class RealtimeEventBroker:
         client = queue.Queue(maxsize=100)
         with self._lock:
             self._clients.add(client)
+            count = len(self._clients)
+        self._notify_client_count(count)
         return client
 
     def unsubscribe(self, client):
         with self._lock:
             self._clients.discard(client)
+            count = len(self._clients)
+        self._notify_client_count(count)
 
     def stream(self, heartbeat_seconds=15):
         client = self.subscribe()

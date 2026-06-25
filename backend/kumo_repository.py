@@ -28,6 +28,28 @@ def _execute(sql, params=None):
     return sf.execute_service(sql, params=params or {}, use_warehouse=True, include_context=True)
 
 
+def _fetch_with_cursor(cur, sql, params=None):
+    cur.execute(sql, params or {})
+    try:
+        return cur.fetchall()
+    except Exception:
+        return []
+
+
+def _describe_table_with_cursor(cur, fqn):
+    if fqn in _describe_cache:
+        return _describe_cache[fqn]
+    rows = _fetch_with_cursor(cur, f"DESC TABLE {fqn}")
+    out = {}
+    for row in rows:
+        name = row_get(row, "name", "NAME")
+        typ = row_get(row, "type", "TYPE")
+        if name:
+            out[str(name).upper()] = str(typ)
+    _describe_cache[fqn] = out
+    return out
+
+
 def clear_cache():
     _describe_cache.clear()
 
@@ -918,12 +940,7 @@ def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requeste
     lock may show INITIATING/QUEUED immediately, but Snowflake still receives the
     same queue rows expected by the dispatcher.
     """
-    h_types = describe_table(config.T_HISTORY)
-    q_types = describe_table(config.T_QUEUE)
     run_id = str(uuid.uuid4())
-
-    h_cols = ["RUN_ID", "WORKFLOW_ID", "STATUS"]
-    h_vals = ["%(run_id)s", "%(workflow_id)s", "'INITIATING'"]
     params = {
         "run_id": run_id,
         "workflow_id": workflow_id,
@@ -931,40 +948,50 @@ def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requeste
         "requested_by": requested_by or "",
     }
 
-    if "TRIGGER_SOURCE" in h_types:
-        h_cols.append("TRIGGER_SOURCE")
-        h_vals.append("%(trigger_source)s")
-    if "REQUESTED_AT" in h_types:
-        h_cols.append("REQUESTED_AT")
-        h_vals.append("SYSDATE()")
-    if "REQUESTED_BY" in h_types:
-        h_cols.append("REQUESTED_BY")
-        h_vals.append("%(requested_by)s" if requested_by else "CURRENT_USER()")
-    if "UPDATED_AT" in h_types:
-        h_cols.append("UPDATED_AT")
-        h_vals.append("SYSDATE()")
+    with sf.connection(use_warehouse=True, include_context=True, force_service=True) as conn:
+        cur = conn.cursor(DictCursor)
+        try:
+            h_types = _describe_table_with_cursor(cur, config.T_HISTORY)
+            q_types = _describe_table_with_cursor(cur, config.T_QUEUE)
 
-    _execute(f"INSERT INTO {config.T_HISTORY} ({', '.join(h_cols)}) VALUES ({', '.join(h_vals)})", params)
+            h_cols = ["RUN_ID", "WORKFLOW_ID", "STATUS"]
+            h_vals = ["%(run_id)s", "%(workflow_id)s", "'INITIATING'"]
+            if "TRIGGER_SOURCE" in h_types:
+                h_cols.append("TRIGGER_SOURCE")
+                h_vals.append("%(trigger_source)s")
+            if "REQUESTED_AT" in h_types:
+                h_cols.append("REQUESTED_AT")
+                h_vals.append("SYSDATE()")
+            if "REQUESTED_BY" in h_types:
+                h_cols.append("REQUESTED_BY")
+                h_vals.append("%(requested_by)s" if requested_by else "CURRENT_USER()")
+            if "UPDATED_AT" in h_types:
+                h_cols.append("UPDATED_AT")
+                h_vals.append("SYSDATE()")
 
-    if "WORKFLOW_ID" not in q_types or "RUN_ID" not in q_types:
-        raise RuntimeError(f"{config.T_QUEUE} must have WORKFLOW_ID and RUN_ID columns")
+            _fetch_with_cursor(cur, f"INSERT INTO {config.T_HISTORY} ({', '.join(h_cols)}) VALUES ({', '.join(h_vals)})", params)
 
-    q_cols = ["WORKFLOW_ID", "RUN_ID"]
-    q_vals = ["%(workflow_id)s", "%(run_id)s"]
-    if "STATUS" in q_types:
-        q_cols.append("STATUS")
-        q_vals.append("'QUEUED'")
-    if "TRIGGER_SOURCE" in q_types:
-        q_cols.append("TRIGGER_SOURCE")
-        q_vals.append("%(trigger_source)s")
-    if "REQUESTED_AT" in q_types:
-        q_cols.append("REQUESTED_AT")
-        q_vals.append("SYSDATE()")
-    if "REQUESTED_BY" in q_types:
-        q_cols.append("REQUESTED_BY")
-        q_vals.append("%(requested_by)s" if requested_by else "CURRENT_USER()")
+            if "WORKFLOW_ID" not in q_types or "RUN_ID" not in q_types:
+                raise RuntimeError(f"{config.T_QUEUE} must have WORKFLOW_ID and RUN_ID columns")
 
-    _execute(f"INSERT INTO {config.T_QUEUE} ({', '.join(q_cols)}) VALUES ({', '.join(q_vals)})", params)
+            q_cols = ["WORKFLOW_ID", "RUN_ID"]
+            q_vals = ["%(workflow_id)s", "%(run_id)s"]
+            if "STATUS" in q_types:
+                q_cols.append("STATUS")
+                q_vals.append("'QUEUED'")
+            if "TRIGGER_SOURCE" in q_types:
+                q_cols.append("TRIGGER_SOURCE")
+                q_vals.append("%(trigger_source)s")
+            if "REQUESTED_AT" in q_types:
+                q_cols.append("REQUESTED_AT")
+                q_vals.append("SYSDATE()")
+            if "REQUESTED_BY" in q_types:
+                q_cols.append("REQUESTED_BY")
+                q_vals.append("%(requested_by)s" if requested_by else "CURRENT_USER()")
+
+            _fetch_with_cursor(cur, f"INSERT INTO {config.T_QUEUE} ({', '.join(q_cols)}) VALUES ({', '.join(q_vals)})", params)
+        finally:
+            cur.close()
     return run_id
 
 

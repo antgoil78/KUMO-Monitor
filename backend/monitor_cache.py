@@ -1,6 +1,7 @@
 import hashlib
 import json
 import threading
+import time
 from datetime import datetime, timezone
 
 import config
@@ -19,6 +20,7 @@ class MonitorCache:
         self._thread = None
         self._last_error = None
         self._last_signature = None
+        self._last_refresh_monotonic = 0.0
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -41,6 +43,15 @@ class MonitorCache:
         with self._lock:
             return self._payload
 
+    def get_or_refresh(self, max_age_seconds=None):
+        max_age = self.refresh_seconds if max_age_seconds is None else max(0, float(max_age_seconds))
+        with self._lock:
+            age = time.monotonic() - float(self._last_refresh_monotonic or 0)
+            has_real_payload = self._payload.get("source") not in ("starting", "error-fallback")
+            if has_real_payload and age <= max_age:
+                return self._payload
+        return self.refresh(force=True)
+
     def refresh(self, force=False):
         try:
             payload = self._build_payload()
@@ -49,6 +60,7 @@ class MonitorCache:
             with self._lock:
                 self._payload = payload
                 self._last_error = None
+                self._last_refresh_monotonic = time.monotonic()
                 if signature != self._last_signature:
                     self._last_signature = signature
                     should_publish = True
@@ -62,6 +74,7 @@ class MonitorCache:
             with self._lock:
                 self._payload = fallback
                 self._last_error = str(exc)
+                self._last_refresh_monotonic = time.monotonic()
                 if signature != self._last_signature:
                     self._last_signature = signature
                     should_publish = True

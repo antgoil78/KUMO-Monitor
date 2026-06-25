@@ -698,15 +698,6 @@ export default function Monitor() {
     return () => source?.close()
   }, [])
   useEffect(() => {
-    const id = setInterval(() => loadLocks(), 5000)
-    return () => clearInterval(id)
-  }, [])
-  useEffect(() => {
-    const intervalMs = payload?.refreshIntervalMs || 5000
-    const id = setInterval(() => load(false), intervalMs)
-    return () => clearInterval(id)
-  }, [payload?.refreshIntervalMs])
-  useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000)
     return () => clearInterval(id)
   }, [])
@@ -757,6 +748,8 @@ export default function Monitor() {
     if (!pendingTerminal && ((actualBusy && !pendingIsAhead) || expired)) return view
     return {
       ...view,
+      runLocked: pendingTerminal ? false : view.runLocked,
+      runLock: pendingTerminal ? null : view.runLock,
       lastStatus: pendingStatus,
       lastRunId: pending.runId || view.lastRunId,
       lastStartTime: pending.lastStartTime || (pendingTerminal ? view.lastStartTime : null),
@@ -799,18 +792,6 @@ export default function Monitor() {
     setModal(null)
     try {
       if (action === 'run') {
-        const optimisticLock = {
-          lockId: `local-${workflow.workflowId}-${Date.now()}`,
-          workflowId: workflow.workflowId,
-          workflowName: workflow.workflowName,
-          runId: 'pending',
-          status: 'INITIATING',
-          requestedBy: 'current user',
-          requestedAt: new Date().toISOString(),
-          message: 'Run request accepted. Waiting for queue insert.'
-        }
-        setGlobalLocks(prev => upsertLock(prev, optimisticLock))
-        setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: 'pending', status: 'INITIATING' } }))
         const result = await api.runWorkflow(workflow.workflowId, workflow.workflowName)
         const immediateLock = result.lock || {
           lockId: `local-${workflow.workflowId}-${Date.now()}`,
@@ -825,11 +806,6 @@ export default function Monitor() {
         setGlobalLocks(prev => upsertLock(prev, immediateLock))
         setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: result.runId || 'pending', status: result.status || 'QUEUED' } }))
         notify(`Queued ${workflow.workflowName}. Run ID: ${result.runId || 'pending'}. Waiting for dispatcher pickup...`)
-        Promise.resolve(loadLocks()).catch(() => {})
-        window.setTimeout(() => {
-          Promise.resolve(loadLocks()).catch(() => {})
-          Promise.resolve(load(false)).catch(err => notify(`Refresh failed after run request: ${err.message}`))
-        }, 2500)
       }
       if (action === 'toggle-workflow') {
         await api.setWorkflowEnabled(workflow.workflowId, !workflow.workflowEnabled)
