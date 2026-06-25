@@ -17,6 +17,8 @@ const statusOptions = [
 const activeRunStatuses = new Set(['INITIATING', 'RUNNING', 'IN_PROGRESS', 'EXECUTING', 'QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED', 'STARTING'])
 const runningRunStatuses = new Set(['RUNNING', 'IN_PROGRESS', 'EXECUTING', 'STARTING'])
 const terminalRunStatuses = new Set(['SUCCESS', 'SUCCEEDED', 'COMPLETED', 'OK', 'FAILED', 'FAILURE', 'ERROR', 'CANCELLED', 'CANCELED', 'SKIPPED'])
+const liveOverlayTtlMs = 120000
+const terminalOverlayTtlMs = 30000
 const statusRank = {
   INITIATING: 10,
   REQUESTED: 20,
@@ -44,15 +46,23 @@ function normalizeStatus(status, fallback = 'INITIATING') {
   return value || fallback
 }
 
+function ageMs(value, fallbackMs = Date.now()) {
+  if (!value) return Date.now() - fallbackMs
+  if (typeof value === 'number') return Date.now() - value
+  const parsed = new Date(value).getTime()
+  return Number.isNaN(parsed) ? Date.now() - fallbackMs : Date.now() - parsed
+}
+
 function liveRunFromEvent(data) {
   const workflowId = String(data?.workflowId || data?.lock?.workflowId || '')
   if (!workflowId) return null
+  const status = normalizeStatus(data?.status || data?.lock?.status, 'QUEUED')
   return {
     lockId: data?.lock?.lockId || '',
     workflowId,
     workflowName: data?.workflowName || data?.lock?.workflowName || workflowId,
     runId: data?.runId || data?.lock?.runId || '',
-    status: normalizeStatus(data?.status || data?.lock?.status),
+    status: status === 'INITIATING' ? 'QUEUED' : status,
     requestedAt: data?.requestedAt || data?.lock?.requestedAt || new Date().toISOString(),
     requestedBy: data?.requestedBy || data?.lock?.requestedBy || data?.actor?.displayName || data?.actor?.userName || '',
     lastStartTime: data?.lastStartTime || data?.lock?.lastStartTime || null,
@@ -67,26 +77,30 @@ function upsertLock(locks, lock) {
   if (!lock?.workflowId) return locks || []
   const next = new Map((locks || []).map(item => [item.workflowId, item]))
   const previous = next.get(lock.workflowId) || {}
+  const now = Date.now()
   const previousStatus = normalizeStatus(previous.status, '')
   const nextStatus = normalizeStatus(lock.status, '')
   const previousRun = String(previous.runId || '')
   const nextRun = String(lock.runId || previousRun || '')
   const isDowngrade = previousStatus && nextStatus && previousRun === nextRun && (statusRank[previousStatus] || 0) > (statusRank[nextStatus] || 0)
   const merged = isDowngrade
-    ? { ...lock, ...previous, status: previousStatus }
-    : { ...previous, ...lock, status: lock.status }
+    ? { ...lock, ...previous, status: previousStatus, updatedAt: previous.updatedAt || now }
+    : { ...previous, ...lock, status: lock.status, updatedAt: lock.updatedAt || now }
   next.set(lock.workflowId, merged)
   return Array.from(next.values())
 }
 
 function mergeLockSnapshot(previousLocks, incomingLocks) {
   const incoming = incomingLocks || []
-  if (!incoming.length) return []
-  const previousByWorkflow = new Map((previousLocks || []).map(item => [item.workflowId, item]))
-  return incoming.reduce((out, lock) => {
-    const previous = previousByWorkflow.get(lock.workflowId)
-    return upsertLock(out, previous ? upsertLock([previous], lock)[0] : lock)
-  }, [])
+  const keepFresh = lock => {
+    const status = normalizeStatus(lock.status, '-')
+    if (terminalRunStatuses.has(status)) return false
+    return ageMs(lock.updatedAt || lock.requestedAt) < liveOverlayTtlMs
+  }
+  if (!incoming.length) {
+    return (previousLocks || []).filter(keepFresh)
+  }
+  return incoming.reduce((out, lock) => upsertLock(out, lock), previousLocks || []).filter(keepFresh)
 }
 
 function reconcileLocksFromWorkflows(locks, workflows) {
@@ -621,17 +635,6 @@ export default function Monitor() {
     }
   }
 
-  async function loadLocks() {
-    try {
-      const data = await api.workflowRunLocks()
-      setGlobalLocks(prev => mergeLockSnapshot(prev, data.locks || []))
-    } catch (err) {
-      // Do not block the monitor page if the lock poll has a transient failure.
-      // The normal monitor payload still contains persisted workflow status.
-      console.warn('Could not refresh workflow run locks', err)
-    }
-  }
-
   function applyLiveRunUpdate(data) {
     const liveRun = liveRunFromEvent(data)
     if (!liveRun) return
@@ -646,9 +649,10 @@ export default function Monitor() {
         ...(prev[liveRun.workflowId] || {}),
         startedAt: prev[liveRun.workflowId]?.startedAt || Date.now(),
         runId: liveRun.runId || prev[liveRun.workflowId]?.runId || 'pending',
-        status: liveRun.status || prev[liveRun.workflowId]?.status || 'INITIATING',
+        status: liveRun.status || prev[liveRun.workflowId]?.status || 'QUEUED',
         lastStartTime: liveRun.lastStartTime || prev[liveRun.workflowId]?.lastStartTime || null,
-        lastEndTime: liveRun.lastEndTime || prev[liveRun.workflowId]?.lastEndTime || null
+        lastEndTime: liveRun.lastEndTime || prev[liveRun.workflowId]?.lastEndTime || null,
+        completedAt: terminalRunStatuses.has(normalizeStatus(liveRun.status, '-')) ? Date.now() : prev[liveRun.workflowId]?.completedAt
       }
     }))
   }
@@ -665,7 +669,7 @@ export default function Monitor() {
     }
   }
 
-  useEffect(() => { load(false); loadLocks() }, [])
+  useEffect(() => { load(false); loadRealtimeState() }, [])
   useEffect(() => {
     const source = createKumoEventSource((event) => {
       const type = event?.type
@@ -714,7 +718,7 @@ export default function Monitor() {
     return () => source?.close()
   }, [])
   useEffect(() => {
-    const id = setInterval(() => loadRealtimeState(), 1500)
+    const id = setInterval(() => loadRealtimeState(), 1000)
     return () => clearInterval(id)
   }, [])
   useEffect(() => {
@@ -762,6 +766,8 @@ export default function Monitor() {
     const viewRunId = String(view.lastRunId || view.runLock?.runId || '')
     const pendingSameRun = pendingRunId && pendingRunId !== 'pending' && viewRunId === pendingRunId
     const pendingIsAhead = pendingSameRun && (statusRank[pendingStatus] || 0) > (statusRank[viewStatus] || 0)
+    if (pendingTerminal && pendingRunId && viewRunId && !pendingSameRun) return view
+    if (pendingTerminal && pending.completedAt && Date.now() - Number(pending.completedAt) > terminalOverlayTtlMs) return view
     if (view.runLocked && !pendingIsAhead) return view
     const actualBusy = isWorkflowBusy(view.lastStatus)
     const expired = Date.now() - Number(pending.startedAt || Date.now()) > 120000
@@ -812,6 +818,16 @@ export default function Monitor() {
     setModal(null)
     try {
       if (action === 'run') {
+        const startedAt = Date.now()
+        setPendingRuns(prev => ({
+          ...prev,
+          [workflow.workflowId]: {
+            startedAt,
+            runId: 'pending',
+            status: 'INITIATING',
+            localOnly: true
+          }
+        }))
         const result = await api.runWorkflow(workflow.workflowId, workflow.workflowName)
         const immediateLock = result.lock || {
           lockId: `local-${workflow.workflowId}-${Date.now()}`,
@@ -824,7 +840,15 @@ export default function Monitor() {
           message: 'Queued. Waiting for dispatcher pickup.'
         }
         setGlobalLocks(prev => upsertLock(prev, immediateLock))
-        setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: result.runId || 'pending', status: result.status || 'QUEUED' } }))
+        setPendingRuns(prev => ({
+          ...prev,
+          [workflow.workflowId]: {
+            startedAt,
+            runId: result.runId || 'pending',
+            status: result.status || 'QUEUED',
+            localOnly: false
+          }
+        }))
         notify(`Queued ${workflow.workflowName}. Run ID: ${result.runId || 'pending'}. Waiting for dispatcher pickup...`)
       }
       if (action === 'toggle-workflow') {

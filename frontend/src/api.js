@@ -74,6 +74,10 @@ export function createKumoEventSource(onEvent, onError) {
   if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
     return null
   }
+  const host = window.location.hostname
+  const enabled = ['localhost', '127.0.0.1'].includes(host) || new URLSearchParams(window.location.search).get('sse') === '1'
+  if (!enabled) return null
+
   const source = new window.EventSource('/api/events')
   const eventTypes = ['connected', 'monitor_update', 'workflow_run_requested', 'workflow_run_queued', 'workflow_run_status', 'workflow_run_failed']
 
