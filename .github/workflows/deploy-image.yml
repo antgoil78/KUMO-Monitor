@@ -80,6 +80,7 @@ jobs:
         run: |
           docker build \
             --progress=plain \
+            --build-arg "GIT_SHA=${{ github.sha }}" \
             -t "${LOCAL_IMAGE_NAME}" .
 
       - name: Tag Docker image

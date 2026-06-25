@@ -12,6 +12,9 @@ RUN npm run build
 # Python backend with React serving
 FROM python:3.11-bullseye
 
+ARG GIT_SHA=local
+ENV KUMO_BUILD_SHA=${GIT_SHA}
+
 WORKDIR /app
 
 RUN python -m pip install --upgrade pip setuptools wheel

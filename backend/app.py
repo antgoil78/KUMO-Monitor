@@ -61,6 +61,13 @@ _RUN_STATUS_RANK = {
 }
 
 
+def _build_info():
+    return {
+        "buildSha": os.getenv("KUMO_BUILD_SHA", "").strip() or "local",
+        "runtimeId": _RUNTIME_ID,
+    }
+
+
 def _now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -758,6 +765,10 @@ def bind_request_context():
 
 @app.after_request
 def log_response(response):
+    if request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    elif response.mimetype == "text/html":
+        response.headers["Cache-Control"] = "no-store"
     app.logger.info(
         "RESPONSE method=%s path=%s status=%s caller_token_present=%s",
         request.method,
@@ -780,6 +791,7 @@ def health():
     return jsonify({
         "ok": True,
         "app": "KUMO Monitor",
+        **_build_info(),
         "mock": bool(config.USE_MOCK),
         "snowflakeConfigured": sf.is_configured(),
         "snowflakeConnectionMode": sf.connection_mode(),
@@ -885,7 +897,7 @@ def workflow_run_locks():
 def realtime_state():
     return jsonify({
         "ok": True,
-        "runtimeId": _RUNTIME_ID,
+        **_build_info(),
         "clientCount": realtime_broker.client_count(),
         "coordinator": status_coordinator.diagnostics(),
         "locks": _live_run_lock_list(),
@@ -1225,6 +1237,13 @@ def notifications():
 
 @app.route("/")
 def index():
+    return send_from_directory(app.static_folder, "index.html")
+
+
+@app.route("/sfc_oauth_complete")
+@app.route("/sfc_oatch_complete")
+def snowflake_oauth_complete():
+    app.logger.info("Snowflake OAuth callback path reached app: %s", request.path)
     return send_from_directory(app.static_folder, "index.html")
 
 
