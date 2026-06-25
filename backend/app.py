@@ -929,8 +929,21 @@ def _actor_context():
 
 @app.route("/api/workflows/<workflow_id>/run", methods=["POST"])
 def run_workflow(workflow_id):
+    return _run_workflow_impl(workflow_id, request.get_json(silent=True) or {}, "POST")
+
+
+@app.route("/api/workflows/<workflow_id>/run-fallback")
+def run_workflow_fallback(workflow_id):
+    return _run_workflow_impl(workflow_id, {
+        "triggerSource": request.args.get("triggerSource") or "MANUAL",
+        "workflowName": request.args.get("workflowName") or "",
+        "requestedBy": request.args.get("requestedBy") or "",
+    }, "GET_FALLBACK")
+
+
+def _run_workflow_impl(workflow_id, payload, request_method):
     started_at = time.perf_counter()
-    payload = request.get_json(silent=True) or {}
+    payload = payload or {}
     lock = None
     workflow_name = payload.get("workflowName") or workflow_id
     actor = _actor_context()
@@ -942,7 +955,8 @@ def run_workflow(workflow_id):
     )
 
     app.logger.info(
-        "KUMO_ACTION action=run_workflow workflow_id=%s actor=%s user=%s role=%s caller_rights=%s",
+        "KUMO_ACTION action=run_workflow method=%s workflow_id=%s actor=%s user=%s role=%s caller_rights=%s",
+        request_method,
         workflow_id,
         actor.get("displayName"),
         actor.get("userName"),
