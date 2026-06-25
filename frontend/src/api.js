@@ -72,7 +72,7 @@ export function createKumoEventSource(onEvent, onError) {
     return null
   }
   const source = new window.EventSource('/api/events')
-  const eventTypes = ['connected', 'monitor_update', 'workflow_run_requested', 'workflow_run_queued', 'workflow_run_failed']
+  const eventTypes = ['connected', 'monitor_update', 'workflow_run_requested', 'workflow_run_queued', 'workflow_run_status', 'workflow_run_failed']
 
   function handle(event) {
     try {

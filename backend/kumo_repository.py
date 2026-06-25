@@ -9,6 +9,7 @@ import snowflake_client as sf
 from utils import normalize_rows, row_get, sql_escape, parse_variant_array, next_run, format_task_name
 
 _describe_cache = {}
+_object_exists_cache = {}
 
 
 def _query(sql, params=None):
@@ -46,10 +47,15 @@ def describe_table(fqn):
 
 
 def object_exists(full_name):
+    key = str(full_name or "").upper()
+    if key in _object_exists_cache:
+        return _object_exists_cache[key]
     try:
         _query(f"SELECT 1 FROM {full_name} LIMIT 1")
+        _object_exists_cache[key] = True
         return True
     except Exception:
+        _object_exists_cache[key] = False
         return False
 
 
@@ -434,6 +440,39 @@ def load_workflow_history(workflow_id, limit=100):
         {"workflow_id": workflow_id},
     )
     return normalize_rows(rows)
+
+
+def get_workflow_run_status(workflow_id, run_id):
+    if not workflow_id or not run_id:
+        return None
+    h_types = describe_table(config.T_HISTORY)
+    select_cols = ["WORKFLOW_ID", "RUN_ID", "STATUS"]
+    for col in ("START_TIME", "END_TIME", "REQUESTED_AT", "REQUESTED_BY", "TRIGGER_SOURCE"):
+        if col in h_types:
+            select_cols.append(col)
+    rows = normalize_rows(_query(
+        f"""
+        SELECT {', '.join(select_cols)}
+        FROM {config.T_HISTORY}
+        WHERE WORKFLOW_ID = %(workflow_id)s
+          AND RUN_ID = %(run_id)s
+        LIMIT 1
+        """,
+        {"workflow_id": workflow_id, "run_id": run_id},
+    ))
+    if not rows:
+        return None
+    row = {str(k).upper(): v for k, v in rows[0].items()}
+    return {
+        "workflowId": row.get("WORKFLOW_ID"),
+        "runId": row.get("RUN_ID"),
+        "status": row.get("STATUS"),
+        "lastStartTime": row.get("START_TIME"),
+        "lastEndTime": row.get("END_TIME"),
+        "lastRequestedAt": row.get("REQUESTED_AT"),
+        "lastRequestedBy": row.get("REQUESTED_BY"),
+        "lastTriggerSource": row.get("TRIGGER_SOURCE"),
+    }
 
 
 def load_tasks():

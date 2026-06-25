@@ -4,7 +4,7 @@ FROM node:18-alpine AS react-builder
 WORKDIR /app/frontend
 
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm install
+RUN npm ci
 
 COPY frontend/ ./
 RUN npm run build
@@ -21,14 +21,6 @@ RUN pip install --no-cache-dir \
     Flask==3.0.0 \
     Flask-CORS==4.0.0 \
     python-dotenv==1.0.0
-
-# --- Accept build-time args ---
-ARG SNOWFLAKE_USER
-ARG SNOWFLAKE_PASSWORD
-
-# --- Set them as environment variables in the container ---
-ENV SNOWFLAKE_USER=$SNOWFLAKE_USER
-ENV SNOWFLAKE_PASSWORD=$SNOWFLAKE_PASSWORD
 
 # Copy backend files
 COPY backend/ /app/backend/

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api } from '../api.js'
+import { api, createKumoEventSource } from '../api.js'
 import StatusBadge, { isWorkflowBusy, statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import { elapsedDuration, formatDateTime } from '../utils/time.js'
@@ -13,6 +13,96 @@ const statusOptions = [
   { value: 'QUEUED', label: 'Queued' },
   { value: '-', label: 'No status' }
 ]
+
+const activeRunStatuses = new Set(['INITIATING', 'RUNNING', 'IN_PROGRESS', 'EXECUTING', 'QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED', 'STARTING'])
+const runningRunStatuses = new Set(['RUNNING', 'IN_PROGRESS', 'EXECUTING', 'STARTING'])
+const terminalRunStatuses = new Set(['SUCCESS', 'SUCCEEDED', 'COMPLETED', 'OK', 'FAILED', 'FAILURE', 'ERROR', 'CANCELLED', 'CANCELED', 'SKIPPED'])
+const statusRank = {
+  INITIATING: 10,
+  REQUESTED: 20,
+  PENDING: 20,
+  SCHEDULED: 20,
+  QUEUED: 20,
+  STARTING: 30,
+  RUNNING: 30,
+  IN_PROGRESS: 30,
+  EXECUTING: 30,
+  SUCCESS: 40,
+  SUCCEEDED: 40,
+  COMPLETED: 40,
+  OK: 40,
+  FAILED: 40,
+  FAILURE: 40,
+  ERROR: 40,
+  CANCELLED: 40,
+  CANCELED: 40,
+  SKIPPED: 40
+}
+
+function normalizeStatus(status, fallback = 'INITIATING') {
+  const value = String(status || '').trim().toUpperCase()
+  return value || fallback
+}
+
+function liveRunFromEvent(data) {
+  const workflowId = String(data?.workflowId || data?.lock?.workflowId || '')
+  if (!workflowId) return null
+  return {
+    lockId: data?.lock?.lockId || '',
+    workflowId,
+    workflowName: data?.workflowName || data?.lock?.workflowName || workflowId,
+    runId: data?.runId || data?.lock?.runId || '',
+    status: normalizeStatus(data?.status || data?.lock?.status),
+    requestedAt: data?.requestedAt || data?.lock?.requestedAt || new Date().toISOString(),
+    requestedBy: data?.requestedBy || data?.lock?.requestedBy || data?.actor?.displayName || data?.actor?.userName || '',
+    lastStartTime: data?.lastStartTime || data?.lock?.lastStartTime || null,
+    lastEndTime: data?.lastEndTime || data?.lock?.lastEndTime || null,
+    message: data?.message || data?.lock?.message || '',
+    updatedAt: Date.now(),
+    ...(data?.lock || {})
+  }
+}
+
+function upsertLock(locks, lock) {
+  if (!lock?.workflowId) return locks || []
+  const next = new Map((locks || []).map(item => [item.workflowId, item]))
+  const previous = next.get(lock.workflowId) || {}
+  const previousStatus = normalizeStatus(previous.status, '')
+  const nextStatus = normalizeStatus(lock.status, '')
+  const previousRun = String(previous.runId || '')
+  const nextRun = String(lock.runId || previousRun || '')
+  const status = previousStatus && nextStatus && previousRun === nextRun && (statusRank[previousStatus] || 0) > (statusRank[nextStatus] || 0)
+    ? previousStatus
+    : lock.status
+  next.set(lock.workflowId, { ...previous, ...lock, status })
+  return Array.from(next.values())
+}
+
+function reconcileLocksFromWorkflows(locks, workflows) {
+  if (!locks?.length) return []
+  const byWorkflow = new Map((workflows || []).map(wf => [String(wf.workflowId), wf]))
+  return locks.reduce((out, lock) => {
+    const workflow = byWorkflow.get(String(lock.workflowId))
+    if (!workflow) {
+      out.push(lock)
+      return out
+    }
+
+    if (workflow.runLock) {
+      out.push({ ...lock, ...workflow.runLock })
+      return out
+    }
+
+    const sameRun = lock.runId && String(workflow.lastRunId || '') === String(lock.runId)
+    const status = normalizeStatus(workflow.lastStatus, '-')
+    if (sameRun && terminalRunStatuses.has(status)) {
+      return out
+    }
+
+    out.push(lock)
+    return out
+  }, [])
+}
 
 function SummaryItem({ tone, icon, label, value }) {
   return (
@@ -98,11 +188,7 @@ function WorkflowRow({ workflow, nowMs, onManage, pendingRun }) {
   const depth = Number(workflow.indent || 0)
   const type = String(workflow.workflowType || 'DBT').toUpperCase()
   const isRoot = depth === 0
-  const pendingExpired = pendingRun && Date.now() - Number(pendingRun.startedAt || Date.now()) > 120000
-  const backendBusy = isWorkflowBusy(workflow.lastStatus)
-  const locked = Boolean(workflow.runLocked || workflow.runLock)
-  const overlayPending = pendingRun && !pendingExpired && !backendBusy && !locked
-  const view = overlayPending ? { ...workflow, lastStatus: pendingRun.status || 'INITIATING', lastRunId: pendingRun.runId || workflow.lastRunId, progress: { percent: null } } : workflow
+  const view = workflow
   const runLock = view.runLock || null
   const busy = isWorkflowBusy(view.lastStatus) || Boolean(view.runLocked)
 
@@ -485,6 +571,7 @@ export default function Monitor() {
       setError(null)
       const data = force ? await api.refreshMonitor() : await api.monitor()
       setPayload(data)
+      setGlobalLocks(prev => reconcileLocksFromWorkflows(prev, data.workflows || []))
       setPendingRuns(prev => {
         const next = { ...prev }
         const seen = new Set((data.workflows || []).map(wf => wf.workflowId))
@@ -494,12 +581,18 @@ export default function Monitor() {
           const pending = next[wf.workflowId]
           if (!pending) continue
 
-          const status = String(wf.lastStatus || '').toUpperCase()
-          const actualBusy = ['RUNNING', 'IN_PROGRESS', 'EXECUTING', 'QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED'].includes(status)
+          const status = normalizeStatus(wf.lastStatus, '-')
+          const pendingStatus = normalizeStatus(pending.status, '')
+          const pendingIsAhead = pending.runId && pending.runId !== 'pending' &&
+            String(wf.lastRunId || '') === String(pending.runId) &&
+            (statusRank[pendingStatus] || 0) > (statusRank[status] || 0)
+          if (pendingIsAhead) continue
+
+          const actualBusy = activeRunStatuses.has(status)
           const runVisible = pending.runId && pending.runId !== 'pending' && String(wf.lastRunId || '') === String(pending.runId)
           const expired = now - Number(pending.startedAt || now) > 120000
 
-          if (actualBusy || runVisible || expired) {
+          if (actualBusy || (runVisible && terminalRunStatuses.has(status)) || expired) {
             delete next[wf.workflowId]
           }
         }
@@ -530,7 +623,71 @@ export default function Monitor() {
 
   useEffect(() => { load(false); loadLocks() }, [])
   useEffect(() => {
-    const id = setInterval(() => loadLocks(), 1000)
+    const source = createKumoEventSource((event) => {
+      const type = event?.type
+      const data = event?.data || {}
+      if (type === 'monitor_update') {
+        setPayload(data)
+        setGlobalLocks(prev => reconcileLocksFromWorkflows(prev, data.workflows || []))
+        setPendingRuns(prev => {
+          const next = { ...prev }
+          for (const wf of data.workflows || []) {
+            const pending = next[wf.workflowId]
+            if (!pending) continue
+            const status = normalizeStatus(wf.lastStatus, '-')
+            const pendingStatus = normalizeStatus(pending.status, '')
+            const sameRun = pending.runId && pending.runId !== 'pending' && String(wf.lastRunId || '') === String(pending.runId)
+            if (sameRun && (statusRank[pendingStatus] || 0) > (statusRank[status] || 0)) {
+              continue
+            }
+            if (activeRunStatuses.has(status) || (sameRun && terminalRunStatuses.has(status))) {
+              delete next[wf.workflowId]
+            }
+          }
+          return next
+        })
+        setLoading(false)
+        return
+      }
+
+      if (['workflow_run_requested', 'workflow_run_queued', 'workflow_run_status'].includes(type)) {
+        const liveRun = liveRunFromEvent(data)
+        if (!liveRun) return
+        if (terminalRunStatuses.has(normalizeStatus(liveRun.status, '-'))) {
+          setGlobalLocks(prev => (prev || []).filter(lock => lock.workflowId !== liveRun.workflowId))
+        } else {
+          setGlobalLocks(prev => upsertLock(prev, liveRun))
+        }
+        setPendingRuns(prev => ({
+          ...prev,
+          [liveRun.workflowId]: {
+            ...(prev[liveRun.workflowId] || {}),
+            startedAt: prev[liveRun.workflowId]?.startedAt || Date.now(),
+            runId: liveRun.runId || prev[liveRun.workflowId]?.runId || 'pending',
+            status: liveRun.status || prev[liveRun.workflowId]?.status || 'INITIATING',
+            lastStartTime: liveRun.lastStartTime || prev[liveRun.workflowId]?.lastStartTime || null,
+            lastEndTime: liveRun.lastEndTime || prev[liveRun.workflowId]?.lastEndTime || null
+          }
+        }))
+        return
+      }
+
+      if (type === 'workflow_run_failed') {
+        const liveRun = liveRunFromEvent({ ...data, status: 'FAILED' })
+        if (!liveRun) return
+        setGlobalLocks(prev => (prev || []).filter(lock => lock.workflowId !== liveRun.workflowId))
+        setPendingRuns(prev => {
+          const next = { ...prev }
+          delete next[liveRun.workflowId]
+          return next
+        })
+        notify(`Run request failed for ${liveRun.workflowName}: ${liveRun.error || data.error || 'Unknown error'}`)
+      }
+    }, () => {})
+    return () => source?.close()
+  }, [])
+  useEffect(() => {
+    const id = setInterval(() => loadLocks(), 5000)
     return () => clearInterval(id)
   }, [])
   useEffect(() => {
@@ -557,27 +714,38 @@ export default function Monitor() {
     let view = w
 
     if (lock) {
-      const actualStatus = String(w.lastStatus || '').toUpperCase()
+      const actualStatus = normalizeStatus(w.lastStatus, '-')
       const sameRun = lock.runId && String(w.lastRunId || '') === String(lock.runId)
-      const actualRunning = sameRun && ['RUNNING', 'IN_PROGRESS', 'EXECUTING', 'STARTING'].includes(actualStatus)
+      const actualRunning = sameRun && runningRunStatuses.has(actualStatus)
       view = {
         ...w,
         runLocked: true,
         runLock: lock,
         lastStatus: actualRunning ? w.lastStatus : (lock.status || 'QUEUED'),
         lastRunId: lock.runId || w.lastRunId,
+        lastStartTime: actualRunning ? (lock.lastStartTime || w.lastStartTime) : (lock.lastStartTime || null),
+        lastEndTime: actualRunning ? (lock.lastEndTime || w.lastEndTime) : null,
         lastRequestedAt: lock.requestedAt || w.lastRequestedAt,
         lastRequestedBy: lock.requestedBy || w.lastRequestedBy,
-        progress: actualRunning ? w.progress : { percent: null }
+        progress: actualRunning ? (w.progress || { percent: null }) : { percent: null }
       }
     }
 
     const pending = pendingRuns[w.workflowId]
     if (!pending || view.runLocked) return view
+    const pendingStatus = normalizeStatus(pending.status, 'INITIATING')
+    const pendingTerminal = terminalRunStatuses.has(pendingStatus)
     const actualBusy = isWorkflowBusy(view.lastStatus)
     const expired = Date.now() - Number(pending.startedAt || Date.now()) > 120000
-    if (actualBusy || expired) return view
-    return { ...view, lastStatus: pending.status || 'INITIATING', lastRunId: pending.runId || view.lastRunId, progress: { percent: null } }
+    if (!pendingTerminal && (actualBusy || expired)) return view
+    return {
+      ...view,
+      lastStatus: pendingStatus,
+      lastRunId: pending.runId || view.lastRunId,
+      lastStartTime: pending.lastStartTime || (pendingTerminal ? view.lastStartTime : null),
+      lastEndTime: pending.lastEndTime || (pendingTerminal ? view.lastEndTime : null),
+      progress: pendingTerminal ? null : { percent: null }
+    }
   })
   const summary = useMemo(() => {
     const total = workflowsWithPending.length
@@ -614,6 +782,17 @@ export default function Monitor() {
     setModal(null)
     try {
       if (action === 'run') {
+        const optimisticLock = {
+          lockId: `local-${workflow.workflowId}-${Date.now()}`,
+          workflowId: workflow.workflowId,
+          workflowName: workflow.workflowName,
+          runId: 'pending',
+          status: 'INITIATING',
+          requestedBy: 'current user',
+          requestedAt: new Date().toISOString(),
+          message: 'Run request accepted. Waiting for queue insert.'
+        }
+        setGlobalLocks(prev => upsertLock(prev, optimisticLock))
         setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: 'pending', status: 'INITIATING' } }))
         const result = await api.runWorkflow(workflow.workflowId, workflow.workflowName)
         const immediateLock = result.lock || {
@@ -626,11 +805,7 @@ export default function Monitor() {
           requestedAt: new Date().toISOString(),
           message: 'Queued. Waiting for dispatcher pickup.'
         }
-        setGlobalLocks(prev => {
-          const next = new Map((prev || []).map(lock => [lock.workflowId, lock]))
-          next.set(immediateLock.workflowId, immediateLock)
-          return Array.from(next.values())
-        })
+        setGlobalLocks(prev => upsertLock(prev, immediateLock))
         setPendingRuns(prev => ({ ...prev, [workflow.workflowId]: { startedAt: Date.now(), runId: result.runId || 'pending', status: result.status || 'QUEUED' } }))
         notify(`Queued ${workflow.workflowName}. Run ID: ${result.runId || 'pending'}. Waiting for dispatcher pickup...`)
         Promise.resolve(loadLocks()).catch(() => {})

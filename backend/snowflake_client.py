@@ -116,6 +116,10 @@ def _connection_kwargs(include_context=True, include_warehouse=True, force_servi
             "user": config.SNOWFLAKE_USER,
             "password": config.SNOWFLAKE_PASSWORD,
         }
+        if config.SNOWFLAKE_PASSCODE:
+            kwargs["passcode"] = config.SNOWFLAKE_PASSCODE
+        if config.SNOWFLAKE_PASSCODE_IN_PASSWORD:
+            kwargs["passcode_in_password"] = True
         if include_context:
             if config.SNOWFLAKE_DATABASE:
                 kwargs["database"] = config.SNOWFLAKE_DATABASE

@@ -14,7 +14,7 @@ class MonitorCache:
     def __init__(self, refresh_seconds):
         self.refresh_seconds = max(2, int(refresh_seconds or 5))
         self._lock = threading.RLock()
-        self._payload = None
+        self._payload = self._fallback_payload(source="starting")
         self._stop_event = threading.Event()
         self._thread = None
         self._last_error = None
@@ -23,7 +23,6 @@ class MonitorCache:
     def start(self):
         if self._thread and self._thread.is_alive():
             return
-        self.refresh(force=True)
         self._thread = threading.Thread(
             target=self._loop,
             name="kumo-monitor-refresh",
@@ -39,8 +38,6 @@ class MonitorCache:
         self._stop_event.set()
 
     def get(self):
-        if self._payload is None:
-            self.refresh(force=True)
         with self._lock:
             return self._payload
 
@@ -100,10 +97,7 @@ class MonitorCache:
 
     def _build_payload(self):
         if config.USE_MOCK or not sf.is_configured():
-            payload = dict(MOCK_MONITOR)
-            payload["refreshIntervalMs"] = self.refresh_seconds * 1000
-            payload["generatedAt"] = datetime.now(timezone.utc).isoformat()
-            return payload
+            return self._fallback_payload(source="mock")
 
         workflows = repo.load_monitor_rows()
         return {
@@ -117,11 +111,14 @@ class MonitorCache:
         }
 
     def _error_payload(self, exc):
+        return self._fallback_payload(source="error-fallback", error=str(exc))
+
+    def _fallback_payload(self, source, error=None):
         payload = dict(MOCK_MONITOR)
-        payload["source"] = "error-fallback"
+        payload["source"] = source
         payload["generatedAt"] = datetime.now(timezone.utc).isoformat()
         payload["refreshIntervalMs"] = self.refresh_seconds * 1000
-        payload["error"] = str(exc)
+        payload["error"] = error
         return payload
 
 
