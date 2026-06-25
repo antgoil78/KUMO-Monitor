@@ -41,6 +41,7 @@ export const api = {
   monitor: () => requestJson('/api/monitor'),
   refreshMonitor: () => requestJson('/api/monitor/refresh', { method: 'POST' }),
   workflowRunLocks: () => requestJson('/api/workflow-run-locks', { timeoutMs: 12000 }),
+  realtimeState: () => requestJson('/api/realtime/state', { timeoutMs: 5000 }),
   runWorkflow: (workflowId, workflowName = '') => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/run`, {
     method: 'POST',
     body: JSON.stringify({ triggerSource: 'MANUAL', workflowName })

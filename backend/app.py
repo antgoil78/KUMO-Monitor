@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import socket
 import time
 import uuid
 from datetime import datetime, timezone
@@ -23,12 +24,16 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 CORS(app)
 logging.basicConfig(level=logging.INFO)
 
+_RUNTIME_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 _active_users_lock = Lock()
 _active_users = {}
 _live_run_locks_lock = Lock()
 _live_run_locks = {}
 _shared_run_locks_lock = Lock()
 _shared_run_locks = {}
+_recent_run_events_lock = Lock()
+_recent_run_events = {}
+_RECENT_RUN_EVENT_TTL_SECONDS = 180
 _TERMINAL_RUN_STATUSES = {
     "SUCCESS", "SUCCEEDED", "COMPLETED", "OK",
     "FAILED", "FAILURE", "ERROR", "CANCELLED", "CANCELED", "SKIPPED",
@@ -58,6 +63,34 @@ _RUN_STATUS_RANK = {
 
 def _now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _remember_run_event(event):
+    workflow_id = str((event or {}).get("workflowId") or "")
+    if not workflow_id:
+        return
+    item = dict(event or {})
+    item["rememberedAt"] = _now_iso()
+    item["_rememberedMonotonic"] = time.monotonic()
+    with _recent_run_events_lock:
+        _recent_run_events[workflow_id] = item
+        _prune_recent_run_events_locked()
+
+
+def _prune_recent_run_events_locked():
+    now = time.monotonic()
+    for workflow_id, event in list(_recent_run_events.items()):
+        if now - float(event.get("_rememberedMonotonic") or now) > _RECENT_RUN_EVENT_TTL_SECONDS:
+            _recent_run_events.pop(workflow_id, None)
+
+
+def _recent_run_event_list():
+    with _recent_run_events_lock:
+        _prune_recent_run_events_locked()
+        return [
+            {k: v for k, v in event.items() if not str(k).startswith("_")}
+            for event in _recent_run_events.values()
+        ]
 
 
 def _upsert_live_run_lock(lock):
@@ -225,6 +258,22 @@ class StatusCoordinator:
         with self._lock:
             return self._client_count, list(self._active_runs.values())
 
+    def diagnostics(self):
+        with self._lock:
+            return {
+                "clientCount": self._client_count,
+                "activeRuns": [
+                    {
+                        "workflowId": run.get("workflowId"),
+                        "workflowName": run.get("workflowName"),
+                        "runId": run.get("runId"),
+                        "lastStatus": run.get("lastStatus"),
+                    }
+                    for run in self._active_runs.values()
+                ],
+                "threadAlive": bool(self._thread and self._thread.is_alive()),
+            }
+
     def _remove_run(self, workflow_id, run_id):
         with self._lock:
             self._active_runs.pop((str(workflow_id), str(run_id)), None)
@@ -267,7 +316,7 @@ class StatusCoordinator:
             "message": f"Run is {status}.",
         })
         _persist_live_run_lock_async(current_lock, actor=actor)
-        realtime_broker.publish("workflow_run_status", {
+        event = {
             "workflowId": workflow_id,
             "workflowName": workflow_name,
             "runId": run_id,
@@ -276,7 +325,9 @@ class StatusCoordinator:
             "actor": actor,
             "requestedBy": requested_by,
             **status_row,
-        })
+        }
+        _remember_run_event(event)
+        realtime_broker.publish("workflow_run_status", event)
 
         if status in _TERMINAL_RUN_STATUSES:
             _release_live_run_lock(workflow_id)
@@ -284,7 +335,7 @@ class StatusCoordinator:
                 repo.release_workflow_run_lock_for_run(workflow_id, run_id=run_id, status=status, reason="HISTORY_TERMINAL")
             except Exception as exc:
                 app.logger.warning("Could not release shared run lock: %s", exc)
-            realtime_broker.publish("workflow_run_status", {
+            terminal_event = {
                 "workflowId": workflow_id,
                 "workflowName": workflow_name,
                 "runId": run_id,
@@ -293,7 +344,9 @@ class StatusCoordinator:
                 "actor": actor,
                 "requestedBy": requested_by,
                 **status_row,
-            })
+            }
+            _remember_run_event(terminal_event)
+            realtime_broker.publish("workflow_run_status", terminal_event)
             return True
         return False
 
@@ -334,14 +387,16 @@ class StatusCoordinator:
                 self._shared_lock_signatures[workflow_id] = signature
                 current_lock = _upsert_live_run_lock(lock)
                 event_type = "workflow_run_queued" if status == "QUEUED" else "workflow_run_status"
-                realtime_broker.publish(event_type, {
+                event = {
                     "workflowId": workflow_id,
                     "workflowName": lock.get("workflowName") or workflow_id,
                     "runId": run_id,
                     "status": status,
                     "lock": current_lock,
                     "requestedBy": lock.get("requestedBy") or "",
-                })
+                }
+                _remember_run_event(event)
+                realtime_broker.publish(event_type, event)
             if run_id and status not in _TERMINAL_RUN_STATUSES:
                 self.track_run(
                     workflow_id,
@@ -826,6 +881,19 @@ def workflow_run_locks():
         return _json_error(exc, 500)
 
 
+@app.route("/api/realtime/state")
+def realtime_state():
+    return jsonify({
+        "ok": True,
+        "runtimeId": _RUNTIME_ID,
+        "clientCount": realtime_broker.client_count(),
+        "coordinator": status_coordinator.diagnostics(),
+        "locks": _live_run_lock_list(),
+        "events": _recent_run_event_list(),
+        "generatedAt": _now_iso(),
+    })
+
+
 def _actor_context():
     if config.USE_MOCK or not sf.is_configured():
         return {
@@ -911,7 +979,7 @@ def run_workflow(workflow_id):
             "requestedAt": _now_iso(),
             "message": "Queued. Waiting for dispatcher pickup.",
         })
-        realtime_broker.publish("workflow_run_queued", {
+        queued_event = {
             "workflowId": workflow_id,
             "workflowName": workflow_name,
             "runId": run_id,
@@ -919,7 +987,9 @@ def run_workflow(workflow_id):
             "lock": lock,
             "actor": actor,
             "requestedBy": requested_by,
-        })
+        }
+        _remember_run_event(queued_event)
+        realtime_broker.publish("workflow_run_queued", queued_event)
         status_coordinator.track_run(workflow_id, workflow_name, run_id, actor, requested_by)
         try:
             _persist_live_run_lock(lock, actor=actor, client_ip=_client_ip(), user_agent=_user_agent())

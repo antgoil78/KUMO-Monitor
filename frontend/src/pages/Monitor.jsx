@@ -632,6 +632,39 @@ export default function Monitor() {
     }
   }
 
+  function applyLiveRunUpdate(data) {
+    const liveRun = liveRunFromEvent(data)
+    if (!liveRun) return
+    if (terminalRunStatuses.has(normalizeStatus(liveRun.status, '-'))) {
+      setGlobalLocks(prev => (prev || []).filter(lock => lock.workflowId !== liveRun.workflowId))
+    } else {
+      setGlobalLocks(prev => upsertLock(prev, liveRun))
+    }
+    setPendingRuns(prev => ({
+      ...prev,
+      [liveRun.workflowId]: {
+        ...(prev[liveRun.workflowId] || {}),
+        startedAt: prev[liveRun.workflowId]?.startedAt || Date.now(),
+        runId: liveRun.runId || prev[liveRun.workflowId]?.runId || 'pending',
+        status: liveRun.status || prev[liveRun.workflowId]?.status || 'INITIATING',
+        lastStartTime: liveRun.lastStartTime || prev[liveRun.workflowId]?.lastStartTime || null,
+        lastEndTime: liveRun.lastEndTime || prev[liveRun.workflowId]?.lastEndTime || null
+      }
+    }))
+  }
+
+  async function loadRealtimeState() {
+    try {
+      const data = await api.realtimeState()
+      setGlobalLocks(prev => mergeLockSnapshot(prev, data.locks || []))
+      for (const event of data.events || []) {
+        applyLiveRunUpdate(event)
+      }
+    } catch (err) {
+      console.warn('Could not refresh realtime state', err)
+    }
+  }
+
   useEffect(() => { load(false); loadLocks() }, [])
   useEffect(() => {
     const source = createKumoEventSource((event) => {
@@ -662,24 +695,7 @@ export default function Monitor() {
       }
 
       if (['workflow_run_requested', 'workflow_run_queued', 'workflow_run_status'].includes(type)) {
-        const liveRun = liveRunFromEvent(data)
-        if (!liveRun) return
-        if (terminalRunStatuses.has(normalizeStatus(liveRun.status, '-'))) {
-          setGlobalLocks(prev => (prev || []).filter(lock => lock.workflowId !== liveRun.workflowId))
-        } else {
-          setGlobalLocks(prev => upsertLock(prev, liveRun))
-        }
-        setPendingRuns(prev => ({
-          ...prev,
-          [liveRun.workflowId]: {
-            ...(prev[liveRun.workflowId] || {}),
-            startedAt: prev[liveRun.workflowId]?.startedAt || Date.now(),
-            runId: liveRun.runId || prev[liveRun.workflowId]?.runId || 'pending',
-            status: liveRun.status || prev[liveRun.workflowId]?.status || 'INITIATING',
-            lastStartTime: liveRun.lastStartTime || prev[liveRun.workflowId]?.lastStartTime || null,
-            lastEndTime: liveRun.lastEndTime || prev[liveRun.workflowId]?.lastEndTime || null
-          }
-        }))
+        applyLiveRunUpdate(data)
         return
       }
 
@@ -696,6 +712,10 @@ export default function Monitor() {
       }
     }, () => {})
     return () => source?.close()
+  }, [])
+  useEffect(() => {
+    const id = setInterval(() => loadRealtimeState(), 1500)
+    return () => clearInterval(id)
   }, [])
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000)
