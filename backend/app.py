@@ -941,12 +941,12 @@ def _actor_context():
 
 @app.route("/api/workflows/<workflow_id>/run", methods=["POST"])
 def run_workflow(workflow_id):
-    return _run_workflow_impl(workflow_id, request.get_json(silent=True) or {}, "POST")
+    return flow_impl(workflow_id, request.get_json(silent=True) or {}, "POST")
 
 
 @app.route("/api/workflows/<workflow_id>/run-fallback")
 def run_workflow_fallback(workflow_id):
-    return _run_workflow_impl(workflow_id, {
+    return flow_impl(workflow_id, {
         "triggerSource": request.args.get("triggerSource") or "MANUAL",
         "workflowName": request.args.get("workflowName") or "",
         "requestedBy": request.args.get("requestedBy") or "",
@@ -977,24 +977,76 @@ def _run_workflow_impl(workflow_id, payload, request_method):
     )
 
     if config.USE_MOCK or not sf.is_configured():
-        response = {"ok": True, "runId": "mock-run", "status": "QUEUED", "actor": actor, "message": "Mock mode: run request accepted"}
-        _record_interaction("RUN_WORKFLOW", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, run_id="mock-run", payload=payload, response=response)
+        response = {
+            "ok": True,
+            "runId": "mock-run",
+            "status": "QUEUED",
+            "actor": actor,
+            "message": "Mock mode: run request accepted",
+        }
+        _record_interaction(
+            "RUN_WORKFLOW",
+            actor=actor,
+            entity_type="WORKFLOW",
+            entity_id=workflow_id,
+            workflow_id=workflow_id,
+            run_id="mock-run",
+            payload=payload,
+            response=response,
+        )
         return jsonify(response)
 
     try:
+        requested_at = _now_iso()
+
+        lock = _upsert_live_run_lock({
+            "lockId": f"live-{uuid.uuid4()}",
+            "workflowId": workflow_id,
+            "workflowName": workflow_name,
+            "runId": "pending",
+            "status": "INITIATING",
+            "requestedBy": requested_by,
+            "requestedByUser": actor.get("userName") or "",
+            "requestedByRole": actor.get("roleName") or "",
+            "requestedAt": requested_at,
+            "message": "Initiating. Waiting for run request to be queued.",
+        })
+
+        requested_event = {
+            "workflowId": workflow_id,
+            "workflowName": workflow_name,
+            "runId": "pending",
+            "status": "INITIATING",
+            "lock": lock,
+            "actor": actor,
+            "requestedBy": requested_by,
+            "requestedAt": requested_at,
+        }
+
+        _remember_run_event(requested_event)
+        realtime_broker.publish("workflow_run_requested", requested_event)
+
+        app.logger.info(
+            "KUMO_RUN_TIMING workflow_id=%s step=initiating_broadcast elapsed_ms=%d",
+            workflow_id,
+            int((time.perf_counter() - started_at) * 1000),
+        )
+
         run_id = repo.request_run(
             workflow_id=workflow_id,
             trigger_source=payload.get("triggerSource", "MANUAL"),
             requested_by=requested_by,
         )
+
         app.logger.info(
             "KUMO_RUN_TIMING workflow_id=%s step=queue_inserted run_id=%s elapsed_ms=%d",
             workflow_id,
             run_id,
             int((time.perf_counter() - started_at) * 1000),
         )
+
         lock = _upsert_live_run_lock({
-            "lockId": f"live-{uuid.uuid4()}",
+            **(lock or {}),
             "workflowId": workflow_id,
             "workflowName": workflow_name,
             "runId": run_id,
@@ -1002,9 +1054,10 @@ def _run_workflow_impl(workflow_id, payload, request_method):
             "requestedBy": requested_by,
             "requestedByUser": actor.get("userName") or "",
             "requestedByRole": actor.get("roleName") or "",
-            "requestedAt": _now_iso(),
+            "requestedAt": (lock or {}).get("requestedAt") or requested_at,
             "message": "Queued. Waiting for dispatcher pickup.",
         })
+
         queued_event = {
             "workflowId": workflow_id,
             "workflowName": workflow_name,
@@ -1014,26 +1067,45 @@ def _run_workflow_impl(workflow_id, payload, request_method):
             "actor": actor,
             "requestedBy": requested_by,
         }
+
         _remember_run_event(queued_event)
         realtime_broker.publish("workflow_run_queued", queued_event)
         status_coordinator.track_run(workflow_id, workflow_name, run_id, actor, requested_by)
+
         try:
             _persist_live_run_lock(lock, actor=actor, client_ip=_client_ip(), user_agent=_user_agent())
         except Exception as exc:
             app.logger.warning("Could not persist shared queued lock: %s", exc)
-        # Do not force a full monitor refresh here. It is slower and may briefly
-        # return the previous persisted status before the dispatcher/history has
-        # caught up. Server-sent events plus the run-lock overlay give all open
-        # browsers the immediate cross-user status instead.
+
+        # Do not force a full monitor refresh here.
+        # It is slower and may briefly return the previous persisted status before
+        # the dispatcher/history has caught up. Server-sent events plus the
+        # run-lock overlay give all open browsers the immediate cross-user status instead.
         response = {"ok": True, "runId": run_id, "status": "QUEUED", "lock": lock, "actor": actor}
-        _record_interaction("RUN_WORKFLOW", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, run_id=run_id, payload=payload, response=response)
+        _record_interaction(
+            "RUN_WORKFLOW",
+            actor=actor,
+            entity_type="WORKFLOW",
+            entity_id=workflow_id,
+            workflow_id=workflow_id,
+            run_id=run_id,
+            payload=payload,
+            response=response,
+        )
         return jsonify(response)
+
     except Exception as exc:
         _release_live_run_lock(workflow_id)
         try:
-            repo.release_workflow_run_lock_for_run(workflow_id, status="FAILED", reason="REQUEST_FAILED", error_message=str(exc))
+            repo.release_workflow_run_lock_for_run(
+                workflow_id,
+                status="FAILED",
+                reason="REQUEST_FAILED",
+                error_message=str(exc),
+            )
         except Exception:
             pass
+
         realtime_broker.publish("workflow_run_failed", {
             "workflowId": workflow_id,
             "workflowName": workflow_name,
@@ -1044,7 +1116,18 @@ def _run_workflow_impl(workflow_id, payload, request_method):
             "requestedBy": requested_by,
             "error": str(exc),
         })
-        _record_interaction("RUN_WORKFLOW", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, status="FAILED", success=False, error_message=str(exc), payload=payload)
+
+        _record_interaction(
+            "RUN_WORKFLOW",
+            actor=actor,
+            entity_type="WORKFLOW",
+            entity_id=workflow_id,
+            workflow_id=workflow_id,
+            status="FAILED",
+            success=False,
+            error_message=str(exc),
+            payload=payload,
+        )
         return _json_error(exc, 500)
 
 
