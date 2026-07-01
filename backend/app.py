@@ -581,6 +581,21 @@ def _active_user_list():
     return rows
 
 
+def _merge_active_users(persistent_users):
+    merged = {}
+    for user in persistent_users or []:
+        key = _user_key(user)
+        if key and key != "UNKNOWN":
+            merged[key] = dict(user)
+    for user in _active_user_list():
+        key = _user_key(user)
+        if key and key != "UNKNOWN":
+            merged[key] = {**merged.get(key, {}), **user}
+    rows = list(merged.values())
+    rows.sort(key=lambda r: r.get("lastSeenAt") or r.get("lastInteractionAt") or "", reverse=True)
+    return rows
+
+
 def _client_ip():
     forwarded = request.headers.get("X-Forwarded-For", "")
     if forwarded:
@@ -736,7 +751,7 @@ def _load_persistent_users(limit=50):
                 "hitCount": int(r.get("HIT_COUNT") or 0),
                 "clientIp": r.get("CLIENT_IP") or "",
             })
-        return out
+        return _merge_active_users(out)
     except Exception as exc:
         app.logger.warning("Could not load persistent app users: %s", exc)
         return _active_user_list()
@@ -772,6 +787,13 @@ def _dashboard_session_snapshot():
             "callerRightsActive": False,
             "callerTokenPresent": False,
         }
+
+    try:
+        session_info = sf.session_context()
+        _register_active_user(session_info, source="dashboard")
+        return {"ok": True, **session_info}
+    except Exception as exc:
+        app.logger.warning("Could not resolve dashboard session context: %s", exc)
 
     return {
         "ok": True,
@@ -1050,7 +1072,15 @@ def active_users():
     if realtime_broker.client_count() > 0:
         _request_dashboard_cache_refresh()
     snapshot = _dashboard_cache_snapshot()
-    return jsonify({**(snapshot.get("activeUsers") or {}), "cached": True, "cacheGeneratedAt": snapshot.get("generatedAt")})
+    active_users = _merge_active_users((snapshot.get("activeUsers") or {}).get("users") or [])
+    return jsonify({
+        **(snapshot.get("activeUsers") or {}),
+        "ok": True,
+        "users": active_users,
+        "count": len(active_users),
+        "cached": True,
+        "cacheGeneratedAt": snapshot.get("generatedAt"),
+    })
 
 
 @app.route("/api/snowflake/ping")
@@ -1066,16 +1096,23 @@ def dashboard():
     if realtime_broker.client_count() > 0:
         monitor_cache.refresh_async()
         _request_dashboard_cache_refresh()
+    session_info = _dashboard_session_snapshot()
     cache = _dashboard_cache_snapshot()
+    active_users = _merge_active_users((cache.get("activeUsers") or {}).get("users") or [])
     monitor_payload = monitor_cache.get()
     _reconcile_live_run_locks(monitor_payload)
     return jsonify({
         "ok": True,
         "source": "server-cache",
         "health": _health_snapshot(),
-        "session": _dashboard_session_snapshot(),
+        "session": session_info,
         "ping": cache.get("ping") or {},
-        "activeUsers": cache.get("activeUsers") or {"ok": True, "users": [], "count": 0},
+        "activeUsers": {
+            **(cache.get("activeUsers") or {}),
+            "ok": True,
+            "users": active_users,
+            "count": len(active_users),
+        },
         "monitor": monitor_payload,
         "cache": {
             "dashboardGeneratedAt": cache.get("generatedAt"),

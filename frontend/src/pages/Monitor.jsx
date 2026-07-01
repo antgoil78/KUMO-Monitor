@@ -143,6 +143,21 @@ function mergeLockSnapshot(previousLocks, incomingLocks) {
   return incoming.reduce((out, lock) => upsertLock(out, lock), []).filter(keepActive)
 }
 
+function locksSignature(locks) {
+  return (locks || [])
+    .map(lock => [
+      lock.workflowId || '',
+      lock.runId || '',
+      lock.status || '',
+      lock.sequence || '',
+      lock.requestedBy || '',
+      lock.lastStartTime || '',
+      lock.lastEndTime || ''
+    ].join(':'))
+    .sort()
+    .join('|')
+}
+
 function reconcileLocksFromWorkflows(locks, workflows) {
   if (!locks?.length) return []
   const byWorkflow = new Map((workflows || []).map(wf => [String(wf.workflowId), wf]))
@@ -759,7 +774,10 @@ export default function Monitor() {
   async function loadRealtimeState() {
     try {
       const data = await api.realtimeState()
-      setGlobalLocks(prev => mergeLockSnapshot(prev, data.locks || []))
+      setGlobalLocks(prev => {
+        const next = mergeLockSnapshot(prev, data.locks || [])
+        return locksSignature(prev) === locksSignature(next) ? prev : next
+      })
       for (const event of data.events || []) {
         applyLiveRunUpdate(event)
       }
@@ -820,11 +838,6 @@ export default function Monitor() {
     const id = setInterval(() => loadRealtimeState(), 1000)
     return () => clearInterval(id)
   }, [])
-  useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [])
-
   const workflows = payload?.workflows || []
   const lockByWorkflow = useMemo(() => {
     const map = {}
@@ -909,6 +922,17 @@ export default function Monitor() {
       progress: pendingTerminal ? null : { percent: null }
     }
   })
+
+  const hasActiveVisibleRuns = useMemo(
+    () => workflowsWithPending.some(w => isWorkflowBusy(w.lastStatus) || w.runLocked),
+    [workflowsWithPending]
+  )
+
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), hasActiveVisibleRuns ? 1000 : 15000)
+    return () => clearInterval(id)
+  }, [hasActiveVisibleRuns])
+
   const summary = useMemo(() => {
     const total = workflowsWithPending.length
     const success = workflowsWithPending.filter(w => statusKind(w.lastStatus) === 'success').length
@@ -1022,7 +1046,7 @@ export default function Monitor() {
         {filtered.length > 0 && (
           <table className="workflow-table monitor-table">
             <thead><tr><th>Workflow</th><th>Manage</th><th>Status</th><th>Last Run</th><th>Duration</th><th>Schedule</th><th>Next Run</th></tr></thead>
-            <tbody>{filtered.map(w => <WorkflowRow key={`${w.workflowId}-${w.lastRunId || 'none'}`} workflow={w} nowMs={nowMs} onManage={(workflow) => setModal({ type: 'actions', workflow })} pendingRun={pendingRuns[w.workflowId]} />)}</tbody>
+            <tbody>{filtered.map(w => <WorkflowRow key={w.workflowId} workflow={w} nowMs={nowMs} onManage={(workflow) => setModal({ type: 'actions', workflow })} pendingRun={pendingRuns[w.workflowId]} />)}</tbody>
           </table>
         )}
       </div>
