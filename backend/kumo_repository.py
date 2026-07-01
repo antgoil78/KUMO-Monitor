@@ -1,4 +1,5 @@
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -10,6 +11,9 @@ from utils import normalize_rows, row_get, sql_escape, parse_variant_array, next
 
 _describe_cache = {}
 _object_exists_cache = {}
+_last_run_lock_cleanup_monotonic = 0.0
+_engine_state_cache = None
+_engine_state_cache_monotonic = 0.0
 
 
 def _query(sql, params=None):
@@ -89,6 +93,32 @@ TERMINAL_RUN_STATUSES = {
     "SUCCESS", "SUCCEEDED", "COMPLETED", "OK",
     "FAILED", "FAILURE", "ERROR", "CANCELLED", "CANCELED", "SKIPPED"
 }
+RUN_STATUS_RANK = {
+    "INITIATING": 10,
+    "REQUESTED": 20,
+    "PENDING": 20,
+    "SCHEDULED": 20,
+    "QUEUED": 20,
+    "STARTING": 30,
+    "RUNNING": 30,
+    "IN_PROGRESS": 30,
+    "EXECUTING": 30,
+    "SUCCESS": 40,
+    "SUCCEEDED": 40,
+    "COMPLETED": 40,
+    "OK": 40,
+    "FAILED": 40,
+    "FAILURE": 40,
+    "ERROR": 40,
+    "CANCELLED": 40,
+    "CANCELED": 40,
+    "SKIPPED": 40,
+}
+
+
+def _status_rank_sql(expr):
+    cases = " ".join([f"WHEN '{status}' THEN {rank}" for status, rank in sorted(RUN_STATUS_RANK.items())])
+    return f"(CASE UPPER(COALESCE({expr}, '')) {cases} ELSE 0 END)"
 
 
 class WorkflowAlreadyActive(RuntimeError):
@@ -96,8 +126,9 @@ class WorkflowAlreadyActive(RuntimeError):
         self.lock = lock or {}
         workflow_name = self.lock.get("workflowName") or self.lock.get("workflowId") or "Workflow"
         status = self.lock.get("status") or "ACTIVE"
-        requested_by = self.lock.get("requestedBy") or "another user"
-        super().__init__(f"{workflow_name} is already {status}. Requested by {requested_by}.")
+        requested_by = self.lock.get("requestedBy") or self.lock.get("requestedByUser") or ""
+        suffix = f" Requested by {requested_by}." if requested_by else ""
+        super().__init__(f"{workflow_name} is already {status}.{suffix}")
 
 
 def _run_lock_table_available():
@@ -117,6 +148,7 @@ def _lock_payload(row):
         "requestedByRole": r.get("REQUESTED_BY_ROLE") or "",
         "requestedAt": r.get("REQUESTED_AT"),
         "lastSeenAt": r.get("LAST_SEEN_AT"),
+        "updatedAt": r.get("UPDATED_AT") or r.get("LAST_SEEN_AT") or r.get("REQUESTED_AT"),
         "lockExpiresAt": r.get("LOCK_EXPIRES_AT"),
         "message": r.get("MESSAGE") or "",
     }
@@ -124,8 +156,14 @@ def _lock_payload(row):
 
 def cleanup_workflow_run_locks():
     """Release UI locks once history reaches a terminal state, and expire stale locks."""
+    global _last_run_lock_cleanup_monotonic
     if not _run_lock_table_available():
         return
+    now = time.monotonic()
+    if now - _last_run_lock_cleanup_monotonic < 30:
+        return
+    _last_run_lock_cleanup_monotonic = now
+
     terminal = ", ".join([f"'{s}'" for s in sorted(TERMINAL_RUN_STATUSES)])
     try:
         _execute(
@@ -183,6 +221,7 @@ def load_active_run_locks(limit=500):
           REQUESTED_BY_ROLE,
           REQUESTED_AT,
           LAST_SEEN_AT,
+          UPDATED_AT,
           LOCK_EXPIRES_AT,
           MESSAGE
         FROM {config.T_APP_WORKFLOW_RUN_LOCKS}
@@ -190,7 +229,7 @@ def load_active_run_locks(limit=500):
           AND LOCK_EXPIRES_AT >= CURRENT_TIMESTAMP()
         QUALIFY ROW_NUMBER() OVER (
           PARTITION BY WORKFLOW_ID
-          ORDER BY REQUESTED_AT DESC NULLS LAST, UPDATED_AT DESC NULLS LAST
+          ORDER BY REQUESTED_AT ASC NULLS LAST, UPDATED_AT ASC NULLS LAST
         ) = 1
         ORDER BY REQUESTED_AT DESC NULLS LAST
         LIMIT {limit}
@@ -254,7 +293,7 @@ def upsert_workflow_run_lock(lock, actor=None, client_ip="", user_agent=""):
           LOCK_ID = COALESCE(t.LOCK_ID, s.LOCK_ID),
           WORKFLOW_NAME = s.WORKFLOW_NAME,
           RUN_ID = COALESCE(s.RUN_ID, t.RUN_ID),
-          STATUS = s.STATUS,
+          STATUS = IFF({_status_rank_sql('s.STATUS')} >= {_status_rank_sql('t.STATUS')}, s.STATUS, t.STATUS),
           REQUESTED_BY = s.REQUESTED_BY,
           REQUESTED_BY_USER = s.REQUESTED_BY_USER,
           REQUESTED_BY_ROLE = s.REQUESTED_BY_ROLE,
@@ -354,13 +393,14 @@ def active_run_lock_for_workflow(workflow_id):
           REQUESTED_BY_ROLE,
           REQUESTED_AT,
           LAST_SEEN_AT,
+          UPDATED_AT,
           LOCK_EXPIRES_AT,
           MESSAGE
         FROM {config.T_APP_WORKFLOW_RUN_LOCKS}
         WHERE WORKFLOW_ID = %(workflow_id)s
           AND RELEASED_AT IS NULL
           AND LOCK_EXPIRES_AT >= CURRENT_TIMESTAMP()
-        ORDER BY REQUESTED_AT DESC NULLS LAST, UPDATED_AT DESC NULLS LAST
+        ORDER BY REQUESTED_AT ASC NULLS LAST, UPDATED_AT ASC NULLS LAST
         LIMIT 1
         """,
         {"workflow_id": workflow_id},
@@ -641,27 +681,57 @@ def load_tasks():
         return []
 
 
+def upstream_workflows_for(workflow_id):
+    workflow_id = str(workflow_id or "").strip()
+    if not workflow_id:
+        return []
+    rows = normalize_rows(_query(
+        f"""
+        SELECT
+          WORKFLOW_ID,
+          ON_SUCCESS,
+          ON_FAIL
+        FROM {config.T_TASKS}
+        """
+    ))
+    upstream = []
+    for row in rows:
+        parent_id = str(row.get("WORKFLOW_ID") or "")
+        if not parent_id or parent_id == workflow_id:
+            continue
+        if workflow_id in set(parse_variant_array(row.get("ON_SUCCESS")) + parse_variant_array(row.get("ON_FAIL"))):
+            upstream.append(parent_id)
+    return upstream
+
+
 def get_engine_state():
+    global _engine_state_cache, _engine_state_cache_monotonic
+
+    now = time.monotonic()
+    if _engine_state_cache and now - _engine_state_cache_monotonic < 30:
+        return dict(_engine_state_cache)
+
     def rdict(row):
         return {str(k).upper(): v for k, v in dict(row).items()}
 
     task_name = "TASK_WF_MASTER_DISPATCHER"
-    for pattern in (f"{task_name}%", f"%{task_name}%"):
-        for scope in (f"SCHEMA {config.DB}.{config.SCHEMA}", f"DATABASE {config.DB}", "ACCOUNT"):
-            try:
-                rows = _query(f"SHOW TASKS LIKE '{pattern}' IN {scope}")
-                if rows:
-                    for row in rows:
-                        d = rdict(row)
-                        if str(d.get("NAME", "")).upper() == task_name:
-                            state = str(d.get("STATE", "")).upper().strip()
-                            return {"task": str(d.get("NAME", task_name)), "state": state, "status": _engine_status(state)}
-                    d = rdict(rows[0])
+    result = {"task": None, "state": None, "status": "MISSING"}
+    for scope in (f"SCHEMA {config.DB}.{config.SCHEMA}", f"DATABASE {config.DB}"):
+        try:
+            rows = _query(f"SHOW TASKS LIKE '{task_name}' IN {scope}")
+            for row in rows or []:
+                d = rdict(row)
+                if str(d.get("NAME", "")).upper() == task_name:
                     state = str(d.get("STATE", "")).upper().strip()
-                    return {"task": str(d.get("NAME", task_name)), "state": state, "status": _engine_status(state)}
-            except Exception:
-                continue
-    return {"task": None, "state": None, "status": "MISSING"}
+                    result = {"task": str(d.get("NAME", task_name)), "state": state, "status": _engine_status(state)}
+                    _engine_state_cache = dict(result)
+                    _engine_state_cache_monotonic = now
+                    return result
+        except Exception:
+            continue
+    _engine_state_cache = dict(result)
+    _engine_state_cache_monotonic = now
+    return result
 
 
 def _engine_status(state):

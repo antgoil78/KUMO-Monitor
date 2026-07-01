@@ -11,6 +11,8 @@ import config
 SPCS_TOKEN_FILE = "/snowflake/session/token"
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 _ingress_user_token = ContextVar("sf_ingress_user_token", default=None)
+_scoped_connection = ContextVar("sf_scoped_connection", default=None)
+_scoped_connection_key = ContextVar("sf_scoped_connection_key", default=None)
 
 
 def set_ingress_user_token(token):
@@ -152,7 +154,43 @@ def connection(use_warehouse=True, include_context=True, force_service=False):
         conn.close()
 
 
+@contextmanager
+def connection_scope(use_warehouse=True, include_context=True, force_service=False):
+    """Reuse one Snowflake connection across several related repository calls."""
+    key = (bool(use_warehouse), bool(include_context), bool(force_service))
+    existing = _scoped_connection.get()
+    existing_key = _scoped_connection_key.get()
+    if existing is not None and existing_key == key:
+        yield existing
+        return
+
+    with connection(use_warehouse=use_warehouse, include_context=include_context, force_service=force_service) as conn:
+        conn_token = _scoped_connection.set(conn)
+        key_token = _scoped_connection_key.set(key)
+        try:
+            yield conn
+        finally:
+            _scoped_connection.reset(conn_token)
+            _scoped_connection_key.reset(key_token)
+
+
+def _current_scoped_connection(use_warehouse=True, include_context=True, force_service=False):
+    key = (bool(use_warehouse), bool(include_context), bool(force_service))
+    if _scoped_connection_key.get() == key:
+        return _scoped_connection.get()
+    return None
+
+
 def query(sql, params=None, use_warehouse=True, include_context=True, force_service=False):
+    scoped = _current_scoped_connection(use_warehouse=use_warehouse, include_context=include_context, force_service=force_service)
+    if scoped is not None:
+        cur = scoped.cursor(DictCursor)
+        try:
+            cur.execute(sql, params or {})
+            return cur.fetchall()
+        finally:
+            cur.close()
+
     with connection(use_warehouse=use_warehouse, include_context=include_context, force_service=force_service) as conn:
         cur = conn.cursor(DictCursor)
         try:
@@ -163,6 +201,18 @@ def query(sql, params=None, use_warehouse=True, include_context=True, force_serv
 
 
 def execute(sql, params=None, use_warehouse=True, include_context=True, force_service=False):
+    scoped = _current_scoped_connection(use_warehouse=use_warehouse, include_context=include_context, force_service=force_service)
+    if scoped is not None:
+        cur = scoped.cursor(DictCursor)
+        try:
+            cur.execute(sql, params or {})
+            try:
+                return cur.fetchall()
+            except Exception:
+                return []
+        finally:
+            cur.close()
+
     with connection(use_warehouse=use_warehouse, include_context=include_context, force_service=force_service) as conn:
         cur = conn.cursor(DictCursor)
         try:

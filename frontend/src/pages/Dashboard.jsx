@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api } from '../api.js'
+import { api, createKumoEventSource } from '../api.js'
 import StatusBadge, { statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import { formatDateTime } from '../utils/time.js'
-
-function resolveSettled(result, fallback = null) {
-  return result.status === 'fulfilled' ? result.value : fallback
-}
 
 function percent(value, total) {
   if (!total) return 0
@@ -148,41 +144,62 @@ export default function Dashboard() {
     }
     setError(null)
 
-    const [monitorResult, healthResult, pingResult, sessionResult, activeUsersResult] = await Promise.allSettled([
-      api.monitor(),
-      api.health(),
-      api.snowflakePing(),
-      api.session(),
-      api.activeUsers()
-    ])
+    try {
+      const data = await api.dashboard()
+      const monitorData = data.monitor || dashboardCache?.payload || null
+      const healthData = data.health || dashboardCache?.health || null
+      const pingData = data.ping || dashboardCache?.ping || null
+      const sessionData = data.session || dashboardCache?.session || null
+      const usersData = data.activeUsers?.users || dashboardCache?.activeUsers || []
 
-    const monitorData = resolveSettled(monitorResult, dashboardCache?.payload || null)
-    const healthData = resolveSettled(healthResult, dashboardCache?.health || null)
-    const pingData = resolveSettled(pingResult, dashboardCache?.ping || null)
-    const sessionData = resolveSettled(sessionResult, dashboardCache?.session || null)
-    const activePayload = resolveSettled(activeUsersResult, null)
-    const usersData = activePayload?.users || sessionData?.activeUsers || dashboardCache?.activeUsers || []
+      dashboardCache = {
+        payload: monitorData,
+        health: healthData,
+        ping: pingData,
+        session: sessionData,
+        activeUsers: usersData,
+        cache: data.cache || null,
+        cachedAt: new Date().toISOString()
+      }
 
-    dashboardCache = {
-      payload: monitorData,
-      health: healthData,
-      ping: pingData,
-      session: sessionData,
-      activeUsers: usersData,
-      cachedAt: new Date().toISOString()
+      setPayload(monitorData)
+      setHealth(healthData)
+      setPing(pingData)
+      setSession(sessionData)
+      setActiveUsers(usersData)
+      if (data.cache?.dashboardError) setError(`Dashboard cache: ${data.cache.dashboardError}`)
+    } catch (err) {
+      if (!dashboardCache) setError(err.message || String(err))
+      if (dashboardCache) {
+        setPayload(dashboardCache.payload)
+        setHealth(dashboardCache.health)
+        setPing(dashboardCache.ping)
+        setSession(dashboardCache.session)
+        setActiveUsers(dashboardCache.activeUsers || [])
+      }
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
     }
-
-    setPayload(monitorData)
-    setHealth(healthData)
-    setPing(pingData)
-    setSession(sessionData)
-    setActiveUsers(usersData)
-
-    const failed = [monitorResult, healthResult].filter(r => r.status === 'rejected')
-    if (failed.length) setError(failed.map(r => r.reason?.message || String(r.reason)).join(' | '))
-    setLoading(false)
-    setRefreshing(false)
   }
+
+  useEffect(() => {
+    const source = createKumoEventSource((event) => {
+      if (event?.type === 'connected') {
+        load({ silent: Boolean(dashboardCache) })
+      }
+      if (event?.type === 'monitor_update') {
+        const monitorData = event.data || null
+        dashboardCache = {
+          ...(dashboardCache || {}),
+          payload: monitorData,
+          cachedAt: new Date().toISOString()
+        }
+        setPayload(monitorData)
+      }
+    }, () => {})
+    return () => source?.close()
+  }, [])
 
   useEffect(() => {
     load({ silent: Boolean(dashboardCache) })
@@ -240,7 +257,7 @@ export default function Dashboard() {
           <div className="vision-spinner" />
           <div>
             <strong>{loading ? 'Updating dashboard…' : 'Refreshing dashboard…'}</strong>
-            <span>Collecting monitor status, Snowflake health and active user data.</span>
+            <span>Reading the latest backend snapshot.</span>
           </div>
         </div>
       )}

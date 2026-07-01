@@ -29,13 +29,17 @@ async function requestJson(url, options = {}) {
   }
 
   if (!response.ok) {
-    throw new Error(data?.error || data?.message || `Request failed with ${response.status}`)
+    const err = new Error(data?.error || data?.message || `Request failed with ${response.status}`)
+    err.status = response.status
+    err.data = data
+    throw err
   }
   return data
 }
 
 export const api = {
   health: () => requestJson('/api/health'),
+  dashboard: () => requestJson('/api/dashboard', { timeoutMs: 8000 }),
   session: () => requestJson('/api/session'),
   activeUsers: () => requestJson('/api/users/active'),
   snowflakePing: () => requestJson('/api/snowflake/ping'),
@@ -74,9 +78,6 @@ export function createKumoEventSource(onEvent, onError) {
   if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
     return null
   }
-  const host = window.location.hostname
-  const enabled = ['localhost', '127.0.0.1'].includes(host) || new URLSearchParams(window.location.search).get('sse') === '1'
-  if (!enabled) return null
 
   const source = new window.EventSource('/api/events')
   const eventTypes = ['connected', 'monitor_update', 'workflow_run_requested', 'workflow_run_queued', 'workflow_run_status', 'workflow_run_failed']

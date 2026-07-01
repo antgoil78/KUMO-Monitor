@@ -1,0 +1,21 @@
+{
+  "name": "kumo-monitor",
+  "version": "1.0.0",
+  "description": "Runtime secrets are loaded from `.env`. This file is ignored by Git and should stay local to each developer machine.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/antgoil78/KUMO-Monitor.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/antgoil78/KUMO-Monitor/issues"
+  },
+  "homepage": "https://github.com/antgoil78/KUMO-Monitor#readme"
+}

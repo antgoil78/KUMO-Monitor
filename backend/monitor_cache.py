@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import threading
 import time
 from datetime import datetime, timezone
@@ -9,6 +10,8 @@ from mock_data import MOCK_MONITOR
 import snowflake_client as sf
 import kumo_repository as repo
 from realtime_events import realtime_broker
+
+logger = logging.getLogger(__name__)
 
 
 class MonitorCache:
@@ -21,23 +24,50 @@ class MonitorCache:
         self._last_error = None
         self._last_signature = None
         self._last_refresh_monotonic = 0.0
+        self._refreshing = False
+        self._refresh_done = threading.Condition(self._lock)
+        self._refresh_requested = threading.Event()
+        self._enabled = False
 
     def start(self):
-        if self._thread and self._thread.is_alive():
-            return
-        self._thread = threading.Thread(
-            target=self._loop,
-            name="kumo-monitor-refresh",
-            daemon=True,
-        )
-        self._thread.start()
+        with self._lock:
+            self._enabled = True
+            self._stop_event.clear()
+            if self._thread and self._thread.is_alive():
+                return
+            self._thread = threading.Thread(
+                target=self._loop,
+                name="kumo-monitor-refresh",
+                daemon=True,
+            )
+            self._thread.start()
 
     def _loop(self):
-        while not self._stop_event.wait(self.refresh_seconds):
+        self.refresh(force=True)
+        while True:
+            self._refresh_requested.wait(timeout=self.refresh_seconds)
+            self._refresh_requested.clear()
+            if self._stop_event.is_set() or not self.is_enabled():
+                break
             self.refresh(force=True)
+        with self._lock:
+            self._thread = None
 
     def stop(self):
-        self._stop_event.set()
+        with self._lock:
+            self._enabled = False
+            self._stop_event.set()
+            self._refresh_requested.set()
+
+    def is_enabled(self):
+        with self._lock:
+            return bool(self._enabled)
+
+    def set_enabled(self, enabled):
+        if enabled:
+            self.start()
+        else:
+            self.stop()
 
     def get(self):
         with self._lock:
@@ -52,7 +82,18 @@ class MonitorCache:
                 return self._payload
         return self.refresh(force=True)
 
+    def refresh_async(self):
+        if self.is_enabled():
+            self._refresh_requested.set()
+        return self.get()
+
     def refresh(self, force=False):
+        with self._lock:
+            if self._refreshing:
+                self._refresh_done.wait(timeout=max(10.0, self.refresh_seconds * 4.0))
+                return self._payload
+            self._refreshing = True
+
         try:
             payload = self._build_payload()
             should_publish = False
@@ -81,6 +122,10 @@ class MonitorCache:
             if should_publish:
                 realtime_broker.publish("monitor_update", fallback)
             return fallback
+        finally:
+            with self._lock:
+                self._refreshing = False
+                self._refresh_done.notify_all()
 
     def _signature(self, payload):
         """Return a stable signature for fields that change the visible monitor state."""
@@ -112,10 +157,23 @@ class MonitorCache:
         if config.USE_MOCK or not sf.is_configured():
             return self._fallback_payload(source="mock")
 
-        workflows = repo.load_monitor_rows()
+        started = time.perf_counter()
+        with sf.connection_scope(use_warehouse=True, include_context=True, force_service=True):
+            workflows_started = time.perf_counter()
+            workflows = repo.load_monitor_rows()
+            engine_started = time.perf_counter()
+            engine = repo.get_engine_state()
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "KUMO_MONITOR_TIMING total_ms=%d workflows_ms=%d engine_ms=%d rows=%d",
+            elapsed_ms,
+            int((engine_started - workflows_started) * 1000),
+            int((time.perf_counter() - engine_started) * 1000),
+            len(workflows or []),
+        )
         return {
             "source": "snowflake",
-            "engine": repo.get_engine_state(),
+            "engine": engine,
             "summary": repo.build_summary(workflows),
             "workflows": workflows,
             "generatedAt": datetime.now(timezone.utc).isoformat(),

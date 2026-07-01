@@ -1,15 +1,16 @@
 export default function ProgressBar({ progress, status }) {
   const upperStatus = String(status || '').toUpperCase()
   const isRunning = ['RUNNING', 'IN_PROGRESS', 'EXECUTING'].includes(upperStatus)
+  const isQueued = ['INITIATING', 'QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED', 'STARTING'].includes(upperStatus)
 
-  if (!progress && !isRunning) return <span className="progress-placeholder">-</span>
+  if (!progress && !isRunning && !isQueued) return <span className="progress-placeholder">-</span>
 
   const percent = progress?.percent
   const hasPercent = typeof percent === 'number'
   const width = hasPercent ? Math.max(0, Math.min(100, percent)) : 100
   const label = hasPercent
     ? `${width}%${progress?.total ? ` (${progress.done}/${progress.total})` : ''}`
-    : isRunning ? 'Running...' : '-'
+    : isRunning ? 'Running...' : isQueued ? `${upperStatus.charAt(0)}${upperStatus.slice(1).toLowerCase()}...` : '-'
 
   return (
     <div className="progress-wrap" title={label}>
