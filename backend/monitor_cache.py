@@ -69,6 +69,12 @@ class MonitorCache:
         else:
             self.stop()
 
+    def set_refresh_seconds(self, seconds):
+        seconds = max(2, int(seconds or self.refresh_seconds or 5))
+        with self._lock:
+            self.refresh_seconds = seconds
+        self._refresh_requested.set()
+
     def get(self):
         with self._lock:
             return self._payload

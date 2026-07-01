@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, createKumoEventSource } from '../api.js'
 import StatusBadge, { statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
@@ -14,6 +14,7 @@ function firstWord(value) {
 }
 
 let dashboardCache = null
+const refreshOptions = [5, 10, 30, 60, 120]
 
 function MetricCard({ label, value, delta, tone, icon, footer }) {
   return (
@@ -127,6 +128,7 @@ function TinyBarChart({ workflows }) {
 }
 
 export default function Dashboard() {
+  const pendingRefreshSec = useRef(null)
   const [payload, setPayload] = useState(dashboardCache?.payload || null)
   const [health, setHealth] = useState(dashboardCache?.health || null)
   const [ping, setPing] = useState(dashboardCache?.ping || null)
@@ -135,6 +137,9 @@ export default function Dashboard() {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(!dashboardCache)
   const [refreshing, setRefreshing] = useState(Boolean(dashboardCache))
+  const [refreshIntervalSec, setRefreshIntervalSec] = useState(
+    Number(dashboardCache?.settings?.refreshSeconds || window.localStorage.getItem('kumoDashboardRefreshSeconds') || 10)
+  )
 
   async function load({ silent = false } = {}) {
     if (silent) {
@@ -151,6 +156,12 @@ export default function Dashboard() {
       const pingData = data.ping || dashboardCache?.ping || null
       const sessionData = data.session || dashboardCache?.session || null
       const usersData = data.activeUsers?.users || dashboardCache?.activeUsers || []
+      const settingsData = data.settings || dashboardCache?.settings || null
+      const nextRefresh = Number(settingsData?.refreshSeconds || refreshIntervalSec || 10)
+      if (!pendingRefreshSec.current && nextRefresh && nextRefresh !== refreshIntervalSec) {
+        setRefreshIntervalSec(nextRefresh)
+        window.localStorage.setItem('kumoDashboardRefreshSeconds', String(nextRefresh))
+      }
 
       dashboardCache = {
         payload: monitorData,
@@ -158,6 +169,7 @@ export default function Dashboard() {
         ping: pingData,
         session: sessionData,
         activeUsers: usersData,
+        settings: settingsData,
         cache: data.cache || null,
         cachedAt: new Date().toISOString()
       }
@@ -203,9 +215,27 @@ export default function Dashboard() {
 
   useEffect(() => {
     load({ silent: Boolean(dashboardCache) })
-    const id = setInterval(() => load({ silent: true }), 10000)
+    const id = setInterval(() => load({ silent: true }), Math.max(5, refreshIntervalSec || 10) * 1000)
     return () => clearInterval(id)
-  }, [])
+  }, [refreshIntervalSec])
+
+  async function updateRefreshInterval(value) {
+    const seconds = Number(value)
+    pendingRefreshSec.current = seconds
+    setRefreshIntervalSec(seconds)
+    window.localStorage.setItem('kumoDashboardRefreshSeconds', String(seconds))
+    try {
+      const settings = await api.updateRefreshSettings(seconds)
+      dashboardCache = { ...(dashboardCache || {}), settings }
+      const confirmed = Number(settings?.refreshSeconds || seconds)
+      setRefreshIntervalSec(confirmed)
+      window.localStorage.setItem('kumoDashboardRefreshSeconds', String(confirmed))
+    } catch (err) {
+      setError(err.message || String(err))
+    } finally {
+      pendingRefreshSec.current = null
+    }
+  }
 
   const workflows = payload?.workflows || []
   const summary = payload?.summary || { total: 0, success: 0, failed: 0, running: 0, queued: 0 }
@@ -246,21 +276,17 @@ export default function Dashboard() {
             <span className={`topbar-dot ${snowflakeOk ? 'success' : mockMode ? 'queued' : 'failed'}`} />
             <span title={ping?.error || ''}>{mockMode ? 'Mock mode' : snowflakeOk ? 'Snowflake connected' : 'Snowflake check failed'}</span>
           </div>
+          <label className="topbar-refresh-control">
+            <span>{refreshing ? 'Refreshing' : 'Refresh'}</span>
+            <select value={refreshIntervalSec} onChange={event => updateRefreshInterval(event.target.value)}>
+              {refreshOptions.map(seconds => <option key={seconds} value={seconds}>{seconds}s</option>)}
+            </select>
+          </label>
         </div>
       </div>
 
       {error && <div className="alert error">{error}</div>}
       {payload?.error && <div className="alert warning">Backend fallback: {payload.error}</div>}
-
-      {(loading || refreshing) && (
-        <div className={`dashboard-loading-panel ${refreshing && !loading ? 'compact' : ''}`}>
-          <div className="vision-spinner" />
-          <div>
-            <strong>{loading ? 'Updating dashboard…' : 'Refreshing dashboard…'}</strong>
-            <span>Reading the latest backend snapshot.</span>
-          </div>
-        </div>
-      )}
 
       <div className="metric-grid vision-grid-4">
         <MetricCard
@@ -289,8 +315,8 @@ export default function Dashboard() {
         />
         <MetricCard
           label="Backend refresh"
-          value={`${health?.refreshSeconds || payload?.refreshIntervalMs / 1000 || 5}s`}
-          delta="Live polling"
+          value={`${refreshIntervalSec || health?.refreshSeconds || payload?.refreshIntervalMs / 1000 || 5}s`}
+          delta={refreshing ? 'Refreshing' : 'Live polling'}
           tone="queued"
           icon="↻"
           footer={`Updated ${formatDateTime(payload?.generatedAt)}`}

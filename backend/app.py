@@ -73,6 +73,8 @@ _dashboard_cache = {
     "error": None,
 }
 _dashboard_cache_enabled = False
+_runtime_settings_lock = Lock()
+_dashboard_refresh_seconds = max(5, int(getattr(config, "KUMO_DASHBOARD_CACHE_SECONDS", config.REFRESH_SECONDS) or config.REFRESH_SECONDS))
 
 
 def _build_info():
@@ -858,9 +860,10 @@ def _refresh_dashboard_cache_once():
 
 def _dashboard_cache_loop():
     global _dashboard_cache_thread
-    interval = max(5, int(getattr(config, "KUMO_DASHBOARD_CACHE_SECONDS", config.REFRESH_SECONDS) or config.REFRESH_SECONDS))
     _refresh_dashboard_cache_once()
     while True:
+        with _runtime_settings_lock:
+            interval = max(5, int(_dashboard_refresh_seconds or config.REFRESH_SECONDS))
         _dashboard_cache_wake.wait(timeout=interval)
         _dashboard_cache_wake.clear()
         with _dashboard_cache_lock:
@@ -905,6 +908,26 @@ def _request_dashboard_cache_refresh():
 def _dashboard_cache_snapshot():
     with _dashboard_cache_lock:
         return dict(_dashboard_cache)
+
+
+def _runtime_refresh_settings():
+    with _runtime_settings_lock:
+        dashboard_seconds = int(_dashboard_refresh_seconds)
+    return {
+        "refreshSeconds": int(monitor_cache.refresh_seconds),
+        "monitorRefreshSeconds": int(monitor_cache.refresh_seconds),
+        "dashboardRefreshSeconds": dashboard_seconds,
+    }
+
+
+def _set_runtime_refresh_seconds(seconds):
+    global _dashboard_refresh_seconds
+    seconds = max(5, min(int(seconds or config.REFRESH_SECONDS), 300))
+    monitor_cache.set_refresh_seconds(seconds)
+    with _runtime_settings_lock:
+        _dashboard_refresh_seconds = seconds
+    _dashboard_cache_wake.set()
+    return _runtime_refresh_settings()
 
 
 def _record_interaction(action, actor=None, entity_type=None, entity_id=None, workflow_id=None,
@@ -1025,10 +1048,19 @@ def _health_snapshot():
         "snowflakeConfigured": sf.is_configured(),
         "snowflakeConnectionMode": sf.connection_mode(),
         "callerTokenPresent": sf.caller_token_present(),
-        "refreshSeconds": config.REFRESH_SECONDS,
+        "refreshSeconds": _runtime_refresh_settings()["refreshSeconds"],
         "db": config.DB,
         "schema": config.SCHEMA,
     }
+
+
+@app.route("/api/settings/refresh", methods=["GET", "PATCH"])
+def refresh_settings():
+    if request.method == "GET":
+        return jsonify({"ok": True, **_runtime_refresh_settings()})
+    payload = request.get_json(silent=True) or {}
+    seconds = payload.get("seconds") or payload.get("refreshSeconds")
+    return jsonify({"ok": True, **_set_runtime_refresh_seconds(seconds)})
 
 
 @app.route("/api/session")
@@ -1113,6 +1145,7 @@ def dashboard():
             "users": active_users,
             "count": len(active_users),
         },
+        "settings": _runtime_refresh_settings(),
         "monitor": monitor_payload,
         "cache": {
             "dashboardGeneratedAt": cache.get("generatedAt"),
