@@ -1781,7 +1781,9 @@ def index():
 
 
 @app.route("/sfc_oauth_complete")
+@app.route("/sfc-oauth-complete")
 @app.route("/sfc_oatch_complete")
+@app.route("/sfc-oatch-complete")
 def snowflake_oauth_complete():
     app.logger.info("Snowflake OAuth callback path reached app: %s", request.path)
     return send_from_directory(app.static_folder, "index.html")
