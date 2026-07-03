@@ -24,6 +24,9 @@ class MonitorCache:
         self._last_error = None
         self._last_signature = None
         self._last_refresh_monotonic = 0.0
+        self._last_refresh_at = None
+        self._last_duration_ms = None
+        self._refresh_count = 0
         self._refreshing = False
         self._refresh_done = threading.Condition(self._lock)
         self._refresh_requested = threading.Event()
@@ -79,6 +82,23 @@ class MonitorCache:
         with self._lock:
             return self._payload
 
+    def diagnostics(self):
+        with self._lock:
+            age = None
+            if self._last_refresh_monotonic:
+                age = round(time.monotonic() - float(self._last_refresh_monotonic), 1)
+            return {
+                "enabled": bool(self._enabled),
+                "threadAlive": bool(self._thread and self._thread.is_alive()),
+                "refreshing": bool(self._refreshing),
+                "refreshSeconds": int(self.refresh_seconds),
+                "lastRefreshAt": self._last_refresh_at,
+                "lastRefreshAgeSeconds": age,
+                "lastDurationMs": self._last_duration_ms,
+                "refreshCount": int(self._refresh_count),
+                "lastError": str(self._last_error) if self._last_error else None,
+            }
+
     def get_or_refresh(self, max_age_seconds=None):
         max_age = self.refresh_seconds if max_age_seconds is None else max(0, float(max_age_seconds))
         with self._lock:
@@ -100,6 +120,7 @@ class MonitorCache:
                 return self._payload
             self._refreshing = True
 
+        started = time.monotonic()
         try:
             payload = self._build_payload()
             should_publish = False
@@ -108,6 +129,9 @@ class MonitorCache:
                 self._payload = payload
                 self._last_error = None
                 self._last_refresh_monotonic = time.monotonic()
+                self._last_refresh_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+                self._last_duration_ms = int((time.monotonic() - started) * 1000)
+                self._refresh_count += 1
                 if signature != self._last_signature:
                     self._last_signature = signature
                     should_publish = True
@@ -122,6 +146,9 @@ class MonitorCache:
                 self._payload = fallback
                 self._last_error = str(exc)
                 self._last_refresh_monotonic = time.monotonic()
+                self._last_refresh_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+                self._last_duration_ms = int((time.monotonic() - started) * 1000)
+                self._refresh_count += 1
                 if signature != self._last_signature:
                     self._last_signature = signature
                     should_publish = True

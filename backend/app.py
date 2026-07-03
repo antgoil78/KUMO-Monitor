@@ -71,6 +71,7 @@ _dashboard_cache = {
     "durationMs": None,
     "refreshing": False,
     "error": None,
+    "refreshCount": 0,
 }
 _dashboard_cache_enabled = False
 _runtime_settings_lock = Lock()
@@ -534,6 +535,10 @@ def _set_realtime_client_count(count):
     status_coordinator.set_client_count(count)
     monitor_cache.set_enabled(count > 0)
     _set_dashboard_cache_enabled(count > 0)
+    try:
+        realtime_broker.publish("realtime_state", _realtime_runtime_state())
+    except Exception as exc:
+        app.logger.debug("Could not publish realtime state: %s", exc)
 
 
 realtime_broker.set_client_count_callback(_set_realtime_client_count)
@@ -855,6 +860,7 @@ def _refresh_dashboard_cache_once():
             "durationMs": int((time.perf_counter() - started) * 1000),
             "refreshing": False,
             "error": error,
+            "refreshCount": int((_dashboard_cache.get("refreshCount") or 0) + 1),
         }
 
 
@@ -910,6 +916,29 @@ def _dashboard_cache_snapshot():
         return dict(_dashboard_cache)
 
 
+def _dashboard_cache_diagnostics():
+    with _dashboard_cache_lock:
+        generated_at = _dashboard_cache.get("generatedAt")
+        refreshing = bool(_dashboard_cache.get("refreshing"))
+        duration_ms = _dashboard_cache.get("durationMs")
+        error = _dashboard_cache.get("error")
+        refresh_count = int(_dashboard_cache.get("refreshCount") or 0)
+        enabled = bool(_dashboard_cache_enabled)
+        thread_alive = bool(_dashboard_cache_thread and _dashboard_cache_thread.is_alive())
+    with _runtime_settings_lock:
+        refresh_seconds = int(_dashboard_refresh_seconds)
+    return {
+        "enabled": enabled,
+        "threadAlive": thread_alive,
+        "refreshing": refreshing,
+        "refreshSeconds": refresh_seconds,
+        "lastRefreshAt": generated_at,
+        "lastDurationMs": duration_ms,
+        "refreshCount": refresh_count,
+        "lastError": error,
+    }
+
+
 def _runtime_refresh_settings():
     with _runtime_settings_lock:
         dashboard_seconds = int(_dashboard_refresh_seconds)
@@ -928,6 +957,25 @@ def _set_runtime_refresh_seconds(seconds):
         _dashboard_refresh_seconds = seconds
     _dashboard_cache_wake.set()
     return _runtime_refresh_settings()
+
+
+def _realtime_runtime_state():
+    client_count = realtime_broker.client_count()
+    monitor_state = monitor_cache.diagnostics()
+    dashboard_state = _dashboard_cache_diagnostics()
+    polling_active = client_count > 0 and (
+        bool(monitor_state.get("threadAlive"))
+        or bool(monitor_state.get("refreshing"))
+        or bool(dashboard_state.get("threadAlive"))
+        or bool(dashboard_state.get("refreshing"))
+    )
+    return {
+        "clientCount": client_count,
+        "pollingActive": polling_active,
+        "monitorCache": monitor_state,
+        "dashboardCache": dashboard_state,
+        "coordinator": status_coordinator.diagnostics(),
+    }
 
 
 def _record_interaction(action, actor=None, entity_type=None, entity_id=None, workflow_id=None,
@@ -1101,8 +1149,6 @@ def session_context():
 
 @app.route("/api/users/active")
 def active_users():
-    if realtime_broker.client_count() > 0:
-        _request_dashboard_cache_refresh()
     snapshot = _dashboard_cache_snapshot()
     active_users = _merge_active_users((snapshot.get("activeUsers") or {}).get("users") or [])
     return jsonify({
@@ -1117,17 +1163,12 @@ def active_users():
 
 @app.route("/api/snowflake/ping")
 def snowflake_ping():
-    if realtime_broker.client_count() > 0:
-        _request_dashboard_cache_refresh()
     snapshot = _dashboard_cache_snapshot()
     return jsonify({**(snapshot.get("ping") or {}), "cached": True, "cacheGeneratedAt": snapshot.get("generatedAt")}), 200
 
 
 @app.route("/api/dashboard")
 def dashboard():
-    if realtime_broker.client_count() > 0:
-        monitor_cache.refresh_async()
-        _request_dashboard_cache_refresh()
     session_info = _dashboard_session_snapshot()
     cache = _dashboard_cache_snapshot()
     active_users = _merge_active_users((cache.get("activeUsers") or {}).get("users") or [])
@@ -1146,12 +1187,14 @@ def dashboard():
             "count": len(active_users),
         },
         "settings": _runtime_refresh_settings(),
+        "realtime": _realtime_runtime_state(),
         "monitor": monitor_payload,
         "cache": {
             "dashboardGeneratedAt": cache.get("generatedAt"),
             "dashboardDurationMs": cache.get("durationMs"),
             "dashboardRefreshing": bool(cache.get("refreshing")),
             "dashboardError": cache.get("error"),
+            "dashboardRefreshCount": int(cache.get("refreshCount") or 0),
             "monitorGeneratedAt": monitor_payload.get("generatedAt") if isinstance(monitor_payload, dict) else None,
         },
         "generatedAt": _now_iso(),
@@ -1160,8 +1203,6 @@ def dashboard():
 
 @app.route("/api/monitor")
 def monitor():
-    if realtime_broker.client_count() > 0:
-        monitor_cache.refresh_async()
     payload = monitor_cache.get()
     _reconcile_live_run_locks(payload)
     return jsonify(payload)
@@ -1199,8 +1240,7 @@ def realtime_state():
     return jsonify({
         "ok": True,
         **_build_info(),
-        "clientCount": realtime_broker.client_count(),
-        "coordinator": status_coordinator.diagnostics(),
+        **_realtime_runtime_state(),
         "locks": _live_run_lock_list(),
         "events": _recent_run_event_list(),
         "generatedAt": _now_iso(),

@@ -162,6 +162,7 @@ h2, h3 { color: var(--text-strong); margin: 0; }
 .topbar-dot.success { color: var(--green); }
 .topbar-dot.queued { color: var(--amber); }
 .topbar-dot.failed { color: var(--red); }
+.realtime-status { min-width: 176px; }
 .topbar-refresh-control {
   min-height: 38px;
   display: inline-flex;

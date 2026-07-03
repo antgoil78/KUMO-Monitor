@@ -134,6 +134,7 @@ export default function Dashboard() {
   const [ping, setPing] = useState(dashboardCache?.ping || null)
   const [session, setSession] = useState(dashboardCache?.session || null)
   const [activeUsers, setActiveUsers] = useState(dashboardCache?.activeUsers || [])
+  const [realtime, setRealtime] = useState(dashboardCache?.realtime || null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(!dashboardCache)
   const [refreshing, setRefreshing] = useState(Boolean(dashboardCache))
@@ -156,6 +157,7 @@ export default function Dashboard() {
       const pingData = data.ping || dashboardCache?.ping || null
       const sessionData = data.session || dashboardCache?.session || null
       const usersData = data.activeUsers?.users || dashboardCache?.activeUsers || []
+      const realtimeData = data.realtime || dashboardCache?.realtime || null
       const settingsData = data.settings || dashboardCache?.settings || null
       const nextRefresh = Number(settingsData?.refreshSeconds || refreshIntervalSec || 10)
       if (!pendingRefreshSec.current && nextRefresh && nextRefresh !== refreshIntervalSec) {
@@ -169,6 +171,7 @@ export default function Dashboard() {
         ping: pingData,
         session: sessionData,
         activeUsers: usersData,
+        realtime: realtimeData,
         settings: settingsData,
         cache: data.cache || null,
         cachedAt: new Date().toISOString()
@@ -179,6 +182,7 @@ export default function Dashboard() {
       setPing(pingData)
       setSession(sessionData)
       setActiveUsers(usersData)
+      setRealtime(realtimeData)
       if (data.cache?.dashboardError) setError(`Dashboard cache: ${data.cache.dashboardError}`)
     } catch (err) {
       if (!dashboardCache) setError(err.message || String(err))
@@ -188,6 +192,7 @@ export default function Dashboard() {
         setPing(dashboardCache.ping)
         setSession(dashboardCache.session)
         setActiveUsers(dashboardCache.activeUsers || [])
+        setRealtime(dashboardCache.realtime || null)
       }
     } finally {
       setLoading(false)
@@ -199,6 +204,15 @@ export default function Dashboard() {
     const source = createKumoEventSource((event) => {
       if (event?.type === 'connected') {
         load({ silent: Boolean(dashboardCache) })
+      }
+      if (event?.type === 'realtime_state') {
+        const realtimeData = event.data || null
+        dashboardCache = {
+          ...(dashboardCache || {}),
+          realtime: realtimeData,
+          cachedAt: new Date().toISOString()
+        }
+        setRealtime(realtimeData)
       }
       if (event?.type === 'monitor_update') {
         const monitorData = event.data || null
@@ -256,6 +270,10 @@ export default function Dashboard() {
   const displayName = session?.displayName || session?.userName || 'KUMO user'
   const welcomeName = session?.firstName || firstWord(displayName)
   const callerRightsActive = Boolean(session?.callerRightsActive)
+  const connectedClients = Number(realtime?.clientCount || 0)
+  const pollingActive = Boolean(realtime?.pollingActive)
+  const monitorCache = realtime?.monitorCache || {}
+  const dashboardRuntimeCache = realtime?.dashboardCache || {}
   const engineKind = statusKind(engine.status)
   const engineOk = ['success', 'running'].includes(engineKind)
   const cacheFresh = Boolean(payload?.generatedAt)
@@ -275,6 +293,10 @@ export default function Dashboard() {
           <div className="topbar-status">
             <span className={`topbar-dot ${snowflakeOk ? 'success' : mockMode ? 'queued' : 'failed'}`} />
             <span title={ping?.error || ''}>{mockMode ? 'Mock mode' : snowflakeOk ? 'Snowflake connected' : 'Snowflake check failed'}</span>
+          </div>
+          <div className="topbar-status realtime-status" title="Live browser connections using /api/events">
+            <span className={`topbar-dot ${pollingActive ? 'success' : 'failed'}`} />
+            <span>{connectedClients} client{connectedClients === 1 ? '' : 's'} · {pollingActive ? 'polling on' : 'polling off'}</span>
           </div>
           <label className="topbar-refresh-control">
             <span>{refreshing ? 'Refreshing' : 'Refresh'}</span>
@@ -384,6 +406,18 @@ export default function Dashboard() {
             <HealthCheck label="Warehouse" detail={warehouse} ok={snowflakeOk && warehouse !== 'Not selected'} />
             <HealthCheck label="Workflow engine" detail={engine.status || 'UNKNOWN'} ok={engineOk} tone={engineKind} />
             <HealthCheck label="Monitor cache" detail={cacheFresh ? `Fresh ${formatDateTime(payload?.generatedAt)}` : 'No data'} ok={cacheFresh} />
+            <HealthCheck
+              label="Connected clients"
+              detail={`${connectedClients} SSE connection${connectedClients === 1 ? '' : 's'}`}
+              ok={connectedClients > 0}
+              tone={connectedClients > 0 ? 'success' : 'failed'}
+            />
+            <HealthCheck
+              label="Backend polling"
+              detail={`${pollingActive ? 'Active' : 'Stopped'} · monitor #${monitorCache.refreshCount || 0} · dashboard #${dashboardRuntimeCache.refreshCount || 0}`}
+              ok={pollingActive}
+              tone={pollingActive ? 'success' : 'failed'}
+            />
           </div>
         </div>
       </div>
