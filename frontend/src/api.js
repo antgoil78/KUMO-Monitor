@@ -2,7 +2,6 @@ async function requestJson(url, options = {}) {
   const { timeoutMs = 45000, ...fetchOptions } = options
   const controller = new AbortController()
   const timer = window.setTimeout(() => controller.abort(), timeoutMs)
-
   let response
   try {
     response = await fetch(url, {
@@ -19,7 +18,6 @@ async function requestJson(url, options = {}) {
   } finally {
     window.clearTimeout(timer)
   }
-
   const text = await response.text()
   let data = null
   try {
@@ -36,7 +34,6 @@ async function requestJson(url, options = {}) {
   }
   return data
 }
-
 export const api = {
   health: () => requestJson('/api/health'),
   dashboard: () => requestJson('/api/dashboard', { timeoutMs: 8000 }),
@@ -74,9 +71,19 @@ export const api = {
   workflowHistory: (workflowId, limit = 100) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/history?limit=${limit}`),
   workflowDag: (workflowId) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/dag`),
   history: (limit = 200) => requestJson(`/api/history?limit=${limit}`),
-  notifications: () => requestJson('/api/notifications')
+  notifications: () => requestJson('/api/notification-admin'),
+  createNotificationGroup: (payload) => requestJson('/api/notification-groups', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  updateNotificationGroup: (groupName, payload) => requestJson(`/api/notification-groups/${encodeURIComponent(groupName)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  }),
+  deleteNotificationGroup: (groupName) => requestJson(`/api/notification-groups/${encodeURIComponent(groupName)}`, {
+    method: 'DELETE'
+  })
 }
-
 
 export function createKumoEventSource(onEvent, onError) {
   if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
@@ -85,7 +92,6 @@ export function createKumoEventSource(onEvent, onError) {
 
   const source = new window.EventSource('/api/events')
   const eventTypes = ['connected', 'realtime_state', 'monitor_update', 'workflow_run_requested', 'workflow_run_queued', 'workflow_run_status', 'workflow_run_failed']
-
   function handle(event) {
     try {
       const payload = event.data ? JSON.parse(event.data) : null
