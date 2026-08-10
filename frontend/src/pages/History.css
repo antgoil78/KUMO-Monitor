@@ -1,0 +1,29 @@
+.history-table .history-workflow-name {
+  color: var(--text-strong);
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.history-run-id-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 270px;
+}
+
+.history-run-id-cell code {
+  max-width: 330px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #bcd2f4;
+  user-select: all;
+}
+
+.history-copy-button {
+  flex: 0 0 auto;
+  min-width: 58px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+}
