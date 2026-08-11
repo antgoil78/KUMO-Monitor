@@ -10,7 +10,9 @@ from flask import Flask, Response, jsonify, request, send_from_directory, g, str
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 from dotenv import load_dotenv
+
 from notification_admin import notification_admin_bp
+from file_ingestion import file_ingestion_bp
 
 load_dotenv()
 
@@ -26,6 +28,8 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 CORS(app)
 
 app.register_blueprint(notification_admin_bp)
+app.register_blueprint(file_ingestion_bp)
+
 logging.basicConfig(level=logging.INFO)
 
 _RUNTIME_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
