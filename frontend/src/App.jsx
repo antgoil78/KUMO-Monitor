@@ -1,15 +1,18 @@
 import { useState } from 'react'
+
 import Sidebar from './components/Sidebar.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import Monitor from './pages/Monitor.jsx'
 import History from './pages/History.jsx'
 import Notifications from './pages/Notifications.jsx'
+import FileIngestion from './pages/FileIngestion.jsx'
 
 const pages = {
   dashboard: Dashboard,
   monitor: Monitor,
   history: History,
-  notifications: Notifications
+  notifications: Notifications,
+  fileIngestion: FileIngestion
 }
 
 export default function App() {
