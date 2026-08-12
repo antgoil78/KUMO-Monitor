@@ -1079,8 +1079,11 @@ pre, code, kbd, samp, .run-id-note code, .schedule-cell code {
 .active-users-card {
   min-height: 238px;
   padding: 22px;
-  display: block;
+
+  display: flex;
+  flex-direction: column;
 }
+
 .identity-title-row { margin-bottom: 14px; }
 .active-user-count {
   position: relative;
@@ -1100,10 +1103,17 @@ pre, code, kbd, samp, .run-id-note code, .schedule-cell code {
 .active-user-list {
   position: relative;
   z-index: 1;
+
   display: grid;
   gap: 10px;
-  max-height: 185px;
-  overflow: auto;
+
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+
+  overflow-y: auto;
+  overflow-x: hidden;
+
   padding-right: 2px;
 }
 .active-user-row {
