@@ -30,6 +30,7 @@ CORS(app)
 app.register_blueprint(notification_admin_bp)
 app.register_blueprint(file_ingestion_bp)
 
+
 logging.basicConfig(level=logging.INFO)
 
 _RUNTIME_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
