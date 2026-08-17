@@ -1,29 +1,62 @@
+.history-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .history-table .history-workflow-name {
   color: var(--text-strong);
   font-weight: 750;
   white-space: nowrap;
 }
 
-.history-run-id-cell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 270px;
+.history-copy-heading,
+.history-copy-cell {
+  width: 72px;
+  text-align: center;
 }
 
-.history-run-id-cell code {
-  max-width: 330px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #bcd2f4;
-  user-select: all;
+.history-copy-cell {
+  vertical-align: middle;
 }
 
 .history-copy-button {
-  flex: 0 0 auto;
-  min-width: 58px;
-  padding: 5px 8px;
+  position: relative;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0;
   border-radius: 8px;
-  font-size: 11px;
+}
+
+.history-copy-icon,
+.history-copy-icon::before {
+  position: absolute;
+  display: block;
+  width: 12px;
+  height: 14px;
+  border: 1.6px solid currentColor;
+  border-radius: 3px;
+  content: '';
+}
+
+.history-copy-icon {
+  top: 8px;
+  left: 10px;
+}
+
+.history-copy-icon::before {
+  top: -4px;
+  left: -4px;
+  opacity: 0.62;
+}
+
+.history-copy-button.copied {
+  color: #69f0ae;
 }
