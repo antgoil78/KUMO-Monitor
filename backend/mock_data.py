@@ -103,6 +103,6 @@ MOCK_MONITOR = {
 }
 
 MOCK_HISTORY = [
-    {"RUN_ID": "run-005", "WORKFLOW_ID": "wf-005", "STATUS": "SUCCESS", "START_TIME": (now - timedelta(hours=4)).isoformat(), "END_TIME": (now - timedelta(hours=3, minutes=55)).isoformat()},
-    {"RUN_ID": "run-004", "WORKFLOW_ID": "wf-004", "STATUS": "FAILED", "START_TIME": (now - timedelta(hours=3)).isoformat(), "END_TIME": (now - timedelta(hours=2, minutes=52)).isoformat()},
+    {"RUN_ID": "run-005", "WORKFLOW_ID": "wf-005", "WORKFLOW_NAME": "Operational Metrics", "STATUS": "SUCCESS", "START_TIME": (now - timedelta(hours=4)).isoformat(), "END_TIME": (now - timedelta(hours=3, minutes=55)).isoformat()},
+    {"RUN_ID": "run-004", "WORKFLOW_ID": "wf-004", "WORKFLOW_NAME": "Risk Exposure Daily", "STATUS": "FAILED", "START_TIME": (now - timedelta(hours=3)).isoformat(), "END_TIME": (now - timedelta(hours=2, minutes=52)).isoformat()},
 ]

@@ -619,8 +619,24 @@ def apply_active_run_locks(workflows):
 def load_history(limit=200):
     limit = max(1, min(int(limit or 200), 2000))
     h_types = describe_table(config.T_HISTORY)
-    order_expr = "COALESCE(REQUESTED_AT, START_TIME, END_TIME)" if "REQUESTED_AT" in h_types else "COALESCE(START_TIME, END_TIME)"
-    rows = _query(f"SELECT * FROM {config.T_HISTORY} ORDER BY {order_expr} DESC NULLS LAST LIMIT {limit}")
+    history_cols = [f"h.{col}" for col in h_types if col != "WORKFLOW_NAME"]
+    workflow_name_expr = (
+        "COALESCE(h.WORKFLOW_NAME, w.WORKFLOW_NAME, h.WORKFLOW_ID) AS WORKFLOW_NAME"
+        if "WORKFLOW_NAME" in h_types
+        else "COALESCE(w.WORKFLOW_NAME, h.WORKFLOW_ID) AS WORKFLOW_NAME"
+    )
+    order_expr = "COALESCE(h.REQUESTED_AT, h.START_TIME, h.END_TIME)" if "REQUESTED_AT" in h_types else "COALESCE(h.START_TIME, h.END_TIME)"
+    rows = _query(
+        f"""
+        SELECT
+          {', '.join(history_cols)},
+          {workflow_name_expr}
+        FROM {config.T_HISTORY} h
+        LEFT JOIN {config.T_WORKFLOWS} w ON w.WORKFLOW_ID = h.WORKFLOW_ID
+        ORDER BY {order_expr} DESC NULLS LAST
+        LIMIT {limit}
+        """
+    )
     return normalize_rows(rows)
 
 
