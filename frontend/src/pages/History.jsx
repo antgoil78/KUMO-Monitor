@@ -4,6 +4,34 @@ import StatusBadge from '../components/StatusBadge.jsx'
 import { elapsedDuration, formatDateTime } from '../utils/time.js'
 import './History.css'
 
+function HistoryLogModal({ row, onClose }) {
+  if (!row) return null
+
+  const workflowName = row.WORKFLOW_NAME || row.WORKFLOW_ID || 'Workflow'
+  const runId = String(row.RUN_ID || '')
+
+  return (
+    <div className="modal-backdrop history-log-backdrop" role="dialog" aria-modal="true" onMouseDown={event => event.target === event.currentTarget && onClose()}>
+      <div className="vision-modal history-log-modal">
+        <div className="modal-header">
+          <div>
+            <span className="modal-eyebrow">Execution log</span>
+            <h2>{workflowName}</h2>
+            <p>{runId ? `Run ID: ${runId}` : 'Run ID unavailable'}</p>
+          </div>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button>
+        </div>
+
+        <div className="history-log-placeholder">
+          <strong>Log details will be added here later.</strong>
+          <span>Status: {row.STATUS || '-'}</span>
+          <span>Started: {formatDateTime(row.START_TIME || row.REQUESTED_AT)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function History() {
   const [rows, setRows] = useState([])
   const [error, setError] = useState(null)
@@ -12,6 +40,7 @@ export default function History() {
   const [nowMs, setNowMs] = useState(Date.now())
   const [workflowFilter, setWorkflowFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [logRow, setLogRow] = useState(null)
 
   async function load() {
     try {
@@ -131,7 +160,7 @@ export default function History() {
               <tr>
                 <th>Workflow</th>
                 <th className="history-copy-heading">
-                  <span className="history-sr-only">Copy run ID</span>
+                  <span className="history-sr-only">Run actions</span>
                 </th>
                 <th>Status</th>
                 <th>Execution Time</th>
@@ -148,19 +177,30 @@ export default function History() {
                   <tr key={`${runId || idx}`}>
                     <td className="history-workflow-name">{workflowName}</td>
                     <td className="history-copy-cell">
-                      {runId ? (
+                      <div className="history-action-buttons">
+                        {runId ? (
+                          <button
+                            type="button"
+                            className={`small-button history-icon-button history-copy-button ${copiedRunId === runId ? 'copied' : ''}`}
+                            title={`${copiedRunId === runId ? 'Copied' : 'Copy'} run ID: ${runId}`}
+                            aria-label={`${copiedRunId === runId ? 'Copied' : 'Copy'} run ID`}
+                            onClick={() => copyRunId(runId)}
+                          >
+                            <span className="history-copy-icon" aria-hidden="true" />
+                          </button>
+                        ) : (
+                          <span className="muted-dash">-</span>
+                        )}
                         <button
                           type="button"
-                          className={`small-button history-copy-button ${copiedRunId === runId ? 'copied' : ''}`}
-                          title={`${copiedRunId === runId ? 'Copied' : 'Copy'} run ID: ${runId}`}
-                          aria-label={`${copiedRunId === runId ? 'Copied' : 'Copy'} run ID`}
-                          onClick={() => copyRunId(runId)}
+                          className="small-button history-icon-button history-log-button"
+                          title={`Open log for ${workflowName}`}
+                          aria-label={`Open log for ${workflowName}`}
+                          onClick={() => setLogRow(r)}
                         >
-                          <span className="history-copy-icon" aria-hidden="true" />
+                          <span className="history-log-icon" aria-hidden="true" />
                         </button>
-                      ) : (
-                        <span className="muted-dash">-</span>
-                      )}
+                      </div>
                     </td>
                     <td><StatusBadge status={r.STATUS} /></td>
                     <td className="duration-cell">{elapsedDuration(r.START_TIME, r.END_TIME, r.STATUS, nowMs)}</td>
@@ -173,6 +213,8 @@ export default function History() {
           </table>
         )}
       </div>
+
+      <HistoryLogModal row={logRow} onClose={() => setLogRow(null)} />
     </section>
   )
 }

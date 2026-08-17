@@ -23,7 +23,7 @@
 
 .history-copy-heading,
 .history-copy-cell {
-  width: 72px;
+  width: 92px;
   text-align: center;
 }
 
@@ -31,7 +31,15 @@
   vertical-align: middle;
 }
 
-.history-copy-button {
+.history-action-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 76px;
+}
+
+.history-icon-button {
   position: relative;
   width: 30px;
   height: 30px;
@@ -64,6 +72,48 @@
 
 .history-copy-button.copied {
   color: #69f0ae;
+}
+
+.history-log-icon {
+  position: absolute;
+  top: 8px;
+  left: 9px;
+  display: block;
+  width: 12px;
+  height: 15px;
+  border: 1.6px solid currentColor;
+  border-radius: 2px;
+}
+
+.history-log-icon::before,
+.history-log-icon::after {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  height: 1.5px;
+  background: currentColor;
+  border-radius: 999px;
+  content: '';
+}
+
+.history-log-icon::before {
+  top: 4px;
+}
+
+.history-log-icon::after {
+  top: 8px;
+}
+
+.history-log-placeholder {
+  display: grid;
+  gap: 8px;
+  min-height: 180px;
+  align-content: start;
+  color: var(--muted);
+}
+
+.history-log-placeholder strong {
+  color: var(--text-strong);
 }
 
 @media (max-width: 720px) {
