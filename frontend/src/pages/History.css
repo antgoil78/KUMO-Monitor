@@ -10,6 +10,11 @@
   border: 0;
 }
 
+.history-toolbar {
+  grid-template-columns: minmax(260px, 1fr) 220px;
+  max-width: 720px;
+}
+
 .history-table .history-workflow-name {
   color: var(--text-strong);
   font-weight: 750;
@@ -59,4 +64,11 @@
 
 .history-copy-button.copied {
   color: #69f0ae;
+}
+
+@media (max-width: 720px) {
+  .history-toolbar {
+    grid-template-columns: 1fr;
+    max-width: none;
+  }
 }
