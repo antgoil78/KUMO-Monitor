@@ -711,23 +711,53 @@ def _history_metrics(rows):
 
 
 def _load_lim_subject_areas(cur, database):
+    prefix = "RAW_LIM_"
+
+    def subjects_from_names(names):
+        non_subject_tables = {"RAW_LIM_META", "RAW_LIM_CONTROL_ARCHIVE"}
+        return sorted({
+            name[len(prefix):]
+            for name in (str(value or "").upper() for value in names)
+            if name.startswith(prefix) and name not in non_subject_tables and len(name) > len(prefix)
+        })
+
+    try:
+        cur.execute(
+            f"""
+            SELECT TABLE_NAME
+            FROM {database}.INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_SCHEMA = 'RAW_LIM'
+              AND TABLE_TYPE = 'BASE TABLE'
+              AND STARTSWITH(TABLE_NAME, 'RAW_LIM_')
+              AND TABLE_NAME <> 'RAW_LIM_META'
+            ORDER BY TABLE_NAME
+            """
+        )
+        subjects = subjects_from_names(row.get("TABLE_NAME") for row in normalize_rows(cur.fetchall()))
+        if subjects:
+            return subjects
+    except Exception as exc:
+        current_app.logger.warning("INFORMATION_SCHEMA subject discovery failed: %s", exc)
+
+    try:
+        cur.execute(f"SHOW TABLES LIKE 'RAW_LIM_%' IN SCHEMA {database}.RAW_LIM")
+        show_rows = normalize_rows(cur.fetchall())
+        subjects = subjects_from_names(row.get("NAME") for row in show_rows)
+        if subjects:
+            return subjects
+    except Exception as exc:
+        current_app.logger.warning("SHOW TABLES subject discovery failed: %s", exc)
+
     cur.execute(
         f"""
-        SELECT TABLE_NAME
-        FROM {database}.INFORMATION_SCHEMA.TABLES
-        WHERE TABLE_SCHEMA = 'RAW_LIM'
-          AND TABLE_TYPE = 'BASE TABLE'
-          AND STARTSWITH(TABLE_NAME, 'RAW_LIM_')
-          AND TABLE_NAME <> 'RAW_LIM_META'
-        ORDER BY TABLE_NAME
+        SELECT DISTINCT UPPER(SUBJECT_AREA) AS SUBJECT_AREA
+        FROM {ADMIN_PKG_GROUP_SOURCE}
+        WHERE ACTIVE_FL = TRUE
+          AND SUBJECT_AREA IS NOT NULL
+        ORDER BY SUBJECT_AREA
         """
     )
-    prefix = "RAW_LIM_"
-    return [
-        str(row.get("TABLE_NAME") or "")[len(prefix):]
-        for row in normalize_rows(cur.fetchall())
-        if str(row.get("TABLE_NAME") or "").startswith(prefix)
-    ]
+    return [str(row.get("SUBJECT_AREA")) for row in normalize_rows(cur.fetchall()) if row.get("SUBJECT_AREA")]
 
 
 @file_ingestion_bp.get("/api/file-ingestion")
@@ -842,12 +872,9 @@ def file_ingestion_reload_subject_areas():
         return jsonify({"ok": True, "source": "mock", "subjectAreas": ["PAAR", "CACT"]})
     try:
         database = _identifier(LIM_DATABASE, "LIM database")
-        role = _identifier(LIM_ROLE, "LIM role")
-        with sf.connection_scope() as conn:
+        with sf.connection_scope(force_service=True) as conn:
             cur = conn.cursor(DictCursor)
             try:
-                cur.execute(f"USE ROLE {role}")
-                cur.execute(f"USE DATABASE {database}")
                 subject_areas = _load_lim_subject_areas(cur, database)
             finally:
                 cur.close()
