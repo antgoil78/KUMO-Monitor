@@ -252,24 +252,30 @@ function WorkflowRow({ workflow, nowMs, onManage, pendingRun }) {
   const view = workflow
   const runLock = view.runLock || null
   const busy = isWorkflowBusy(view.lastStatus) || Boolean(view.runLocked)
+  const dependencyLabel = workflow.dependencyTrigger === 'ON_FAIL' ? 'after failure' : 'after success'
   return (
     <tr className={`${disabled ? 'disabled-row' : ''} ${isRoot ? 'root-row' : 'child-row'} depth-row-${Math.min(depth, 6)} ${busy ? 'busy-row' : ''}`}>
       <td className="workflow-cell">
         <div className={`workflow-tree depth-${Math.min(depth, 6)}`} style={{ '--depth': depth }}>
-          {depth > 0 && <span className="tree-branch" aria-hidden="true" />}
+          {depth > 0 && <span className="tree-branch" aria-hidden="true"><span>↳</span></span>}
           <span className={`workflow-title ${isRoot ? 'root' : 'child'}`}>{workflow.workflowName}</span>
           <span className={`type-chip ${type.toLowerCase()}`}>{type}</span>
+          {depth > 0 && (
+            <span className={`dependency-chip ${workflow.dependencyTrigger === 'ON_FAIL' ? 'failure' : 'success'}`} title={`Triggered ${dependencyLabel} of ${workflow.parentWorkflowName || 'parent workflow'}`}>
+              {dependencyLabel} · {workflow.parentWorkflowName || 'parent'}
+            </span>
+          )}
         </div>
       </td>
       <td className="row-actions">
         <button
           className="row-manage-button"
-          aria-label={`Manage ${workflow.workflowName}`}
-          title={`Manage ${workflow.workflowName}`}
+          aria-label={`Actions for ${workflow.workflowName}`}
+          title={`Actions for ${workflow.workflowName}`}
           onClick={() => onManage(view)}
         >
           <span className="manage-dot" />
-          <span>Manage</span>
+          <span>Action</span>
         </button>
       </td>
       <td className="status-cell">
@@ -488,24 +494,6 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
     </Modal>
   )
 }
-function HistoryModal({ workflow, onClose }) {
-  const [rows, setRows] = useState(null)
-  const [error, setError] = useState(null)
-  useEffect(() => {
-    let cancelled = false
-    api.workflowHistory(workflow.workflowId).then(data => {
-      if (!cancelled) setRows(data.rows || [])
-    }).catch(err => !cancelled && setError(err.message))
-    return () => { cancelled = true }
-  }, [workflow.workflowId])
-  return (
-    <Modal title="Workflow history" subtitle={workflow.workflowName} onClose={onClose} wide>
-      {error && <div className="alert error">{error}</div>}
-      {!rows && !error && <div className="empty-state">Loading history...</div>}
-      {rows && <div className="modal-table-wrap"><table className="workflow-table compact"><thead><tr><th>Run ID</th><th>Status</th><th>Requested</th><th>Start</th><th>End</th><th>Error</th></tr></thead><tbody>{rows.map(row => <tr key={row.RUN_ID}><td><code>{row.RUN_ID}</code></td><td><StatusBadge status={row.STATUS} /></td><td>{formatDateTime(row.REQUESTED_AT)}</td><td>{formatDateTime(row.START_TIME)}</td><td>{formatDateTime(row.END_TIME)}</td><td>{String(row.ERROR_MESSAGE || '').slice(0, 120)}</td></tr>)}</tbody></table></div>}
-    </Modal>
-  )
-}
 function DagModal({ workflow, onClose }) {
   const [dag, setDag] = useState(null)
   const [error, setError] = useState(null)
@@ -544,7 +532,11 @@ function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
   const isDbt = String(view.workflowType || '').toUpperCase() === 'DBT'
   const runLock = view.runLock || null
   const busy = isWorkflowBusy(view.lastStatus) || Boolean(view.runLocked)
-  const parentTriggered = Number(view.indent || 0) > 0
+  const hasParent = Number(view.indent || 0) > 0
+  const dependencyCondition = view.dependencyTrigger === 'ON_FAIL' ? 'fails' : 'succeeds'
+  const parentContext = view.parentWorkflowName
+    ? `Usually triggered when ${view.parentWorkflowName} ${dependencyCondition}. This starts it independently.`
+    : 'This workflow has an upstream dependency. This starts it independently.'
   async function choose(action) {
     await onAction(action, view)
   }
@@ -560,10 +552,10 @@ function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
       </div>
       {runLock && <div className="alert info compact">This workflow is locked for a pending run. Run ID: <code>{runLock.runId || 'pending'}</code></div>}
       <div className="action-grid">
-        <button className="action-tile primary" disabled={!wfEnabled || busy || parentTriggered} onClick={() => choose('run')}>
+        <button className="action-tile primary" disabled={!wfEnabled || busy} onClick={() => choose('run')}>
           <span className="action-icon">▶</span>
-          <strong>{busy ? 'Workflow active' : parentTriggered ? 'Parent triggered' : 'Run workflow'}</strong>
-          <small>{runLock ? lockStatusText(runLock) : (parentTriggered ? 'Manual run is disabled for dependency children.' : (busy ? 'Run is disabled while initiating, queued or running.' : 'Create a manual run request.'))}</small>
+          <strong>{busy ? 'Workflow active' : hasParent ? 'Run independently' : 'Run workflow'}</strong>
+          <small>{runLock ? lockStatusText(runLock) : (busy ? 'Run is disabled while initiating, queued or running.' : (hasParent ? parentContext : 'Create a manual run request.'))}</small>
         </button>
         {isDbt && (
           <button className="action-tile" onClick={() => choose('dag')}>
@@ -596,7 +588,7 @@ function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
     </Modal>
   )
 }
-export default function Monitor() {
+export default function Monitor({ onNavigate }) {
   const [payload, setPayload] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -898,7 +890,13 @@ export default function Monitor() {
   async function handleAction(action, workflow) {
     setOpenMenuId(null)
     setActionMessage(null)
-    if (action === 'history') return setModal({ type: 'history', workflow })
+    if (action === 'history') {
+      setModal(null)
+      return onNavigate('history', {
+        workflowName: workflow.workflowName,
+        workflowId: workflow.workflowId
+      })
+    }
     if (action === 'dag') return setModal({ type: 'dag', workflow })
     if (action === 'edit') return setModal({ type: 'edit', workflow })
     setModal(null)
@@ -976,13 +974,12 @@ export default function Monitor() {
         {!loading && filtered.length === 0 ? <div className="empty-state">No workflows match the current filters.</div> : null}
         {filtered.length > 0 && (
           <table className="workflow-table monitor-table">
-            <thead><tr><th>Workflow</th><th>Manage</th><th>Status</th><th>Last Run</th><th>Duration</th><th>Schedule</th><th>Next Run</th></tr></thead>
+            <thead><tr><th>Workflow</th><th><span className="visually-hidden">Actions</span></th><th>Status</th><th>Last Run</th><th>Duration</th><th>Schedule</th><th>Next Run</th></tr></thead>
             <tbody>{filtered.map(w => <WorkflowRow key={w.workflowId} workflow={w} nowMs={nowMs} onManage={(workflow) => setModal({ type: 'actions', workflow })} pendingRun={pendingRuns[w.workflowId]} />)}</tbody>
           </table>
         )}
       </div>
       {modal?.type === 'actions' && <ActionsModal workflow={modal.workflow} pendingRun={pendingRuns[modal.workflow.workflowId]} onClose={() => setModal(null)} onAction={handleAction} />}
-      {modal?.type === 'history' && <HistoryModal workflow={modal.workflow} onClose={() => setModal(null)} />}
       {modal?.type === 'dag' && <DagModal workflow={modal.workflow} onClose={() => setModal(null)} />}
       {modal?.type === 'edit' && <EditModal workflowId={modal.workflow.workflowId} onClose={() => setModal(null)} onSaved={() => load(true)} notify={notify} />}
     </section>

@@ -32,13 +32,14 @@ function HistoryLogModal({ row, onClose }) {
   )
 }
 
-export default function History() {
+export default function History({ workflowName = '', workflowId = '' }) {
   const [rows, setRows] = useState([])
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [copiedRunId, setCopiedRunId] = useState('')
   const [nowMs, setNowMs] = useState(Date.now())
-  const [workflowFilter, setWorkflowFilter] = useState('')
+  const [workflowFilter, setWorkflowFilter] = useState(workflowName)
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState(workflowId)
   const [statusFilter, setStatusFilter] = useState('')
   const [logRow, setLogRow] = useState(null)
 
@@ -107,13 +108,15 @@ export default function History() {
     const selectedStatus = statusFilter.trim().toUpperCase()
 
     return rows.filter(row => {
-      const workflowName = String(row.WORKFLOW_NAME || '').toLowerCase()
+      const rowWorkflowName = String(row.WORKFLOW_NAME || '').toLowerCase()
+      const rowWorkflowId = String(row.WORKFLOW_ID || '')
       const status = String(row.STATUS || '').trim().toUpperCase()
-      const matchesName = !nameFilter || workflowName.includes(nameFilter)
+      const matchesSelectedWorkflow = !selectedWorkflowId || rowWorkflowId === String(selectedWorkflowId)
+      const matchesName = !nameFilter || rowWorkflowName.includes(nameFilter)
       const matchesStatus = !selectedStatus || status === selectedStatus
-      return matchesName && matchesStatus
+      return matchesSelectedWorkflow && matchesName && matchesStatus
     })
-  }, [rows, workflowFilter, statusFilter])
+  }, [rows, workflowFilter, statusFilter, selectedWorkflowId])
 
   return (
     <section className="page history-page">
@@ -131,7 +134,10 @@ export default function History() {
       <div className="monitor-toolbar history-toolbar">
         <input
           value={workflowFilter}
-          onChange={event => setWorkflowFilter(event.target.value)}
+          onChange={event => {
+            setWorkflowFilter(event.target.value)
+            setSelectedWorkflowId('')
+          }}
           placeholder="Filter workflow name..."
           className="search-input"
           aria-label="Filter history by workflow name"

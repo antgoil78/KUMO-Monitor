@@ -6,24 +6,32 @@ import Monitor from './pages/Monitor.jsx'
 import History from './pages/History.jsx'
 import Notifications from './pages/Notifications.jsx'
 import FileIngestion from './pages/FileIngestion.jsx'
+import LimReload from './pages/LimReload.jsx'
 
 const pages = {
   dashboard: Dashboard,
   monitor: Monitor,
   history: History,
   notifications: Notifications,
-  fileIngestion: FileIngestion
+  fileIngestion: FileIngestion,
+  limReload: LimReload
 }
 
 export default function App() {
   const [page, setPage] = useState('dashboard')
+  const [pageContext, setPageContext] = useState({})
   const Page = pages[page] || Dashboard
+
+  function navigate(nextPage, context = {}) {
+    setPageContext(context)
+    setPage(nextPage)
+  }
 
   return (
     <div className="app-shell">
-      <Sidebar activePage={page} onNavigate={setPage} />
+      <Sidebar activePage={page} onNavigate={navigate} />
       <main className="main-content">
-        <Page />
+        <Page {...pageContext} onNavigate={navigate} />
       </main>
     </div>
   )

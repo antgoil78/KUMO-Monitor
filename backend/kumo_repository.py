@@ -872,15 +872,20 @@ def _order_and_enrich(rows):
     ordered = []
     seen = set()
 
-    def add_row(workflow_id, indent=0):
+    def add_row(workflow_id, indent=0, parent_id=None, dependency_trigger=None):
         if workflow_id in seen or workflow_id not in row_by_id:
             return
         seen.add(workflow_id)
         row = dict(row_by_id[workflow_id])
         row["INDENT"] = indent
+        row["PARENT_WORKFLOW_ID"] = parent_id
+        row["PARENT_WORKFLOW_NAME"] = (
+            row_by_id.get(parent_id, {}).get("WORKFLOW_NAME") if parent_id else None
+        )
+        row["DEPENDENCY_TRIGGER"] = dependency_trigger
         ordered.append(row)
-        for child_id, _ in children_of.get(workflow_id, []):
-            add_row(child_id, indent + 1)
+        for child_id, trigger in children_of.get(workflow_id, []):
+            add_row(child_id, indent + 1, workflow_id, trigger)
 
     for row in rows:
         wid = str(row.get("WORKFLOW_ID") or "")
@@ -921,6 +926,9 @@ def _order_and_enrich(rows):
             "scheduleTimezone": row.get("SCHEDULE_TIMEZONE") or "UTC",
             "nextRunTime": next_run(row.get("SCHEDULE_CRON"), row.get("SCHEDULE_TIMEZONE") or "UTC") if bool(row.get("TASK_ENABLED", True)) else None,
             "indent": int(row.get("INDENT") or 0),
+            "parentWorkflowId": row.get("PARENT_WORKFLOW_ID"),
+            "parentWorkflowName": row.get("PARENT_WORKFLOW_NAME"),
+            "dependencyTrigger": row.get("DEPENDENCY_TRIGGER"),
             "progress": progress_obj,
         })
     return enriched

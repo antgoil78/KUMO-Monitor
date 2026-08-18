@@ -1461,44 +1461,6 @@ def _run_workflow_impl(workflow_id, payload, request_method):
         actor.get("callerRightsActive"),
     )
 
-    if trigger_source == "MANUAL":
-        try:
-            upstream = repo.upstream_workflows_for(workflow_id)
-        except Exception as exc:
-            app.logger.warning("Could not validate manual run upstream dependencies: %s", exc)
-            upstream = []
-        if upstream:
-            message = "Manual runs are disabled for workflows that are triggered by parent workflows."
-            _release_live_run_lock(workflow_id)
-            _publish_run_event("workflow_run_failed", {
-                "workflowId": workflow_id,
-                "workflowName": workflow_name,
-                "runId": (lock or {}).get("runId") or "pending",
-                "status": "FAILED",
-                "lock": None,
-                "actor": actor,
-                "requestedBy": requested_by,
-                "error": message,
-            })
-            _record_interaction(
-                "RUN_WORKFLOW",
-                actor=actor,
-                entity_type="WORKFLOW",
-                entity_id=workflow_id,
-                workflow_id=workflow_id,
-                status="BLOCKED",
-                success=False,
-                error_message=message,
-                payload=payload,
-                response={"ok": False, "upstreamWorkflows": upstream},
-            )
-            return jsonify({
-                "ok": False,
-                "error": message,
-                "upstreamWorkflows": upstream,
-                "actor": actor,
-            }), 409
-
     if config.USE_MOCK or not sf.is_configured():
         response = {
             "ok": True,

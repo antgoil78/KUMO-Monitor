@@ -41,6 +41,9 @@ MOCK_MONITOR = {
             "scheduleTimezone": "Europe/Stockholm",
             "nextRunTime": (now + timedelta(minutes=9)).isoformat(),
             "indent": 1,
+            "parentWorkflowId": "wf-001",
+            "parentWorkflowName": "Load Ledger",
+            "dependencyTrigger": "ON_SUCCESS",
             "progress": None,
         },
         {

@@ -1,0 +1,61 @@
+.lim-reload-page { padding: 0 4px 64px; }
+.reload-context { padding: 7px 10px; border: 1px solid var(--line-soft); border-radius: 9px; color: var(--muted); font: 700 10px monospace; }
+.reload-layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(280px, .75fr); gap: 16px; align-items: start; }
+.reload-card { padding: 18px; border: 1px solid rgba(105,139,255,.18); border-radius: 16px; background: linear-gradient(145deg, rgba(9,23,55,.92), rgba(4,13,35,.86)); box-shadow: 0 18px 50px rgba(0,0,0,.22); }
+.reload-section { margin-bottom: 20px; }
+.reload-label, .mode-fieldset legend { display: block; margin-bottom: 8px; color: #dcecff; font-size: 12px; font-weight: 800; }
+.reload-label em { margin-left: 5px; color: var(--muted); font-size: 9px; font-style: normal; font-weight: 600; text-transform: uppercase; }
+.reload-section > input { width: min(340px, 100%); }
+.reload-section small, .reload-confirm small, .reload-options small { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.mode-fieldset { padding: 0; border: 0; }
+.reload-mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+.reload-mode { min-height: 112px; padding: 12px; border: 1px solid var(--line-soft); border-radius: 12px; background: rgba(255,255,255,.025); cursor: pointer; }
+.reload-mode input { margin: 0 0 10px; }
+.reload-mode strong, .reload-mode span { display: block; }
+.reload-mode strong { color: #dcecff; font-size: 12px; }
+.reload-mode span { margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.reload-mode.selected { border-color: rgba(1,232,255,.55); background: rgba(0,117,255,.12); box-shadow: inset 0 0 24px rgba(0,117,255,.08); }
+.reload-mode.danger.selected { border-color: rgba(255,83,120,.58); background: rgba(255,83,120,.09); }
+.reload-date-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 220px)); gap: 10px; }
+.reload-date-grid label { color: var(--muted); font-size: 10px; font-weight: 700; }
+.reload-date-grid input { display: block; width: 100%; margin-top: 5px; }
+.reload-options { display: grid; gap: 8px; }
+.reload-options label, .reload-confirm { display: flex; gap: 10px; padding: 11px 12px; border: 1px solid var(--line-soft); border-radius: 11px; background: rgba(255,255,255,.022); }
+.reload-options input, .reload-confirm input { margin-top: 2px; }
+.reload-options strong, .reload-confirm strong { color: #dcecff; font-size: 11px; }
+.reload-options small, .reload-confirm small { margin-top: 3px; }
+.reload-confirm { margin-bottom: 12px; border-color: rgba(255,190,80,.28); background: rgba(255,190,80,.055); }
+.reload-confirm.danger { border-color: rgba(255,83,120,.4); background: rgba(255,83,120,.07); }
+.reload-validation { margin-bottom: 10px; color: var(--amber); font-size: 11px; }
+.reload-submit { min-width: 150px; }
+.reload-submit.running { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-width: 230px; cursor: wait; opacity: 1; }
+.reload-submit.running small { padding-left: 8px; border-left: 1px solid rgba(255,255,255,.22); color: rgba(255,255,255,.72); font-size: 9px; font-variant-numeric: tabular-nums; }
+.reload-spinner { width: 14px; height: 14px; flex: 0 0 14px; border: 2px solid rgba(255,255,255,.3); border-top-color: white; border-radius: 50%; animation: reload-spin .8s linear infinite; }
+.running-dots i { display: inline-block; font-style: normal; animation: reload-dot 1.2s infinite both; }
+.running-dots i:nth-child(2) { animation-delay: .18s; }
+.running-dots i:nth-child(3) { animation-delay: .36s; }
+.reload-running-note { display: flex; align-items: center; gap: 10px; max-width: 520px; margin-top: 12px; padding: 10px 12px; border: 1px solid rgba(1,232,255,.22); border-radius: 10px; background: linear-gradient(90deg, rgba(0,117,255,.12), rgba(1,232,255,.04)); }
+.reload-running-note strong, .reload-running-note small { display: block; }
+.reload-running-note strong { color: #cfefff; font-size: 10px; }
+.reload-running-note small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.reload-running-pulse { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 0 rgba(1,232,255,.45); animation: reload-pulse 1.5s ease-out infinite; }
+@keyframes reload-spin { to { transform: rotate(360deg); } }
+@keyframes reload-dot { 0%, 25% { opacity: .18; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-1px); } 75%, 100% { opacity: .18; transform: translateY(0); } }
+@keyframes reload-pulse { 0% { box-shadow: 0 0 0 0 rgba(1,232,255,.45); } 70% { box-shadow: 0 0 0 8px rgba(1,232,255,0); } 100% { box-shadow: 0 0 0 0 rgba(1,232,255,0); } }
+.reload-submit.danger:not(:disabled) { background: linear-gradient(135deg, #d7355d, #9e2347); border-color: rgba(255,130,155,.55); }
+.reload-side { display: grid; gap: 16px; }
+.reload-summary h2, .reload-result h2 { margin: 5px 0 7px; font-size: 18px; }
+.reload-summary p { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.reload-summary dl { margin: 14px 0 0; }
+.reload-summary dl div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line-soft); }
+.reload-summary dt { color: var(--muted); font-size: 10px; }
+.reload-summary dd { margin: 0; color: #dcecff; font-size: 10px; font-weight: 800; text-align: right; }
+.reload-result-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
+.reload-result-grid div { min-width: 0; padding: 9px; border-radius: 9px; background: rgba(255,255,255,.035); }
+.reload-result-grid span, .reload-result-grid strong { display: block; overflow-wrap: anywhere; }
+.reload-result-grid span { color: var(--muted); font-size: 8px; text-transform: uppercase; }
+.reload-result-grid strong { margin-top: 4px; color: #dcecff; font-size: 11px; }
+.nav-item-child { width: calc(100% - 22px); margin-left: 22px; font-size: 11px; opacity: .88; }
+.nav-item-child .nav-icon { font-size: 11px; }
+@media (max-width: 1050px) { .reload-layout { grid-template-columns: 1fr; } .reload-side { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 700px) { .reload-mode-grid, .reload-side { grid-template-columns: 1fr; } .reload-date-grid { grid-template-columns: 1fr; } }

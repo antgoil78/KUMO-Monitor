@@ -39,6 +39,8 @@ async function requestJson(url, options = {}) {
 }
 
 export const fileIngestionApi = {
+  subjectAreas: () => requestJson('/api/file-ingestion/reload/subject-areas'),
+
   overview: (historyDays = 30) =>
     requestJson(`/api/file-ingestion?historyDays=${encodeURIComponent(historyDays)}`),
 
@@ -51,5 +53,12 @@ export const fileIngestionApi = {
   history: (groupName, historyDays = 30) =>
     requestJson(
       `/api/file-ingestion/${encodeURIComponent(groupName)}/history?historyDays=${encodeURIComponent(historyDays)}`
-    )
+    ),
+
+  reload: (payload) =>
+    requestJson('/api/file-ingestion/reload', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 300000
+    })
 }
