@@ -158,6 +158,14 @@
   font-weight: 700;
 }
 
+.lim-expand-button { display: inline-flex; align-items: center; gap: 7px; padding: 0; border: 0; background: none; color: #dcecff; font: inherit; font-weight: 800; cursor: pointer; }
+.lim-expand-button > span { display: grid; place-items: center; width: 17px; height: 17px; border: 1px solid rgba(1,232,255,.28); border-radius: 5px; color: var(--cyan); font-size: 13px; }
+.lim-source-row td { background: rgba(1,232,255,.018); border-bottom-color: rgba(105,139,255,.1); }
+.lim-source-row td:first-child { padding-left: 28px; }
+.lim-source-branch { color: rgba(103,217,255,.72); font-size: 15px; }
+.lim-source-name { color: #a8dcff; font-size: 11px; letter-spacing: .08em; }
+.lim-source-label { color: var(--muted2); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+
 .lim-muted,
 .lim-sub-value {
   color: var(--muted);

@@ -3,7 +3,7 @@ import { fileIngestionApi } from '../fileIngestionApi.js'
 import './FileIngestion.css'
 
 const HISTORY_DAYS = 30
-const ATTENTION_STATUSES = new Set(['FAILED', 'STOPPED', 'SKIPPED'])
+const ATTENTION_STATUSES = new Set(['FAILED', 'STOPPED', 'SKIPPED', 'BLOCKED'])
 
 function formatValue(value, fallback = '—') {
   if (value === null || value === undefined || value === '') return fallback
@@ -88,6 +88,15 @@ function SummaryStrip({ summary }) {
 }
 
 function OverviewTable({ rows, onOpenDetail }) {
+  const [expanded, setExpanded] = useState(() => new Set())
+  function toggle(group) {
+    setExpanded(previous => {
+      const next = new Set(previous)
+      if (next.has(group)) next.delete(group)
+      else next.add(group)
+      return next
+    })
+  }
   return (
     <div className="table-card lim-overview-card">
       <div className="lim-table-scroll">
@@ -107,55 +116,38 @@ function OverviewTable({ rows, onOpenDetail }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map(row => {
-              const fileRows = Number(row.FILE_ROWS || 0)
-              const readyRows = Number(row.READY_ROWS || 0)
-              const missingRows = Number(row.MISSING_ROWS || 0)
-              const readiness = pct(readyRows, fileRows)
-              const tone = statusTone(row.STATUS_KIND)
-
-              return (
-                <tr key={row.PKG_GROUP_NAME}>
-                  <td className="lim-muted">{formatValue(row.SUBJECT_AREA)}</td>
-                  <td><strong className="lim-package-name">{formatValue(row.PKG_GROUP_NAME)}</strong></td>
-                  <td>
-                    <span className={`lim-status ${tone}`}>
-                      <span>{statusSymbol(row.STATUS_KIND)}</span>
-                      {formatValue(row.STATUS_LABEL, 'No data')}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="lim-primary-value">{formatValue(row.LATEST_STATUS_LIST, 'No latest run')}</div>
-                    <div className="lim-sub-value">{formatDate(row.LATEST_CONTROL_DATE)}</div>
-                  </td>
-                  <td>
-                    <div>{fileRows} <span className="lim-muted">· {Number(row.RECEIVED_ROWS || 0)} received</span></div>
-                    <div className={missingRows ? 'lim-warning-text' : 'lim-sub-value'}>{missingRows} missing</div>
-                  </td>
-                  <td>
-                    <div>{readyRows}/{fileRows} <span className="lim-muted">({readiness}%)</span></div>
-                    <div className="lim-progress"><span style={{ width: `${readiness}%` }} /></div>
-                  </td>
-                  <td className="lim-muted lim-nowrap">{formatDate(row.LATEST_DLVY_END_DATE)}</td>
-                  <td className="lim-muted lim-nowrap">{formatDate(row.LAST_LOADED_AT)}</td>
-                  <td>
-                    <div>{Number(row.HISTORY_DAYS || 0)} days</div>
-                    <div className="lim-sub-value">{Number(row.HISTORY_ROWS || 0)} rows</div>
-                  </td>
-                  <td>
-                    <div className="lim-row-actions">
-                      <button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, 'history')}>History</button>
-                      <button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, 'raw')}>RAW</button>
-                      <button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, 'ready')}>READY</button>
-                    </div>
-                  </td>
-                </tr>
-              )
+            {rows.flatMap(row => {
+              const isExpanded = expanded.has(row.PKG_GROUP_NAME)
+              const parent = <OverviewRow key={row.PKG_GROUP_NAME} row={row} expanded={isExpanded} onToggle={() => toggle(row.PKG_GROUP_NAME)} onOpenDetail={onOpenDetail} />
+              const children = isExpanded ? (row.sources || []).map(source => <OverviewRow key={`${row.PKG_GROUP_NAME}-${source.SOURCE_ID}`} row={source} source onOpenDetail={onOpenDetail} />) : []
+              return [parent, ...children]
             })}
           </tbody>
         </table>
       </div>
     </div>
+  )
+}
+
+function OverviewRow({ row, source = false, expanded = false, onToggle, onOpenDetail }) {
+  const fileRows = Number(row.FILE_ROWS || 0)
+  const readyRows = Number(row.READY_ROWS || 0)
+  const missingRows = Number(row.MISSING_ROWS || 0)
+  const readiness = pct(readyRows, fileRows)
+  const tone = statusTone(row.STATUS_KIND)
+  return (
+    <tr className={source ? 'lim-source-row' : 'lim-subject-row'}>
+      <td className="lim-muted">{source ? <span className="lim-source-branch">↳</span> : <button type="button" className="lim-expand-button" onClick={onToggle} aria-expanded={expanded}><span>{expanded ? '−' : '+'}</span>{formatValue(row.SUBJECT_AREA)}</button>}</td>
+      <td>{source ? <strong className="lim-source-name">{formatValue(row.SOURCE_ID)}</strong> : <strong className="lim-package-name">{formatValue(row.PKG_GROUP_NAME)}</strong>}</td>
+      <td><span className={`lim-status ${tone}`}><span>{statusSymbol(row.STATUS_KIND)}</span>{formatValue(row.STATUS_LABEL, 'No data')}</span></td>
+      <td><div className="lim-primary-value">{formatValue(row.LATEST_STATUS_LIST, 'No latest run')}</div><div className="lim-sub-value">{formatDate(row.LATEST_CONTROL_DATE)}</div></td>
+      <td><div>{fileRows} <span className="lim-muted">· {Number(row.RECEIVED_ROWS || 0)} received</span></div><div className={missingRows ? 'lim-warning-text' : 'lim-sub-value'}>{missingRows} missing</div></td>
+      <td><div>{readyRows}/{fileRows} <span className="lim-muted">({readiness}%)</span></div><div className="lim-progress"><span style={{ width: `${readiness}%` }} /></div></td>
+      <td className="lim-muted lim-nowrap">{formatDate(row.LATEST_DLVY_END_DATE)}</td>
+      <td className="lim-muted lim-nowrap">{formatDate(row.LAST_LOADED_AT)}</td>
+      <td>{source ? <span className="lim-muted">—</span> : <><div>{Number(row.HISTORY_DAYS || 0)} days</div><div className="lim-sub-value">{Number(row.HISTORY_ROWS || 0)} rows</div></>}</td>
+      <td><div className="lim-row-actions"><button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, 'history', source ? row.SOURCE_ID : null)}>History</button><button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, 'raw', source ? row.SOURCE_ID : null)}>RAW</button><button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, 'ready', source ? row.SOURCE_ID : null)}>READY</button></div></td>
+    </tr>
   )
 }
 
@@ -312,7 +304,7 @@ function DetailModal({ detail, onClose }) {
         <div className="modal-header">
           <div>
             <span className="modal-eyebrow">LIM ingestion</span>
-            <h2>{titles[detail.type]} · {detail.groupName}</h2>
+            <h2>{titles[detail.type]} · {detail.groupName}{detail.sourceId ? ` · ${detail.sourceId}` : ''}</h2>
             <p>{detail.type === 'history' ? `History window: last ${HISTORY_DAYS} days` : 'Current ingestion state'}</p>
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button>
@@ -375,17 +367,17 @@ export default function FileIngestion() {
     )
   }, [data, query])
 
-  async function openDetail(groupName, type) {
-    setDetail({ groupName, type, loading: true, error: null, data: null })
+  async function openDetail(groupName, type, sourceId = null) {
+    setDetail({ groupName, sourceId, type, loading: true, error: null, data: null })
     try {
       const result = type === 'raw'
-        ? await fileIngestionApi.raw(groupName)
+        ? await fileIngestionApi.raw(groupName, sourceId)
         : type === 'ready'
-          ? await fileIngestionApi.ready(groupName)
-          : await fileIngestionApi.history(groupName, HISTORY_DAYS)
-      setDetail({ groupName, type, loading: false, error: null, data: result })
+          ? await fileIngestionApi.ready(groupName, sourceId)
+          : await fileIngestionApi.history(groupName, HISTORY_DAYS, sourceId)
+      setDetail({ groupName, sourceId, type, loading: false, error: null, data: result })
     } catch (err) {
-      setDetail({ groupName, type, loading: false, error: err.message, data: null })
+      setDetail({ groupName, sourceId, type, loading: false, error: err.message, data: null })
     }
   }
 

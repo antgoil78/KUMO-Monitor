@@ -66,6 +66,20 @@ def _history_days():
     return max(1, min(value, MAX_HISTORY_DAYS))
 
 
+def _source_id():
+    value = request.args.get("sourceId")
+    return _identifier(value, "source ID") if value else None
+
+
+def _filter_source(rows, source_id):
+    if not source_id:
+        return rows
+    return [
+        row for row in rows
+        if str(row.get("DLVY_SOURCE_ID") or "").strip().upper() == source_id
+    ]
+
+
 def _num(value):
     if value is None:
         return 0
@@ -159,18 +173,40 @@ def _load_catalog(cur):
         return normalize_rows(cur.fetchall())
 
 
+def _load_source_catalog(cur):
+    cur.execute(
+        f"""
+        SELECT DISTINCT
+               COALESCE({SUBJECT_AREA_COLUMN}, 'Unknown subject area') AS SUBJECT_AREA,
+               PKG_GROUP_NAME,
+               UPPER(SOURCE_ID) AS SOURCE_ID
+        FROM {ADMIN_PKG_GROUP_SOURCE}
+        WHERE ACTIVE_FL = TRUE
+          AND PKG_GROUP_NAME IS NOT NULL
+          AND SOURCE_ID IS NOT NULL
+        ORDER BY SUBJECT_AREA, PKG_GROUP_NAME, SOURCE_ID
+        """
+    )
+    return normalize_rows(cur.fetchall())
+
+
 def _group_params(groups):
     params = {f"g{i}": name for i, name in enumerate(groups)}
     placeholders = ", ".join(f"%({key})s" for key in params)
     return placeholders, params
 
 
-def _build_overview(catalog, meta_rows, latest_rows, history_rows, raw_only_rows=None, raw_readiness_rows=None):
+def _build_overview(catalog, meta_rows, latest_rows, history_rows, raw_only_rows=None,
+                    raw_readiness_rows=None, source_catalog=None, source_meta_rows=None,
+                    source_latest_rows=None):
     meta = {str(row.get("PKG_GROUP_NAME")): row for row in meta_rows}
     latest = {str(row.get("PKG_GROUP_NAME")): row for row in latest_rows}
     history = {str(row.get("PKG_GROUP_NAME")): row for row in history_rows}
     raw_only = {str(row.get("PKG_GROUP_NAME")): row for row in (raw_only_rows or [])}
-    raw_readiness = {str(row.get("PKG_GROUP_NAME")): row for row in (raw_readiness_rows or [])}
+    raw_readiness = {
+        str(row.get("PKG_GROUP_NAME")): row for row in (raw_readiness_rows or [])
+        if not row.get("SOURCE_ID")
+    }
 
     numeric_cols = [
         "FILE_ROWS",
@@ -226,7 +262,17 @@ def _build_overview(catalog, meta_rows, latest_rows, history_rows, raw_only_rows
             row["NOT_READY_ROWS"] = _num(live_raw.get("RAW_NOT_READY_FILES"))
             row["RAW_FILE_COUNT"] = raw_file_count
 
+        row["sources"] = _build_source_rows(
+            group, source_catalog or [], source_meta_rows or [],
+            source_latest_rows or [], raw_readiness_rows or []
+        )
+        if row["sources"]:
+            for column in ("FILE_ROWS", "RECEIVED_ROWS", "MISSING_ROWS", "READY_ROWS",
+                           "NOT_READY_ROWS", "ROWCOUNT_OK_ROWS", "ROWCOUNT_BAD_ROWS"):
+                row[column] = sum(_num(source.get(column)) for source in row["sources"])
         kind = _status_kind(row)
+        if any(source.get("STATUS_KIND") == "ATTENTION" for source in row["sources"]):
+            kind = "ATTENTION"
         row["STATUS_KIND"] = kind
         row["STATUS_LABEL"] = _status_label(kind)
         row["STATUS_SORT"] = _status_sort(kind)
@@ -240,6 +286,60 @@ def _build_overview(catalog, meta_rows, latest_rows, history_rows, raw_only_rows
         )
     )
     return overview
+
+
+def _build_source_rows(group, source_catalog, source_meta_rows, source_latest_rows, raw_readiness_rows):
+    keys = lambda rows: {
+        (str(row.get("PKG_GROUP_NAME")), str(row.get("SOURCE_ID") or "").upper()): row
+        for row in rows if row.get("SOURCE_ID")
+    }
+    meta = keys(source_meta_rows)
+    latest = keys(source_latest_rows)
+    live = keys(raw_readiness_rows)
+    sources = []
+    candidates = {
+        str(item.get("SOURCE_ID") or "").upper(): {**item, "IS_CONFIGURED": True}
+        for item in source_catalog if str(item.get("PKG_GROUP_NAME")) == group
+    }
+    for item in raw_readiness_rows:
+        if str(item.get("PKG_GROUP_NAME")) == group and item.get("SOURCE_ID"):
+            candidates.setdefault(str(item.get("SOURCE_ID")).upper(), {
+                "PKG_GROUP_NAME": group,
+                "SOURCE_ID": item.get("SOURCE_ID"),
+                "IS_CONFIGURED": False,
+            })
+    for item in candidates.values():
+        source_id = str(item.get("SOURCE_ID") or "").upper()
+        key = (group, source_id)
+        row = {
+            "SUBJECT_AREA": item.get("SUBJECT_AREA"),
+            "PKG_GROUP_NAME": group,
+            "SOURCE_ID": source_id,
+            "IS_CONFIGURED": bool(item.get("IS_CONFIGURED")),
+            **meta.get(key, {}),
+            **latest.get(key, {}),
+        }
+        for column in ("FILE_ROWS", "RECEIVED_ROWS", "MISSING_ROWS", "READY_ROWS",
+                       "NOT_READY_ROWS", "ROWCOUNT_OK_ROWS", "ROWCOUNT_BAD_ROWS",
+                       "LATEST_LOG_ROWS", "LATEST_UPDATED_ROWS", "LATEST_ATTENTION_ROWS"):
+            row[column] = _num(row.get(column))
+        raw = live.get(key, {})
+        raw_files = _num(raw.get("RAW_FILE_COUNT"))
+        if raw_files:
+            row["FILE_ROWS"] = max(row["FILE_ROWS"], raw_files)
+            row["RECEIVED_ROWS"] = raw_files
+            row["READY_ROWS"] = _num(raw.get("RAW_READY_FILES"))
+            row["NOT_READY_ROWS"] = _num(raw.get("RAW_NOT_READY_FILES"))
+        kind = _status_kind(row)
+        if not row["IS_CONFIGURED"]:
+            kind = "ATTENTION"
+        row["STATUS_KIND"] = kind
+        row["STATUS_LABEL"] = (
+            _status_label(kind) if row["IS_CONFIGURED"] else "Unconfigured source"
+        )
+        row["STATUS_SORT"] = _status_sort(kind)
+        sources.append(row)
+    return sorted(sources, key=lambda row: str(row.get("SOURCE_ID")))
 
 
 def _build_summary(overview):
@@ -319,16 +419,37 @@ def _load_raw_table_readiness(cur, catalog):
                  PKG_GROUP_NAME
           FROM {ADMIN_PKG_GROUP_SOURCE}
           WHERE ACTIVE_FL = TRUE
+        ),
+        SUBJECT_GROUP_MAP AS (
+          SELECT UPPER(SUBJECT_AREA) AS SUBJECT_AREA,
+                 MIN(PKG_GROUP_NAME) AS PKG_GROUP_NAME,
+                 COUNT(DISTINCT PKG_GROUP_NAME) AS GROUP_COUNT
+          FROM {ADMIN_PKG_GROUP_SOURCE}
+          WHERE ACTIVE_FL = TRUE
+          GROUP BY UPPER(SUBJECT_AREA)
+        ),
+        MAPPED_RAW_FILES AS (
+          SELECT COALESCE(exact.PKG_GROUP_NAME, subject_map.PKG_GROUP_NAME) AS PKG_GROUP_NAME,
+                 r.SOURCE_ID,
+                 r.DW_FILE_NM,
+                 r.FILE_READY
+          FROM RAW_FILES r
+          LEFT JOIN ACTIVE_SOURCE_MAP exact
+            ON exact.SUBJECT_AREA = r.SUBJECT_AREA
+           AND exact.SOURCE_ID = UPPER(r.SOURCE_ID)
+          JOIN SUBJECT_GROUP_MAP subject_map
+            ON subject_map.SUBJECT_AREA = r.SUBJECT_AREA
+          WHERE exact.PKG_GROUP_NAME IS NOT NULL OR subject_map.GROUP_COUNT = 1
         )
         SELECT m.PKG_GROUP_NAME,
+               IFF(GROUPING(r.SOURCE_ID) = 1, NULL, r.SOURCE_ID) AS SOURCE_ID,
                COUNT(DISTINCT r.DW_FILE_NM) AS RAW_FILE_COUNT,
                COUNT(DISTINCT IFF(r.FILE_READY, r.DW_FILE_NM, NULL)) AS RAW_READY_FILES,
                COUNT(DISTINCT IFF(NOT r.FILE_READY, r.DW_FILE_NM, NULL)) AS RAW_NOT_READY_FILES
-        FROM RAW_FILES r
-        JOIN ACTIVE_SOURCE_MAP m
-          ON m.SUBJECT_AREA = r.SUBJECT_AREA
-         AND m.SOURCE_ID = UPPER(r.SOURCE_ID)
-        GROUP BY m.PKG_GROUP_NAME
+        FROM MAPPED_RAW_FILES r
+        JOIN (SELECT DISTINCT PKG_GROUP_NAME FROM {ADMIN_PKG_GROUP_SOURCE} WHERE ACTIVE_FL = TRUE) m
+          ON m.PKG_GROUP_NAME = r.PKG_GROUP_NAME
+        GROUP BY GROUPING SETS ((m.PKG_GROUP_NAME), (m.PKG_GROUP_NAME, r.SOURCE_ID))
         """
     )
     return normalize_rows(cur.fetchall())
@@ -339,6 +460,7 @@ def _load_overview(history_days):
         cur = conn.cursor(DictCursor)
         try:
             catalog = _load_catalog(cur)
+            source_catalog = _load_source_catalog(cur)
             groups = [str(row.get("PKG_GROUP_NAME")) for row in catalog if row.get("PKG_GROUP_NAME")]
             if not groups:
                 return {"overview": [], "summary": _build_summary([]), "subjectAreas": 0}
@@ -364,6 +486,28 @@ def _load_overview(history_days):
                 params,
             )
             meta_rows = normalize_rows(cur.fetchall())
+
+            cur.execute(
+                f"""
+                SELECT PKG_GROUP_NAME,
+                       UPPER(DLVY_SOURCE_ID) AS SOURCE_ID,
+                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL') AS FILE_ROWS,
+                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND RECEIVED_FL = TRUE) AS RECEIVED_ROWS,
+                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND RECEIVED_FL = FALSE) AS MISSING_ROWS,
+                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND DW_READY_TO_LOAD_FL = TRUE) AS READY_ROWS,
+                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND DW_READY_TO_LOAD_FL = FALSE) AS NOT_READY_ROWS,
+                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND ROWCOUNT_STATUS = 'ROWCOUNT_OK') AS ROWCOUNT_OK_ROWS,
+                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND ROWCOUNT_STATUS IS NOT NULL AND ROWCOUNT_STATUS <> 'ROWCOUNT_OK') AS ROWCOUNT_BAD_ROWS,
+                       MAX(DLVY_END_DATE) AS LATEST_DLVY_END_DATE,
+                       MAX(LOADED_AT) AS LAST_LOADED_AT
+                FROM {RAW_LIM_META_TABLE}
+                WHERE PKG_GROUP_NAME IN ({placeholders})
+                  AND DLVY_SOURCE_ID IS NOT NULL
+                GROUP BY PKG_GROUP_NAME, UPPER(DLVY_SOURCE_ID)
+                """,
+                params,
+            )
+            source_meta_rows = normalize_rows(cur.fetchall())
 
             try:
                 cur.execute(
@@ -408,7 +552,7 @@ def _load_overview(history_days):
                        OR LOWER(REGEXP_REPLACE(meta.ORIGINAL_FILE_NAME, '\\\\.gz$', '')) = LOWER(REGEXP_REPLACE(r.FILE_NM, '\\\\.gz$', ''))
                      )
                     WHERE r.PKG_GROUP_NAME IN ({placeholders})
-                      AND COALESCE(SPLIT_PART(r.FILE_NM, '_', 1), '') NOT LIKE '%000'
+                      AND COALESCE(SPLIT_PART(r.FILE_NM, '_', 1), '') NOT LIKE '%%000'
                     GROUP BY r.PKG_GROUP_NAME
                     """,
                     params,
@@ -430,7 +574,7 @@ def _load_overview(history_days):
                     SELECT PKG_GROUP_NAME,
                            COUNT(*) AS LATEST_LOG_ROWS,
                            COUNT_IF(STATUS = 'UPDATED') AS LATEST_UPDATED_ROWS,
-                           COUNT_IF(STATUS IN ('STOPPED', 'FAILED', 'SKIPPED')) AS LATEST_ATTENTION_ROWS,
+                           COUNT_IF(STATUS IN ('STOPPED', 'FAILED', 'SKIPPED', 'BLOCKED')) AS LATEST_ATTENTION_ROWS,
                            LISTAGG(DISTINCT STATUS, ', ') WITHIN GROUP (ORDER BY STATUS) AS LATEST_STATUS_LIST,
                            MAX(CONTROL_DATE) AS LATEST_CONTROL_DATE
                     FROM {SET_READY_LATEST_TABLE}
@@ -444,6 +588,27 @@ def _load_overview(history_days):
                 latest_rows = []
 
             try:
+                cur.execute(
+                    f"""
+                    SELECT PKG_GROUP_NAME,
+                           UPPER(DLVY_SOURCE_ID) AS SOURCE_ID,
+                           COUNT(*) AS LATEST_LOG_ROWS,
+                           COUNT_IF(STATUS = 'UPDATED') AS LATEST_UPDATED_ROWS,
+                           COUNT_IF(STATUS IN ('STOPPED', 'FAILED', 'SKIPPED', 'BLOCKED')) AS LATEST_ATTENTION_ROWS,
+                           LISTAGG(DISTINCT STATUS, ', ') WITHIN GROUP (ORDER BY STATUS) AS LATEST_STATUS_LIST,
+                           MAX(CONTROL_DATE) AS LATEST_CONTROL_DATE
+                    FROM {SET_READY_LATEST_TABLE}
+                    WHERE PKG_GROUP_NAME IN ({placeholders})
+                      AND DLVY_SOURCE_ID IS NOT NULL
+                    GROUP BY PKG_GROUP_NAME, UPPER(DLVY_SOURCE_ID)
+                    """,
+                    params,
+                )
+                source_latest_rows = normalize_rows(cur.fetchall())
+            except Exception:
+                source_latest_rows = []
+
+            try:
                 history_params = dict(params)
                 history_params["history_days"] = int(history_days)
                 cur.execute(
@@ -452,7 +617,7 @@ def _load_overview(history_days):
                            COUNT(*) AS HISTORY_ROWS,
                            COUNT(DISTINCT TO_DATE(CONTROL_DATE)) AS HISTORY_DAYS,
                            COUNT_IF(STATUS = 'UPDATED') AS HISTORY_UPDATED_ROWS,
-                           COUNT_IF(STATUS IN ('STOPPED', 'FAILED', 'SKIPPED')) AS HISTORY_ATTENTION_ROWS,
+                           COUNT_IF(STATUS IN ('STOPPED', 'FAILED', 'SKIPPED', 'BLOCKED')) AS HISTORY_ATTENTION_ROWS,
                            MAX(CONTROL_DATE) AS HISTORY_LAST_CONTROL_DATE
                     FROM {SET_READY_HISTORY_TABLE}
                     WHERE PKG_GROUP_NAME IN ({placeholders})
@@ -468,7 +633,8 @@ def _load_overview(history_days):
             cur.close()
 
     overview = _build_overview(
-        catalog, meta_rows, latest_rows, history_rows, raw_only_rows, raw_readiness_rows
+        catalog, meta_rows, latest_rows, history_rows, raw_only_rows, raw_readiness_rows,
+        source_catalog, source_meta_rows, source_latest_rows
     )
     subject_areas = len({str(row.get("SUBJECT_AREA") or "Unknown subject area") for row in catalog})
     return {
@@ -518,6 +684,25 @@ def _load_raw_detail(group_name):
           FROM {ADMIN_PKG_GROUP_SOURCE}
           WHERE ACTIVE_FL = TRUE
             AND PKG_GROUP_NAME = %(group_name)s
+
+          UNION
+
+          SELECT DISTINCT
+                 UPPER(r.DLVY_SUBJECT_AREA_ID) AS SUBJECT_AREA,
+                 UPPER(r.DLVY_SOURCE_ID) AS SOURCE_ID,
+                 g.PKG_GROUP_NAME
+          FROM {RAW_LOAD_RESULTS_TABLE} r
+          JOIN (
+            SELECT UPPER(SUBJECT_AREA) AS SUBJECT_AREA,
+                   MAX(PKG_GROUP_NAME) AS PKG_GROUP_NAME
+            FROM {ADMIN_PKG_GROUP_SOURCE}
+            WHERE ACTIVE_FL = TRUE
+              AND SUBJECT_AREA IS NOT NULL
+            GROUP BY UPPER(SUBJECT_AREA)
+            HAVING COUNT(DISTINCT PKG_GROUP_NAME) = 1
+               AND MAX(PKG_GROUP_NAME) = %(group_name)s
+          ) g ON g.SUBJECT_AREA = UPPER(r.DLVY_SUBJECT_AREA_ID)
+          WHERE r.DLVY_SOURCE_ID IS NOT NULL
         ),
         LATEST_RAW_LOAD AS (
           SELECT *
@@ -692,7 +877,7 @@ def _ready_metrics(rows):
         "rows": len(rows),
         "updated": sum(1 for row in rows if row.get("STATUS") == "UPDATED"),
         "attention": sum(
-            1 for row in rows if row.get("STATUS") in ("STOPPED", "FAILED", "SKIPPED")
+            1 for row in rows if row.get("STATUS") in ("STOPPED", "FAILED", "SKIPPED", "BLOCKED")
         ),
         "rowsUpdated": sum(_num(row.get("ROWS_UPDATED")) for row in rows),
     }
@@ -705,7 +890,7 @@ def _history_metrics(rows):
         "runDays": len(run_days),
         "updated": sum(1 for row in rows if row.get("STATUS") == "UPDATED"),
         "attention": sum(
-            1 for row in rows if row.get("STATUS") in ("STOPPED", "FAILED", "SKIPPED")
+            1 for row in rows if row.get("STATUS") in ("STOPPED", "FAILED", "SKIPPED", "BLOCKED")
         ),
     }
 
@@ -893,8 +1078,11 @@ def file_ingestion_raw(group_name):
         return jsonify({"ok": True, "source": "mock", "rows": [], "metrics": _raw_metrics([])})
 
     try:
-        rows = _load_raw_detail(group_name)
+        source_id = _source_id()
+        rows = _filter_source(_load_raw_detail(group_name), source_id)
         return jsonify({"ok": True, "source": "snowflake", "rows": rows, "metrics": _raw_metrics(rows)})
+    except ValueError as exc:
+        return _json_error(exc, 400)
     except Exception as exc:
         current_app.logger.exception("Failed to load RAW LIM detail for %s", group_name)
         return _json_error(exc, 500)
@@ -906,8 +1094,11 @@ def file_ingestion_ready(group_name):
         return jsonify({"ok": True, "source": "mock", "rows": [], "metrics": _ready_metrics([])})
 
     try:
-        rows = _load_ready_detail(group_name)
+        source_id = _source_id()
+        rows = _filter_source(_load_ready_detail(group_name), source_id)
         return jsonify({"ok": True, "source": "snowflake", "rows": rows, "metrics": _ready_metrics(rows)})
+    except ValueError as exc:
+        return _json_error(exc, 400)
     except Exception as exc:
         current_app.logger.exception("Failed to load READY LIM detail for %s", group_name)
         return _json_error(exc, 500)
@@ -929,7 +1120,8 @@ def file_ingestion_history(group_name):
         )
 
     try:
-        rows = _load_history_detail(group_name, history_days)
+        source_id = _source_id()
+        rows = _filter_source(_load_history_detail(group_name, history_days), source_id)
         return jsonify(
             {
                 "ok": True,
@@ -939,6 +1131,8 @@ def file_ingestion_history(group_name):
                 "metrics": _history_metrics(rows),
             }
         )
+    except ValueError as exc:
+        return _json_error(exc, 400)
     except Exception as exc:
         current_app.logger.exception("Failed to load LIM history detail for %s", group_name)
         return _json_error(exc, 500)

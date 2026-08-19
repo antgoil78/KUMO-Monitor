@@ -38,27 +38,36 @@ async function requestJson(url, options = {}) {
   return data
 }
 
+const RAW_RELOAD_TIMEOUT_MS = 30 * 60 * 1000
+
 export const fileIngestionApi = {
   subjectAreas: () => requestJson('/api/file-ingestion/reload/subject-areas'),
 
   overview: (historyDays = 30) =>
-    requestJson(`/api/file-ingestion?historyDays=${encodeURIComponent(historyDays)}`),
+    requestJson(`/api/file-ingestion?historyDays=${encodeURIComponent(historyDays)}`, {
+      timeoutMs: 5 * 60 * 1000
+    }),
 
-  raw: (groupName) =>
-    requestJson(`/api/file-ingestion/${encodeURIComponent(groupName)}/raw`),
+  raw: (groupName, sourceId) =>
+    requestJson(`/api/file-ingestion/${encodeURIComponent(groupName)}/raw${sourceId ? `?sourceId=${encodeURIComponent(sourceId)}` : ''}`, {
+      timeoutMs: 5 * 60 * 1000
+    }),
 
-  ready: (groupName) =>
-    requestJson(`/api/file-ingestion/${encodeURIComponent(groupName)}/ready`),
+  ready: (groupName, sourceId) =>
+    requestJson(`/api/file-ingestion/${encodeURIComponent(groupName)}/ready${sourceId ? `?sourceId=${encodeURIComponent(sourceId)}` : ''}`, {
+      timeoutMs: 5 * 60 * 1000
+    }),
 
-  history: (groupName, historyDays = 30) =>
+  history: (groupName, historyDays = 30, sourceId) =>
     requestJson(
-      `/api/file-ingestion/${encodeURIComponent(groupName)}/history?historyDays=${encodeURIComponent(historyDays)}`
+      `/api/file-ingestion/${encodeURIComponent(groupName)}/history?historyDays=${encodeURIComponent(historyDays)}${sourceId ? `&sourceId=${encodeURIComponent(sourceId)}` : ''}`,
+      { timeoutMs: 5 * 60 * 1000 }
     ),
 
   reload: (payload) =>
     requestJson('/api/file-ingestion/reload', {
       method: 'POST',
       body: JSON.stringify(payload),
-      timeoutMs: 300000
+      timeoutMs: RAW_RELOAD_TIMEOUT_MS
     })
 }
