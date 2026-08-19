@@ -832,7 +832,10 @@ def file_ingestion_reload():
 
         database = _identifier(LIM_DATABASE, "LIM database")
         role = _identifier(LIM_ROLE, "LIM role")
-        with sf.connection_scope() as conn:
+        # Loads are an application-owned administrative operation. In SPCS the
+        # browser caller token may not have visibility of KUMO_TST.META even
+        # though the container service role does, so use the service context.
+        with sf.connection_scope(force_service=True) as conn:
             cur = conn.cursor(DictCursor)
             try:
                 cur.execute(f"USE ROLE {role}")
@@ -841,8 +844,8 @@ def file_ingestion_reload():
                 if lim_format not in subject_areas:
                     return _json_error(f"RAW_LIM_{lim_format} was not found in {database}.RAW_LIM.", 400)
                 cur.execute(
-                    """
-                    CALL META.LOAD_RAW_LIM_FROM_STAGE(
+                    f"""
+                    CALL {database}.META.LOAD_RAW_LIM_FROM_STAGE(
                       P_LIM_FORMAT => %(lim_format)s,
                       P_FROM_DLVY_END_DATE => %(from_date)s::DATE,
                       P_TO_DLVY_END_DATE => %(to_date)s::DATE,
