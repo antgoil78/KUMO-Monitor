@@ -11,7 +11,7 @@ const modes = [
 const resultLabels = {
   STATUS: 'Status', LOAD_MODE: 'Load mode', LIM_FORMAT: 'LIM format', FROM_DLVY_END_DATE: 'From date',
   TO_DLVY_END_DATE: 'To date', FILES_SELECTED: 'Files selected', RAW_ROWS_DELETED: 'RAW rows deleted',
-  RAW_LOAD_RESULTS_DELETED: 'Load results deleted', SET_READY_LOG_DELETED: 'Ready log deleted',
+  SET_READY_LOG_DELETED: 'Ready log deleted',
   TMP_SET_READY_LOG_DELETED: 'Temporary log deleted', PKG_CONTROL_ROWS_RESET: 'Package controls reset',
   COPY_COMMANDS_EXECUTED: 'Copy commands'
 }

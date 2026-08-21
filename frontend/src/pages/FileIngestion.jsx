@@ -108,9 +108,8 @@ function OverviewTable({ rows, onOpenDetail }) {
               <th>Status</th>
               <th>Latest run</th>
               <th>Files</th>
-              <th>Ready</th>
+              <th>RAW status</th>
               <th>Delivery</th>
-              <th>Last loaded</th>
               <th>History</th>
               <th>Details</th>
             </tr>
@@ -132,7 +131,7 @@ function OverviewTable({ rows, onOpenDetail }) {
 function OverviewRow({ row, source = false, expanded = false, onToggle, onOpenDetail }) {
   const fileRows = Number(row.FILE_ROWS || 0)
   const readyRows = Number(row.READY_ROWS || 0)
-  const missingRows = Number(row.MISSING_ROWS || 0)
+  const waitingRows = Number(row.NOT_READY_ROWS || 0)
   const readiness = pct(readyRows, fileRows)
   const tone = statusTone(row.STATUS_KIND)
   return (
@@ -140,11 +139,10 @@ function OverviewRow({ row, source = false, expanded = false, onToggle, onOpenDe
       <td className="lim-muted">{source ? <span className="lim-source-branch">↳</span> : <button type="button" className="lim-expand-button" onClick={onToggle} aria-expanded={expanded}><span>{expanded ? '−' : '+'}</span>{formatValue(row.SUBJECT_AREA)}</button>}</td>
       <td>{source ? <strong className="lim-source-name">{formatValue(row.SOURCE_ID)}</strong> : <strong className="lim-package-name">{formatValue(row.PKG_GROUP_NAME)}</strong>}</td>
       <td><span className={`lim-status ${tone}`}><span>{statusSymbol(row.STATUS_KIND)}</span>{formatValue(row.STATUS_LABEL, 'No data')}</span></td>
-      <td><div className="lim-primary-value">{formatValue(row.LATEST_STATUS_LIST, 'No latest run')}</div><div className="lim-sub-value">{formatDate(row.LATEST_CONTROL_DATE)}</div></td>
-      <td><div>{fileRows} <span className="lim-muted">· {Number(row.RECEIVED_ROWS || 0)} received</span></div><div className={missingRows ? 'lim-warning-text' : 'lim-sub-value'}>{missingRows} missing</div></td>
-      <td><div>{readyRows}/{fileRows} <span className="lim-muted">({readiness}%)</span></div><div className="lim-progress"><span style={{ width: `${readiness}%` }} /></div></td>
+      <td><div className="lim-primary-value">{formatValue(row.LATEST_STATUS_LIST, 'No latest run')}</div><div className="lim-sub-value">Ready run: {formatDate(row.LATEST_CONTROL_DATE)}</div></td>
+      <td><div><strong>{fileRows}</strong> <span className="lim-muted">in RAW</span></div><div className="lim-sub-value">Loaded: {formatDate(row.RAW_LATEST_LOAD_DTTM)}</div></td>
+      <td><div><span className="success-text">{readyRows} ready</span> <span className="lim-muted">·</span> <span className={waitingRows ? 'lim-warning-text' : 'lim-muted'}>{waitingRows} waiting</span></div><div className="lim-progress"><span style={{ width: `${readiness}%` }} /></div></td>
       <td className="lim-muted lim-nowrap">{formatDate(row.LATEST_DLVY_END_DATE)}</td>
-      <td className="lim-muted lim-nowrap">{formatDate(row.LAST_LOADED_AT)}</td>
       <td>{source ? <span className="lim-muted">—</span> : <><div>{Number(row.HISTORY_DAYS || 0)} days</div><div className="lim-sub-value">{Number(row.HISTORY_ROWS || 0)} rows</div></>}</td>
       <td><div className="lim-row-actions"><button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, 'history', source ? row.SOURCE_ID : null)}>History</button><button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, 'raw', source ? row.SOURCE_ID : null)}>RAW</button><button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, 'ready', source ? row.SOURCE_ID : null)}>READY</button></div></td>
     </tr>
