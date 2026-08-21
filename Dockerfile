@@ -4,7 +4,7 @@ FROM node:18-alpine AS react-builder
 WORKDIR /app/frontend
 
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN npm ci 
 
 
 COPY frontend/ ./
