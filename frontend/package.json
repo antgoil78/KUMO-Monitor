@@ -9,12 +9,11 @@
     "preview": "vite preview --host 0.0.0.0 --port 3000"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.1.1",
     "@vitejs/plugin-react": "4.3.4",
-    "vite": "5.4.21",
+    "@xyflow/react": "^12.11.3",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
-  },
-  "devDependencies": {}
+    "react-dom": "18.3.1",
+    "vite": "5.4.21"
+  }
 }
-
-

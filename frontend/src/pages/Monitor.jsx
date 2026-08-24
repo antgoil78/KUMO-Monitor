@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Background, Controls, MarkerType, MiniMap, ReactFlow } from '@xyflow/react'
+import dagre from '@dagrejs/dagre'
 import { api, createKumoEventSource } from '../api.js'
 import StatusBadge, { isWorkflowBusy, statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
@@ -724,6 +726,46 @@ function DagModal({ workflow, onClose }) {
   const done = nodes.filter(n => ['DONE', 'SUCCESS', 'SUCCEEDED', 'COMPLETED', 'OK'].includes(String(n.status).toUpperCase())).length
   const failed = nodes.filter(n => ['ERROR', 'FAILED', 'FAILURE'].includes(String(n.status).toUpperCase())).length
   const percent = nodes.length ? Math.round((done / nodes.length) * 100) : 0
+  const graph = useMemo(() => {
+    const nodeWidth = 190
+    const nodeHeight = 64
+    const layout = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}))
+    layout.setGraph({ rankdir: 'LR', ranksep: 90, nodesep: 34, marginx: 30, marginy: 30 })
+    const uniqueNodes = Array.from(new Map(nodes.filter(node => node.id).map(node => [String(node.id), node])).values())
+    const nodeIds = new Set(uniqueNodes.map(node => String(node.id)))
+    const validEdges = (dag?.edges || []).filter(edge => nodeIds.has(String(edge.source)) && nodeIds.has(String(edge.target)))
+    uniqueNodes.forEach(node => layout.setNode(String(node.id), { width: nodeWidth, height: nodeHeight }))
+    validEdges.forEach(edge => layout.setEdge(String(edge.source), String(edge.target)))
+    dagre.layout(layout)
+    const flowNodes = uniqueNodes.map(node => {
+      const position = layout.node(String(node.id))
+      const kind = statusKind(node.status)
+      return {
+        id: String(node.id),
+        position: { x: position.x - nodeWidth / 2, y: position.y - nodeHeight / 2 },
+        data: { label: <><span className={`dag-graph-dot ${kind}`} /><span>{node.label}</span><small>{String(node.status || 'UNKNOWN')}</small></> },
+        className: `dag-graph-node ${kind}`,
+        sourcePosition: 'right',
+        targetPosition: 'left',
+        style: { width: nodeWidth, height: nodeHeight }
+      }
+    })
+    const statusById = new Map(uniqueNodes.map(node => [String(node.id), statusKind(node.status)]))
+    const flowEdges = validEdges.map((edge, index) => {
+      const targetKind = statusById.get(String(edge.target)) || ''
+      const color = targetKind === 'failed' ? '#ff4b6e' : '#4779c9'
+      return {
+        id: `dag-edge-${edge.source}-${edge.target}-${index}`,
+        source: String(edge.source),
+        target: String(edge.target),
+        type: 'smoothstep',
+        animated: targetKind === 'running',
+        markerEnd: { type: MarkerType.ArrowClosed, color },
+        style: { stroke: color, strokeWidth: 1.6 }
+      }
+    })
+    return { nodes: flowNodes, edges: flowEdges }
+  }, [nodes, dag?.edges])
   return (
     <Modal title="DAG run" subtitle={workflow.workflowName} onClose={onClose} wide>
       {error && <div className="alert error">{error}</div>}
@@ -731,7 +773,15 @@ function DagModal({ workflow, onClose }) {
       {dag && <>
         <div className="dag-summary"><StatusBadge status={dag.run?.STATUS || '—'} /><span>Run ID <code>{dag.run?.RUN_ID || '—'}</code></span><span>{done}/{nodes.length} completed</span>{failed > 0 && <span className="failed-text">{failed} failed</span>}</div>
         <div className="dag-progress"><ProgressBar progress={{ percent, total: nodes.length, done, failed }} status={dag.run?.STATUS} /></div>
-        <div className="dag-node-grid">{nodes.length ? nodes.map(node => <div className={`dag-node ${statusKind(node.status)}`} key={node.id} title={node.id}>{node.label}</div>) : <div className="soft-empty">No execution progress data for this run.</div>}</div>
+        {nodes.length ? (
+          <div className="dag-graph" aria-label="DBT execution dependency graph">
+            <ReactFlow nodes={graph.nodes} edges={graph.edges} fitView fitViewOptions={{ padding: 0.18 }} minZoom={0.15} maxZoom={1.8} nodesDraggable={false} nodesConnectable={false} elementsSelectable>
+              <Background color="rgba(105, 139, 255, 0.18)" gap={22} size={1} />
+              <MiniMap pannable zoomable nodeColor={node => node.className?.includes('failed') ? '#ff4b6e' : node.className?.includes('success') ? '#01b574' : node.className?.includes('running') ? '#0075ff' : '#647695'} maskColor="rgba(3, 9, 31, 0.72)" />
+              <Controls showInteractive={false} />
+            </ReactFlow>
+          </div>
+        ) : <div className="soft-empty">No execution progress data for this run.</div>}
         {dag.errors?.length > 0 && <div className="modal-table-wrap"><table className="workflow-table compact"><thead><tr><th>Time</th><th>Model</th><th>Error</th></tr></thead><tbody>{dag.errors.map((err, idx) => <tr key={`${err.ORIGIN}-${idx}`}><td>{formatDateTime(err.LOG_DTTM)}</td><td>{err.ORIGIN}</td><td>{String(err.MESSAGE || '').slice(0, 240)}</td></tr>)}</tbody></table></div>}
       </>}
     </Modal>
@@ -1135,7 +1185,10 @@ export default function Monitor({ onNavigate }) {
         workflowId: workflow.workflowId
       })
     }
-    if (action === 'dag') return setModal({ type: 'dag', workflow })
+    if (action === 'dag') {
+      setModal(null)
+      return onNavigate('dag', { workflow })
+    }
     if (action === 'edit') return setModal({ type: 'edit', workflow })
     setModal(null)
     try {

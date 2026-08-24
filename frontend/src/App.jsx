@@ -7,6 +7,7 @@ import History from './pages/History.jsx'
 import Notifications from './pages/Notifications.jsx'
 import FileIngestion from './pages/FileIngestion.jsx'
 import LimReload from './pages/LimReload.jsx'
+import DagView from './pages/DagView.jsx'
 
 const pages = {
   dashboard: Dashboard,
@@ -14,7 +15,8 @@ const pages = {
   history: History,
   notifications: Notifications,
   fileIngestion: FileIngestion,
-  limReload: LimReload
+  limReload: LimReload,
+  dag: DagView
 }
 
 export default function App() {
