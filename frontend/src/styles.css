@@ -408,6 +408,30 @@ h2, h3 { color: var(--text-strong); margin: 0; }
 .timeline-run.failed { background: var(--red); color: var(--red); }
 .timeline-run.running { background: linear-gradient(90deg, var(--blue), var(--cyan)); color: var(--blue); animation: timeline-pulse 1.5s ease-in-out infinite; }
 .timeline-run.queued { background: var(--amber); color: var(--amber); }
+.timeline-body { position: relative; }
+.timeline-dependencies {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  left: 254px;
+  width: calc(100% - 278px);
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.timeline-data-row { position: relative; z-index: 2; }
+.dependency-line {
+  fill: none;
+  stroke-width: 1.7;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.72;
+  stroke-dasharray: 4 3;
+}
+.dependency-line.success { stroke: rgba(1, 181, 116, 0.92); }
+.dependency-line.failure { stroke: rgba(255, 75, 110, 0.96); }
+.dependency-arrow.success { fill: var(--green); }
+.dependency-arrow.failure { fill: var(--red); }
 .timeline-empty { position: absolute; top: 24px; left: 8px; color: var(--muted2); font-size: 10px; }
 .timeline-legend { display: flex; align-items: center; gap: 18px; padding: 15px 20px; border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 10px; background: rgba(5, 13, 35, 0.54); }
 .timeline-legend span { display: inline-flex; align-items: center; gap: 6px; }
@@ -416,6 +440,15 @@ h2, h3 { color: var(--text-strong); margin: 0; }
 .timeline-legend i.failed { background: var(--red); }
 .timeline-legend i.running { background: var(--blue); }
 .timeline-legend i.queued { background: var(--amber); }
+.timeline-legend i.dependency-success,
+.timeline-legend i.dependency-failure {
+  width: 15px;
+  height: 0;
+  border-radius: 0;
+  border-top: 2px dashed var(--green);
+  background: transparent;
+}
+.timeline-legend i.dependency-failure { border-top-color: var(--red); }
 .timeline-legend small { margin-left: auto; color: var(--muted2); }
 @keyframes timeline-pulse { 50% { opacity: 0.58; } }
 .workflow-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }

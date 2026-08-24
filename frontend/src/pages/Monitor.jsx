@@ -181,6 +181,7 @@ function SummaryItem({ tone, icon, label, value }) {
 }
 
 function TimelineView({ workflows, rows, loading, nowMs, rangeHours }) {
+  const timelineEndRatio = 0.96
   const rangeMs = rangeHours * 60 * 60 * 1000
   const windowStart = nowMs - rangeMs
   const timelineTicks = Array.from({ length: 7 }, (_, index) => rangeHours * (1 - index / 6))
@@ -200,11 +201,35 @@ function TimelineView({ workflows, rows, loading, nowMs, rangeHours }) {
       runs: runsByWorkflow.get(String(workflow.workflowId)) || []
     }))
   }, [workflows, rows, nowMs, windowStart])
+  const dependencyConnections = useMemo(() => {
+    const runLocations = new Map()
+    workflowRows.forEach(({ runs }, rowIndex) => {
+      runs.forEach(run => runLocations.set(String(run.RUN_ID || ''), { run, rowIndex }))
+    })
+    const connections = []
+    workflowRows.forEach(({ workflow, runs }, childRowIndex) => {
+      runs.forEach(childRun => {
+        const parent = runLocations.get(String(childRun.PARENT_RUN_ID || ''))
+        if (!parent) return
+        const parentEnd = Math.min(Math.max(parent.run.end, windowStart), nowMs)
+        const childStart = Math.min(Math.max(childRun.start, windowStart), nowMs)
+        connections.push({
+          id: `${parent.run.RUN_ID}-${childRun.RUN_ID}`,
+          fromX: ((parentEnd - windowStart) / rangeMs) * 1000 * timelineEndRatio,
+          toX: ((childStart - windowStart) / rangeMs) * 1000 * timelineEndRatio,
+          fromY: parent.rowIndex * 62 + 31,
+          toY: childRowIndex * 62 + 31,
+          tone: String(childRun.TRIGGER_SOURCE || workflow.dependencyTrigger || '').toUpperCase() === 'ON_FAIL' ? 'failure' : 'success'
+        })
+      })
+    })
+    return connections
+  }, [workflowRows, windowStart, nowMs, rangeMs])
 
   function barStyle(run) {
     const start = Math.max(run.start, windowStart)
-    const left = ((start - windowStart) / (nowMs - windowStart)) * 100
-    const rawWidth = ((Math.max(run.end, start + 60 * 1000) - start) / (nowMs - windowStart)) * 100
+    const left = ((start - windowStart) / (nowMs - windowStart)) * 100 * timelineEndRatio
+    const rawWidth = ((Math.max(run.end, start + 60 * 1000) - start) / (nowMs - windowStart)) * 100 * timelineEndRatio
     return { left: `${left}%`, width: `${Math.max(rawWidth, 0.45)}%` }
   }
 
@@ -216,13 +241,35 @@ function TimelineView({ workflows, rows, loading, nowMs, rangeHours }) {
         <div className="timeline-workflow-heading">Workflow</div>
         <div className="timeline-axis" aria-hidden="true">
           {timelineTicks.map((hours, index) => (
-            <span key={index} style={{ left: `${(index / 6) * 100}%` }}>
+            <span key={index} style={{ left: `${(index / 6) * 100 * timelineEndRatio}%` }}>
               {hours === 0 ? 'Now' : rangeHours === 1 ? `−${Math.round(hours * 60)}m` : `−${Number(hours.toFixed(1))}h`}
             </span>
           ))}
         </div>
       </div>
       <div className="timeline-body">
+        {dependencyConnections.length > 0 && (
+          <svg
+            className="timeline-dependencies"
+            viewBox={`0 0 1000 ${workflowRows.length * 62}`}
+            preserveAspectRatio="none"
+            aria-label={`${dependencyConnections.length} execution dependencies`}
+          >
+            <defs>
+              <marker id="dependency-arrow-success" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="strokeWidth">
+                <path d="M0,0 L7,3.5 L0,7 z" className="dependency-arrow success" />
+              </marker>
+              <marker id="dependency-arrow-failure" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="strokeWidth">
+                <path d="M0,0 L7,3.5 L0,7 z" className="dependency-arrow failure" />
+              </marker>
+            </defs>
+            {dependencyConnections.map(connection => {
+              const bend = Math.max(10, Math.abs(connection.toX - connection.fromX) * 0.42)
+              const path = `M ${connection.fromX} ${connection.fromY} C ${connection.fromX + bend} ${connection.fromY}, ${connection.toX - bend} ${connection.toY}, ${connection.toX} ${connection.toY}`
+              return <path key={connection.id} d={path} className={`dependency-line ${connection.tone}`} markerEnd={`url(#dependency-arrow-${connection.tone})`} />
+            })}
+          </svg>
+        )}
         {workflowRows.map(({ workflow, runs }) => (
           <div className="timeline-grid-row timeline-data-row" key={workflow.workflowId}>
             <div className="timeline-workflow-label">
@@ -230,7 +277,7 @@ function TimelineView({ workflows, rows, loading, nowMs, rangeHours }) {
               <span>{runs.length} {runs.length === 1 ? 'execution' : 'executions'}</span>
             </div>
             <div className="timeline-track">
-              {timelineTicks.map((_, index) => <i key={index} style={{ left: `${(index / 6) * 100}%` }} />)}
+              {timelineTicks.map((_, index) => <i key={index} style={{ left: `${(index / 6) * 100 * timelineEndRatio}%` }} />)}
               {runs.map((run, index) => {
                 const kind = statusKind(run.STATUS)
                 return (
@@ -254,6 +301,8 @@ function TimelineView({ workflows, rows, loading, nowMs, rangeHours }) {
         <span><i className="failed" /> Failed</span>
         <span><i className="running" /> Running</span>
         <span><i className="queued" /> Queued</span>
+        <span><i className="dependency-success" /> After success</span>
+        <span><i className="dependency-failure" /> After failure</span>
         <small>Hover an execution for exact times</small>
       </div>
     </div>
