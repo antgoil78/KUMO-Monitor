@@ -181,6 +181,8 @@ function SummaryItem({ tone, icon, label, value }) {
 }
 
 function TimelineView({ workflows, rows, loading, nowMs, rangeHours }) {
+  const [collapsedWorkflows, setCollapsedWorkflows] = useState(() => new Set())
+  const timelineViewRef = useRef(null)
   const timelineEndRatio = 0.96
   const timelineRowHeight = 50
   const rangeMs = rangeHours * 60 * 60 * 1000
@@ -194,6 +196,21 @@ function TimelineView({ workflows, rows, loading, nowMs, rangeHours }) {
   }, [workflows, rows, nowMs])
   const windowStart = timelineEnd - rangeMs
   const timelineTicks = Array.from({ length: 7 }, (_, index) => rangeHours * (1 - index / 6))
+  const hierarchy = useMemo(() => {
+    const byId = new Map(workflows.map(workflow => [String(workflow.workflowId), workflow]))
+    const parents = new Set(workflows.filter(workflow => workflow.parentWorkflowId).map(workflow => String(workflow.parentWorkflowId)))
+    const visible = workflows.filter(workflow => {
+      let parentId = String(workflow.parentWorkflowId || '')
+      const visited = new Set()
+      while (parentId && !visited.has(parentId)) {
+        if (collapsedWorkflows.has(parentId)) return false
+        visited.add(parentId)
+        parentId = String(byId.get(parentId)?.parentWorkflowId || '')
+      }
+      return true
+    })
+    return { parents, visible }
+  }, [workflows, collapsedWorkflows])
   const workflowRows = useMemo(() => {
     const runsByWorkflow = new Map()
     for (const row of rows || []) {
@@ -205,11 +222,11 @@ function TimelineView({ workflows, rows, loading, nowMs, rangeHours }) {
       runs.push({ ...row, start, end: Math.min(end, timelineEnd) })
       runsByWorkflow.set(workflowId, runs)
     }
-    return workflows.map(workflow => ({
+    return hierarchy.visible.map(workflow => ({
       workflow,
       runs: runsByWorkflow.get(String(workflow.workflowId)) || []
     }))
-  }, [workflows, rows, nowMs, timelineEnd, windowStart])
+  }, [hierarchy.visible, rows, nowMs, timelineEnd, windowStart])
   const dependencyConnections = useMemo(() => {
     const runLocations = new Map()
     workflowRows.forEach(({ runs }, rowIndex) => {
@@ -249,12 +266,45 @@ function TimelineView({ workflows, rows, loading, nowMs, rangeHours }) {
     return `${value.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`
   }
 
+  function toggleWorkflow(workflowId) {
+    setCollapsedWorkflows(previous => {
+      const next = new Set(previous)
+      const key = String(workflowId)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function collapseAllWorkflows() {
+    setCollapsedWorkflows(new Set(hierarchy.parents))
+  }
+
+  function expandAllWorkflows() {
+    setCollapsedWorkflows(new Set())
+  }
+
+  useEffect(() => {
+    if (loading) return undefined
+    const frame = window.requestAnimationFrame(() => {
+      const scrollContainer = timelineViewRef.current?.parentElement
+      if (scrollContainer) scrollContainer.scrollLeft = scrollContainer.scrollWidth
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [rangeHours, loading])
+
   if (loading) return <div className="empty-state">Loading timeline executions...</div>
 
   return (
-    <div className="timeline-view" style={{ width: `${Math.max(100, (rangeHours / 3) * 100)}%` }}>
+    <div ref={timelineViewRef} className="timeline-view" style={{ width: `${Math.min(200, Math.max(100, (rangeHours / 6) * 100))}%` }}>
       <div className="timeline-head timeline-grid-row">
-        <div className="timeline-workflow-heading">Workflow</div>
+        <div className="timeline-workflow-heading">
+          <span>Workflow</span>
+          <span className="timeline-hierarchy-actions">
+            <button type="button" onClick={expandAllWorkflows} title="Expand all workflows" aria-label="Expand all workflows">⊞</button>
+            <button type="button" onClick={collapseAllWorkflows} title="Collapse all workflows" aria-label="Collapse all workflows">⊟</button>
+          </span>
+        </div>
         <div className="timeline-axis" aria-hidden="true">
           {timelineTicks.map((hours, index) => (
             <span key={index} style={{ left: `${(index / 6) * 100 * timelineEndRatio}%` }}>
@@ -291,7 +341,17 @@ function TimelineView({ workflows, rows, loading, nowMs, rangeHours }) {
             <div className="timeline-grid-row timeline-data-row" key={workflow.workflowId}>
               <div className="timeline-workflow-label">
                 <strong style={{ paddingLeft: `${Math.min(Number(workflow.indent || 0), 4) * 10}px` }}>
-                  {Number(workflow.indent || 0) > 0 && <span className="timeline-tree-arrow">↳</span>}
+                  {hierarchy.parents.has(String(workflow.workflowId)) ? (
+                    <button
+                      type="button"
+                      className="timeline-collapse-button"
+                      onClick={() => toggleWorkflow(workflow.workflowId)}
+                      aria-label={`${collapsedWorkflows.has(String(workflow.workflowId)) ? 'Expand' : 'Collapse'} ${workflow.workflowName}`}
+                      title={`${collapsedWorkflows.has(String(workflow.workflowId)) ? 'Expand' : 'Collapse'} child workflows`}
+                    >
+                      {collapsedWorkflows.has(String(workflow.workflowId)) ? '▸' : '▾'}
+                    </button>
+                  ) : Number(workflow.indent || 0) > 0 ? <span className="timeline-tree-arrow">↳</span> : <span className="timeline-tree-spacer" />}
                   {workflow.workflowName}
                 </strong>
                 {workflow.parentWorkflowName ? (
@@ -892,7 +952,7 @@ export default function Monitor({ onNavigate }) {
     if (viewMode !== 'timeline' || timelineLoaded) return
     let cancelled = false
     setTimelineLoading(true)
-    api.history(500)
+    api.history(2000)
       .then(data => {
         if (!cancelled) {
           setTimelineRows(data.rows || [])
@@ -1138,11 +1198,13 @@ export default function Monitor({ onNavigate }) {
             <label className="timeline-range-control">
               <span>Range</span>
               <select value={timelineRangeHours} onChange={event => setTimelineRangeHours(Number(event.target.value))} aria-label="Timeline range">
-                <option value="1">1 hour</option>
-                <option value="3">3 hours</option>
                 <option value="6">6 hours</option>
                 <option value="12">12 hours</option>
                 <option value="24">24 hours</option>
+                <option value="72">3 days</option>
+                <option value="168">1 week</option>
+                <option value="336">2 weeks</option>
+                <option value="720">1 month</option>
               </select>
             </label>
           )}
