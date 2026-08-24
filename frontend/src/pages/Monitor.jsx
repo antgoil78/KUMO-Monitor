@@ -180,6 +180,86 @@ function SummaryItem({ tone, icon, label, value }) {
   )
 }
 
+function TimelineView({ workflows, rows, loading, nowMs, rangeHours }) {
+  const rangeMs = rangeHours * 60 * 60 * 1000
+  const windowStart = nowMs - rangeMs
+  const timelineTicks = Array.from({ length: 7 }, (_, index) => rangeHours * (1 - index / 6))
+  const workflowRows = useMemo(() => {
+    const runsByWorkflow = new Map()
+    for (const row of rows || []) {
+      const workflowId = String(row.WORKFLOW_ID || '')
+      const start = timestampMs(row.START_TIME || row.REQUESTED_AT)
+      const end = timestampMs(row.END_TIME) || nowMs
+      if (!workflowId || !start || end < windowStart || start > nowMs) continue
+      const runs = runsByWorkflow.get(workflowId) || []
+      runs.push({ ...row, start, end: Math.min(end, nowMs) })
+      runsByWorkflow.set(workflowId, runs)
+    }
+    return workflows.map(workflow => ({
+      workflow,
+      runs: runsByWorkflow.get(String(workflow.workflowId)) || []
+    }))
+  }, [workflows, rows, nowMs, windowStart])
+
+  function barStyle(run) {
+    const start = Math.max(run.start, windowStart)
+    const left = ((start - windowStart) / (nowMs - windowStart)) * 100
+    const rawWidth = ((Math.max(run.end, start + 60 * 1000) - start) / (nowMs - windowStart)) * 100
+    return { left: `${left}%`, width: `${Math.max(rawWidth, 0.45)}%` }
+  }
+
+  if (loading) return <div className="empty-state">Loading timeline executions...</div>
+
+  return (
+    <div className="timeline-view">
+      <div className="timeline-head timeline-grid-row">
+        <div className="timeline-workflow-heading">Workflow</div>
+        <div className="timeline-axis" aria-hidden="true">
+          {timelineTicks.map((hours, index) => (
+            <span key={index} style={{ left: `${(index / 6) * 100}%` }}>
+              {hours === 0 ? 'Now' : rangeHours === 1 ? `−${Math.round(hours * 60)}m` : `−${Number(hours.toFixed(1))}h`}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="timeline-body">
+        {workflowRows.map(({ workflow, runs }) => (
+          <div className="timeline-grid-row timeline-data-row" key={workflow.workflowId}>
+            <div className="timeline-workflow-label">
+              <strong>{workflow.workflowName}</strong>
+              <span>{runs.length} {runs.length === 1 ? 'execution' : 'executions'}</span>
+            </div>
+            <div className="timeline-track">
+              {timelineTicks.map((_, index) => <i key={index} style={{ left: `${(index / 6) * 100}%` }} />)}
+              {runs.map((run, index) => {
+                const kind = statusKind(run.STATUS)
+                return (
+                  <button
+                    type="button"
+                    key={`${run.RUN_ID || index}`}
+                    className={`timeline-run ${kind}`}
+                    style={barStyle(run)}
+                    title={`${run.STATUS || 'Unknown'} · ${formatDateTime(run.START_TIME || run.REQUESTED_AT)} → ${formatDateTime(run.END_TIME)}`}
+                    aria-label={`${workflow.workflowName}: ${run.STATUS || 'unknown'} execution`}
+                  />
+                )
+              })}
+              {runs.length === 0 && <span className="timeline-empty">No runs</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="timeline-legend">
+        <span><i className="success" /> Success</span>
+        <span><i className="failed" /> Failed</span>
+        <span><i className="running" /> Running</span>
+        <span><i className="queued" /> Queued</span>
+        <small>Hover an execution for exact times</small>
+      </div>
+    </div>
+  )
+}
+
 function RunningProgress({ workflow }) {
   const s = String(workflow.lastStatus || '').toUpperCase()
   const isBusy = ['INITIATING', 'RUNNING', 'IN_PROGRESS', 'EXECUTING', 'QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED'].includes(s)
@@ -601,6 +681,11 @@ export default function Monitor({ onNavigate }) {
   const pendingRunsRef = useRef({})
   const [globalLocks, setGlobalLocks] = useState([])
   const [modal, setModal] = useState(null)
+  const [viewMode, setViewMode] = useState('table')
+  const [timelineRows, setTimelineRows] = useState([])
+  const [timelineLoading, setTimelineLoading] = useState(false)
+  const [timelineLoaded, setTimelineLoaded] = useState(false)
+  const [timelineRangeHours, setTimelineRangeHours] = useState(1)
   useEffect(() => {
     pendingRunsRef.current = pendingRuns
   }, [pendingRuns])
@@ -725,6 +810,21 @@ export default function Monitor({ onNavigate }) {
     }
   }
   useEffect(() => { load(false); loadRealtimeState() }, [])
+  useEffect(() => {
+    if (viewMode !== 'timeline' || timelineLoaded) return
+    let cancelled = false
+    setTimelineLoading(true)
+    api.history(500)
+      .then(data => {
+        if (!cancelled) {
+          setTimelineRows(data.rows || [])
+          setTimelineLoaded(true)
+        }
+      })
+      .catch(err => !cancelled && setError(err.message))
+      .finally(() => !cancelled && setTimelineLoading(false))
+    return () => { cancelled = true }
+  }, [viewMode, timelineLoaded])
   useEffect(() => {
     const source = createKumoEventSource((event) => {
       const type = event?.type
@@ -948,9 +1048,27 @@ export default function Monitor({ onNavigate }) {
       {actionMessage && <div className="alert info">{actionMessage}</div>}
       <div className="monitor-toolbar">
         <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Filter workflows..." className="search-input" />
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="status-select">
-          {statusOptions.map(option => <option key={option.value || 'all'} value={option.value}>{option.label}</option>)}
-        </select>
+        <div className="monitor-toolbar-actions">
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="status-select">
+            {statusOptions.map(option => <option key={option.value || 'all'} value={option.value}>{option.label}</option>)}
+          </select>
+          <div className="view-switch" aria-label="Monitor view">
+            <button className={viewMode === 'table' ? 'active' : ''} onClick={() => setViewMode('table')}>☷ Table</button>
+            <button className={viewMode === 'timeline' ? 'active' : ''} onClick={() => setViewMode('timeline')}>━ Timeline</button>
+          </div>
+          {viewMode === 'timeline' && (
+            <label className="timeline-range-control">
+              <span>Range</span>
+              <select value={timelineRangeHours} onChange={event => setTimelineRangeHours(Number(event.target.value))} aria-label="Timeline range">
+                <option value="1">1 hour</option>
+                <option value="3">3 hours</option>
+                <option value="6">6 hours</option>
+                <option value="12">12 hours</option>
+                <option value="24">24 hours</option>
+              </select>
+            </label>
+          )}
+        </div>
       </div>
       <div className="monitor-system-strip">
         <div className={`system-engine-card ${statusKind(engine.status)}`}>
@@ -969,10 +1087,13 @@ export default function Monitor({ onNavigate }) {
         </div>
         <span className="summary-updated">Updated {formatDateTime(payload?.generatedAt)}</span>
       </div>
-      <div className="table-card monitor-table-card vision-card-flat">
+      <div className={`table-card monitor-table-card vision-card-flat ${viewMode === 'timeline' ? 'timeline-card' : ''}`}>
         {loading ? <div className="empty-state">Loading monitor data...</div> : null}
         {!loading && filtered.length === 0 ? <div className="empty-state">No workflows match the current filters.</div> : null}
-        {filtered.length > 0 && (
+        {filtered.length > 0 && viewMode === 'timeline' && (
+          <TimelineView workflows={filtered} rows={timelineRows} loading={timelineLoading} nowMs={nowMs} rangeHours={timelineRangeHours} />
+        )}
+        {filtered.length > 0 && viewMode === 'table' && (
           <table className="workflow-table monitor-table">
             <thead><tr><th>Workflow</th><th><span className="visually-hidden">Actions</span></th><th>Status</th><th>Last Run</th><th>Duration</th><th>Schedule</th><th>Next Run</th></tr></thead>
             <tbody>{filtered.map(w => <WorkflowRow key={w.workflowId} workflow={w} nowMs={nowMs} onManage={(workflow) => setModal({ type: 'actions', workflow })} pendingRun={pendingRuns[w.workflowId]} />)}</tbody>
