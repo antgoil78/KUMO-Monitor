@@ -22,6 +22,7 @@ file_ingestion_bp = Blueprint("file_ingestion", __name__)
 
 ADMIN_PKG_GROUP_SOURCE = f"{config.DB}.{config.SCHEMA}.RAW_LIM_PKG_GROUP_SOURCE"
 RAW_LIM_META_TABLE = "KUMO_TST.RAW_LIM.RAW_LIM_META"
+SET_READY_LATEST_TABLE = "KUMO_TST.RAW_LIM._TMP_SET_READY_LOG"
 SET_READY_HISTORY_TABLE = "KUMO_TST.RAW_LIM._SET_READY_LOG"
 SUBJECT_AREA_COLUMN = "SUBJECT_AREA"
 DEFAULT_HISTORY_DAYS = 30
@@ -504,23 +505,14 @@ def _load_overview(history_days):
             try:
                 cur.execute(
                     f"""
-                    WITH RANKED_LOG AS (
-                      SELECT *,
-                             DENSE_RANK() OVER (
-                               PARTITION BY PKG_GROUP_NAME
-                               ORDER BY CONTROL_DATE DESC
-                             ) AS RUN_RANK
-                      FROM {SET_READY_HISTORY_TABLE}
-                      WHERE PKG_GROUP_NAME IN ({placeholders})
-                    )
                     SELECT PKG_GROUP_NAME,
                            COUNT(*) AS LATEST_LOG_ROWS,
                            COUNT_IF(STATUS = 'UPDATED') AS LATEST_UPDATED_ROWS,
                            COUNT_IF(STATUS IN ('STOPPED', 'FAILED', 'SKIPPED', 'BLOCKED')) AS LATEST_ATTENTION_ROWS,
                            LISTAGG(DISTINCT STATUS, ', ') WITHIN GROUP (ORDER BY STATUS) AS LATEST_STATUS_LIST,
                            MAX(CONTROL_DATE) AS LATEST_CONTROL_DATE
-                    FROM RANKED_LOG
-                    WHERE RUN_RANK = 1
+                    FROM {SET_READY_LATEST_TABLE}
+                    WHERE PKG_GROUP_NAME IN ({placeholders})
                     GROUP BY PKG_GROUP_NAME
                     """,
                     params,
@@ -532,15 +524,6 @@ def _load_overview(history_days):
             try:
                 cur.execute(
                     f"""
-                    WITH RANKED_LOG AS (
-                      SELECT *,
-                             DENSE_RANK() OVER (
-                               PARTITION BY PKG_GROUP_NAME
-                               ORDER BY CONTROL_DATE DESC
-                             ) AS RUN_RANK
-                      FROM {SET_READY_HISTORY_TABLE}
-                      WHERE PKG_GROUP_NAME IN ({placeholders})
-                    )
                     SELECT PKG_GROUP_NAME,
                            UPPER(DLVY_SOURCE_ID) AS SOURCE_ID,
                            COUNT(*) AS LATEST_LOG_ROWS,
@@ -548,8 +531,8 @@ def _load_overview(history_days):
                            COUNT_IF(STATUS IN ('STOPPED', 'FAILED', 'SKIPPED', 'BLOCKED')) AS LATEST_ATTENTION_ROWS,
                            LISTAGG(DISTINCT STATUS, ', ') WITHIN GROUP (ORDER BY STATUS) AS LATEST_STATUS_LIST,
                            MAX(CONTROL_DATE) AS LATEST_CONTROL_DATE
-                    FROM RANKED_LOG
-                    WHERE RUN_RANK = 1
+                    FROM {SET_READY_LATEST_TABLE}
+                    WHERE PKG_GROUP_NAME IN ({placeholders})
                       AND DLVY_SOURCE_ID IS NOT NULL
                     GROUP BY PKG_GROUP_NAME, UPPER(DLVY_SOURCE_ID)
                     """,
@@ -678,15 +661,6 @@ def _load_raw_detail(group_name):
 def _load_ready_detail(group_name):
     rows = sf.query_service(
         f"""
-        WITH RANKED_LOG AS (
-          SELECT *,
-                 DENSE_RANK() OVER (
-                   PARTITION BY PKG_GROUP_NAME
-                   ORDER BY CONTROL_DATE DESC
-                 ) AS RUN_RANK
-          FROM {SET_READY_HISTORY_TABLE}
-          WHERE PKG_GROUP_NAME = %(group_name)s
-        )
         SELECT PKG_GROUP_NAME,
                DLVY_END_DATE,
                DLVY_SOURCE_ID,
@@ -697,8 +671,8 @@ def _load_ready_detail(group_name):
                ROWS_UPDATED,
                REASON,
                CONTROL_DATE
-        FROM RANKED_LOG
-        WHERE RUN_RANK = 1
+        FROM {SET_READY_LATEST_TABLE}
+        WHERE PKG_GROUP_NAME = %(group_name)s
         ORDER BY CONTROL_DATE DESC, DLVY_END_DATE DESC, DLVY_SOURCE_ID
         """,
         params={"group_name": group_name},

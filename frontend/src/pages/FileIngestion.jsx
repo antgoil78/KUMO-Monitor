@@ -111,7 +111,7 @@ function OverviewTable({ rows, onOpenDetail }) {
               <th>RAW status</th>
               <th>Delivery</th>
               <th>History</th>
-              <th>Details</th>
+              <th>Loading history</th>
             </tr>
           </thead>
           <tbody>
@@ -144,7 +144,7 @@ function OverviewRow({ row, source = false, expanded = false, onToggle, onOpenDe
       <td><div><span className="success-text">{readyRows} ready</span> <span className="lim-muted">·</span> <span className={waitingRows ? 'lim-warning-text' : 'lim-muted'}>{waitingRows} waiting</span></div><div className="lim-progress"><span style={{ width: `${readiness}%` }} /></div></td>
       <td className="lim-muted lim-nowrap">{formatDate(row.LATEST_DLVY_END_DATE)}</td>
       <td>{source ? <span className="lim-muted">—</span> : <><div>{Number(row.HISTORY_DAYS || 0)} days</div><div className="lim-sub-value">{Number(row.HISTORY_ROWS || 0)} rows</div></>}</td>
-      <td><div className="lim-row-actions"><button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, 'history', source ? row.SOURCE_ID : null)}>History</button><button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, 'raw', source ? row.SOURCE_ID : null)}>RAW</button><button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, 'ready', source ? row.SOURCE_ID : null)}>READY</button></div></td>
+      <td><div className="lim-row-actions"><button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, 'history', source ? row.SOURCE_ID : null)}>Open history</button></div></td>
     </tr>
   )
 }
@@ -257,11 +257,41 @@ function LogTable({ rows }) {
   )
 }
 
+function CompactHistoryTable({ rows, firstError }) {
+  return (
+    <div className="lim-history-table-wrap">
+      <table className="lim-table lim-history-table">
+        <thead><tr><th>Delivery</th><th>Source</th><th>Package</th><th>Status</th><th>Reason</th></tr></thead>
+        <tbody>{rows.map((row, index) => {
+          const status = formatValue(row.STATUS, '')
+          const isFirstError = row === firstError
+          return (
+            <tr key={`${row.CONTROL_DATE || 'run'}-${row.DLVY_END_DATE || ''}-${row.DLVY_SOURCE_ID || ''}-${index}`} className={isFirstError ? 'lim-first-error-row' : status === 'BLOCKED' ? 'lim-blocked-row' : ''}>
+              <td className="lim-nowrap">{formatDate(row.DLVY_END_DATE)}</td>
+              <td><strong>{formatValue(row.DLVY_SOURCE_ID)}</strong></td>
+              <td><div>{formatValue(row.DLVY_PKG_ID)}</div><div className="lim-sub-value">{formatValue(row.DLVY_PKG_YEAR)} · {formatValue(row.DLVY_PKG_YEAR_SEQ_NO)}</div></td>
+              <td><span className={`lim-log-status ${logTone(status)}`}>{status || '—'}</span>{isFirstError && <span className="lim-root-cause-badge">First error</span>}</td>
+              <td className="lim-history-reason">{formatValue(row.REASON)}</td>
+            </tr>
+          )
+        })}</tbody>
+      </table>
+    </div>
+  )
+}
+
 function HistoryGroups({ rows }) {
   const groups = useMemo(() => {
     const map = new Map()
-    rows.forEach(row => {
-      const key = formatValue(row.CONTROL_RUN_DATE, 'Unknown date')
+    const sorted = [...rows].sort((a, b) => {
+      const runOrder = new Date(b.CONTROL_DATE || 0) - new Date(a.CONTROL_DATE || 0)
+      if (runOrder) return runOrder
+      const deliveryOrder = new Date(a.DLVY_END_DATE || 0) - new Date(b.DLVY_END_DATE || 0)
+      if (deliveryOrder) return deliveryOrder
+      return String(a.DLVY_SOURCE_ID || '').localeCompare(String(b.DLVY_SOURCE_ID || ''))
+    })
+    sorted.forEach(row => {
+      const key = formatValue(row.CONTROL_DATE, 'Unknown run')
       if (!map.has(key)) map.set(key, [])
       map.get(key).push(row)
     })
@@ -270,16 +300,19 @@ function HistoryGroups({ rows }) {
 
   return (
     <div className="lim-history-groups">
-      {groups.map(([date, dayRows], index) => {
-        const updated = dayRows.filter(row => row.STATUS === 'UPDATED').length
-        const attention = dayRows.filter(row => ATTENTION_STATUSES.has(row.STATUS)).length
+      {groups.map(([runDate, runRows], index) => {
+        const updated = runRows.filter(row => row.STATUS === 'UPDATED').length
+        const attention = runRows.filter(row => ATTENTION_STATUSES.has(row.STATUS)).length
+        const firstError = runRows.find(row => ATTENTION_STATUSES.has(row.STATUS) && row.STATUS !== 'BLOCKED')
+          || runRows.find(row => ATTENTION_STATUSES.has(row.STATUS))
         return (
-          <details key={date} className="lim-history-day" open={index === 0}>
+          <details key={runDate} className={`lim-history-day ${firstError ? 'has-error' : ''}`} open={index === 0}>
             <summary>
-              <strong>{date}</strong>
-              <span>{dayRows.length} rows · {updated} updated · {attention} attention</span>
+              <strong>{formatDate(runDate)}</strong>
+              <span>{runRows.length} deliveries · {updated} updated · {attention} attention</span>
             </summary>
-            <LogTable rows={dayRows} />
+            {firstError && <div className="lim-first-error-summary"><span>First error to solve</span><strong>{formatValue(firstError.STATUS)} · {formatDate(firstError.DLVY_END_DATE)} · {formatValue(firstError.DLVY_SOURCE_ID)}</strong><p>{formatValue(firstError.REASON)}</p></div>}
+            <CompactHistoryTable rows={runRows} firstError={firstError} />
           </details>
         )
       })}
@@ -290,37 +323,27 @@ function HistoryGroups({ rows }) {
 function DetailModal({ detail, onClose }) {
   if (!detail) return null
 
-  const titles = {
-    raw: 'RAW Status',
-    ready: 'READY Status',
-    history: 'Log history'
-  }
-
   return (
     <div className="modal-backdrop lim-modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
       <div className="vision-modal lim-detail-modal" role="dialog" aria-modal="true">
         <div className="modal-header">
           <div>
             <span className="modal-eyebrow">LIM ingestion</span>
-            <h2>{titles[detail.type]} · {detail.groupName}{detail.sourceId ? ` · ${detail.sourceId}` : ''}</h2>
-            <p>{detail.type === 'history' ? `History window: last ${HISTORY_DAYS} days` : 'Current ingestion state'}</p>
+            <h2>Loading history · {detail.groupName}{detail.sourceId ? ` · ${detail.sourceId}` : ''}</h2>
+            <p>Newest runs first · deliveries ordered oldest to newest within each run · last {HISTORY_DAYS} days</p>
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button>
         </div>
 
         {detail.loading ? (
-          <div className="lim-detail-loading">Loading {titles[detail.type].toLowerCase()}...</div>
+          <div className="lim-detail-loading">Loading history...</div>
         ) : detail.error ? (
           <div className="alert error">{detail.error}</div>
         ) : (
           <>
             <DetailMetrics type={detail.type} metrics={detail.data?.metrics} />
             {detail.data?.rows?.length ? (
-              detail.type === 'raw'
-                ? <RawTable rows={detail.data.rows} />
-                : detail.type === 'history'
-                  ? <HistoryGroups rows={detail.data.rows} />
-                  : <LogTable rows={detail.data.rows} />
+              <HistoryGroups rows={detail.data.rows} />
             ) : (
               <div className="lim-empty-detail">No rows to display.</div>
             )}

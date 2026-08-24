@@ -250,8 +250,8 @@
 }
 
 .lim-detail-modal {
-  width: min(1500px, calc(100vw - 42px));
-  max-height: calc(100vh - 42px);
+  width: min(1720px, calc(100vw - 20px));
+  max-height: calc(100vh - 20px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -418,6 +418,25 @@
   border-top: 1px solid var(--line-soft);
   border-radius: 0;
 }
+
+.lim-history-day.has-error { border-color: rgba(255, 83, 120, .28); }
+.lim-first-error-summary { margin: 0; padding: 12px 14px; border-top: 1px solid rgba(255,83,120,.2); background: linear-gradient(90deg, rgba(255,83,120,.11), rgba(255,83,120,.025)); }
+.lim-first-error-summary span, .lim-first-error-summary strong { display: block; }
+.lim-first-error-summary span { color: #ff9daf; font-size: 9px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.lim-first-error-summary strong { margin-top: 4px; color: #ffe3e9; font-size: 12px; }
+.lim-first-error-summary p { margin: 5px 0 0; color: #d8aeb8; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.lim-history-table-wrap { width: 100%; border-top: 1px solid var(--line-soft); overflow-y: auto; overflow-x: hidden; }
+.lim-history-table { width: 100%; min-width: 0; table-layout: fixed; }
+.lim-history-table th:nth-child(1) { width: 155px; }
+.lim-history-table th:nth-child(2) { width: 90px; }
+.lim-history-table th:nth-child(3) { width: 145px; }
+.lim-history-table th:nth-child(4) { width: 175px; }
+.lim-history-table td { vertical-align: top; }
+.lim-history-reason { white-space: normal; overflow-wrap: anywhere; line-height: 1.45; }
+.lim-first-error-row td { background: rgba(255,83,120,.085); border-bottom-color: rgba(255,83,120,.22); }
+.lim-blocked-row { opacity: .68; }
+.lim-blocked-row:hover { opacity: 1; }
+.lim-root-cause-badge { display: inline-flex; margin-left: 6px; padding: 2px 6px; border: 1px solid rgba(255,83,120,.35); border-radius: 999px; color: #ff9daf; background: rgba(255,83,120,.1); font-size: 8px; font-weight: 900; text-transform: uppercase; white-space: nowrap; }
 
 @media (max-width: 1000px) {
   .lim-detail-metrics.five,

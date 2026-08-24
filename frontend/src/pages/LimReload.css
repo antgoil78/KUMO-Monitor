@@ -55,6 +55,19 @@
 .reload-result-grid span, .reload-result-grid strong { display: block; overflow-wrap: anywhere; }
 .reload-result-grid span { color: var(--muted); font-size: 8px; text-transform: uppercase; }
 .reload-result-grid strong { margin-top: 4px; color: #dcecff; font-size: 11px; }
+.reload-confirm-backdrop { z-index: 1200; }
+.reload-confirm-modal { width: min(620px, calc(100vw - 32px)); padding: 24px; border-color: rgba(255,83,120,.4); background: linear-gradient(155deg, rgba(31,12,35,.98), rgba(6,15,38,.99)); }
+.reload-confirm-icon { display: grid; place-items: center; width: 38px; height: 38px; margin-bottom: 14px; border: 1px solid rgba(255,113,143,.5); border-radius: 50%; color: #ff8fa8; background: rgba(255,83,120,.12); font-size: 20px; font-weight: 900; }
+.reload-confirm-modal h2 { margin: 6px 0 8px; color: #ffe6ec; }
+.reload-confirm-modal > p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.reload-confirm-steps { display: grid; gap: 8px; margin: 18px 0; padding: 0; list-style: none; counter-reset: reload-step; }
+.reload-confirm-steps li { position: relative; min-height: 48px; padding: 10px 12px 10px 48px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background: rgba(255,255,255,.025); counter-increment: reload-step; }
+.reload-confirm-steps li::before { content: counter(reload-step); position: absolute; top: 10px; left: 12px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; color: #ffd5df; background: rgba(255,83,120,.14); font-size: 10px; font-weight: 900; }
+.reload-confirm-steps strong, .reload-confirm-steps span { display: block; }
+.reload-confirm-steps strong { color: #e9f3ff; font-size: 11px; }
+.reload-confirm-steps span { margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.reload-confirm-actions { display: flex; justify-content: flex-end; gap: 9px; padding-top: 4px; }
+.reload-confirm-run { background: linear-gradient(135deg, #d7355d, #9e2347); border-color: rgba(255,130,155,.55); }
 .nav-item-child { width: calc(100% - 22px); margin-left: 22px; font-size: 11px; opacity: .88; }
 .nav-item-child .nav-icon { font-size: 11px; }
 @media (max-width: 1050px) { .reload-layout { grid-template-columns: 1fr; } .reload-side { grid-template-columns: repeat(2, 1fr); } }
