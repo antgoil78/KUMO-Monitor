@@ -44,6 +44,17 @@ function valuePreview(value, limit = 110) {
   return text.length > limit ? `${text.slice(0, limit)}…` : text
 }
 
+function logTone(value) {
+  const text = String(value ?? '').trim().toUpperCase()
+  if (!text) return ''
+  if (/\b(ERROR|FAILED|FAILURE|FATAL|ABORTED)\b/.test(text)) return 'failed'
+  if (/\b(WARN|WARNING|SKIPPED)\b/.test(text)) return 'warning'
+  if (/\b(SUCCESS|SUCCEEDED|COMPLETED|DONE|OK)\b/.test(text)) return 'success'
+  if (/\b(RUNNING|EXECUTING|IN_PROGRESS|STARTED)\b/.test(text)) return 'running'
+  if (/\b(INFO|DEBUG|TRACE|NOTICE)\b/.test(text)) return 'info'
+  return ''
+}
+
 function columnsFor(rows, sourceKey) {
   const available = new Set(rows.flatMap(row => Object.keys(row)))
   const preferred = (preferredColumns[sourceKey] || []).filter(column => available.has(column))
@@ -80,7 +91,10 @@ function FriendlyJson({ value }) {
   const entries = Object.entries(structured).slice(0, 4)
   return (
     <dl className="execution-json-preview">
-      {entries.map(([key, item]) => <div key={key}><dt>{key}</dt><dd>{typeof item === 'object' ? JSON.stringify(item) : String(item ?? '—')}</dd></div>)}
+      {entries.map(([key, item]) => {
+        const text = typeof item === 'object' ? JSON.stringify(item) : String(item ?? '—')
+        return <div key={key}><dt>{key}</dt><dd className={logTone(text)}>{text}</dd></div>
+      })}
       {Object.keys(structured).length > entries.length && <div><dt>More</dt><dd>+{Object.keys(structured).length - entries.length} properties</dd></div>}
     </dl>
   )
@@ -96,13 +110,14 @@ function LogTable({ rows, sourceKey, onViewValue }) {
         <thead><tr>{columns.map(column => <th key={column}>{column.replaceAll('_', ' ')}</th>)}</tr></thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={`${row.LOG_ID || row.SRT || row.LOG_DTTM || index}-${index}`}>
+            <tr key={`${row.LOG_ID || row.SRT || row.LOG_DTTM || index}-${index}`} className={`execution-log-row ${logTone(row.STATUS || row.TYPE || row.ERROR_MESSAGE || row.MESSAGE)}`}>
               {columns.map(column => {
                 const value = row[column]
                 const structured = structuredValue(value)
                 const opensViewer = ['LATEST_SQL', 'SQL'].includes(column) || structured || String(value ?? '').length > 240
+                const tone = ['STATUS', 'TYPE', 'MESSAGE', 'ERROR_MESSAGE'].includes(column) ? logTone(value) : ''
                 return (
-                  <td key={column} className={['MESSAGE', 'ERROR_MESSAGE'].includes(column) ? 'execution-log-message-cell' : opensViewer ? 'execution-view-cell' : ''}>
+                  <td key={column} className={`${['MESSAGE', 'ERROR_MESSAGE'].includes(column) ? 'execution-log-message-cell' : opensViewer ? 'execution-view-cell' : ''} ${tone}`}>
                     {column === 'STATUS' ? <StatusBadge status={value} /> : structured ? <FriendlyJson value={value} /> : <span>{opensViewer ? valuePreview(value) : displayValue(column, value)}</span>}
                     {opensViewer && <button type="button" className="execution-view-value" onClick={() => onViewValue({ column, value, modelName: row.MODEL_NAME })}>View</button>}
                   </td>

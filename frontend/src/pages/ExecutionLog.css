@@ -20,6 +20,14 @@
 .execution-log-table { min-width: 850px; }
 .execution-log-table th { position: sticky; z-index: 1; top: 0; white-space: nowrap; }
 .execution-log-table td { max-width: 320px; vertical-align: top; white-space: nowrap; }
+.execution-log-row.failed { background: rgba(255, 75, 110, .055); }
+.execution-log-row.warning { background: rgba(255, 181, 71, .045); }
+.execution-log-table td.failed, .execution-json-preview dd.failed { color: #ff718d; }
+.execution-log-table td.warning, .execution-json-preview dd.warning { color: #ffc568; }
+.execution-log-table td.success, .execution-json-preview dd.success { color: #55dda5; }
+.execution-log-table td.running, .execution-json-preview dd.running { color: #54c9ff; }
+.execution-log-table td.info, .execution-json-preview dd.info { color: #91b8ff; }
+.execution-log-table td.failed, .execution-log-table td.warning, .execution-log-table td.success, .execution-log-table td.running, .execution-log-table td.info { font-weight: 700; }
 .execution-log-table .execution-log-message-cell { min-width: 360px; max-width: 720px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .execution-log-table .execution-view-cell { min-width: 210px; max-width: 340px; white-space: normal; }
 .execution-view-cell > span { display: block; max-width: 300px; overflow: hidden; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
