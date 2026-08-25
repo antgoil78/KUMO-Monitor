@@ -16,7 +16,7 @@ class RealtimeEventBroker:
 
     def __init__(self):
         self._lock = RLock()
-        self._clients = set()
+        self._clients = {}
         self._client_count_callback = None
 
     def set_client_count_callback(self, callback):
@@ -26,6 +26,12 @@ class RealtimeEventBroker:
     def client_count(self):
         with self._lock:
             return len(self._clients)
+
+    def client_details(self):
+        with self._lock:
+            rows = [dict(metadata) for metadata in self._clients.values()]
+        rows.sort(key=lambda row: row.get("connectedAt") or "")
+        return rows
 
     def _notify_client_count(self, count):
         callback = None
@@ -65,24 +71,31 @@ class RealtimeEventBroker:
         if stale:
             with self._lock:
                 for client in stale:
-                    self._clients.discard(client)
+                    self._clients.pop(client, None)
 
-    def subscribe(self):
+    def subscribe(self, metadata=None):
         client = queue.Queue(maxsize=100)
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        details = {**(metadata or {}), "connectedAt": now, "lastActivityAt": now}
         with self._lock:
-            self._clients.add(client)
+            self._clients[client] = details
             count = len(self._clients)
         self._notify_client_count(count)
         return client
 
     def unsubscribe(self, client):
         with self._lock:
-            self._clients.discard(client)
+            self._clients.pop(client, None)
             count = len(self._clients)
         self._notify_client_count(count)
 
-    def stream(self, heartbeat_seconds=15):
-        client = self.subscribe()
+    def stream(self, metadata=None, heartbeat_seconds=15):
+        client = self.subscribe(metadata)
+
+        def touch():
+            with self._lock:
+                if client in self._clients:
+                    self._clients[client]["lastActivityAt"] = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
         def encode(event):
             event_type = event.get("type") or "message"
@@ -96,12 +109,15 @@ class RealtimeEventBroker:
                 "at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
                 "data": {"ok": True},
             })
+            touch()
             while True:
                 try:
                     event = client.get(timeout=heartbeat_seconds)
+                    touch()
                     yield encode(event)
                 except queue.Empty:
                     # Comments are valid SSE heartbeats and are ignored by EventSource.
+                    touch()
                     yield f": ping {int(time.time())}\n\n"
         finally:
             self.unsubscribe(client)

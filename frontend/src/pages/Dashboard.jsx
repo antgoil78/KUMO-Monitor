@@ -127,6 +127,49 @@ function TinyBarChart({ workflows }) {
   )
 }
 
+function browserName(userAgent) {
+  const value = String(userAgent || '')
+  if (/Edg\//.test(value)) return 'Edge'
+  if (/Chrome\//.test(value)) return 'Chrome'
+  if (/Firefox\//.test(value)) return 'Firefox'
+  if (/Safari\//.test(value)) return 'Safari'
+  return value ? 'Browser' : 'Unknown'
+}
+
+function PollingInfo({ clients, pollingActive, onClose }) {
+  const clientCount = clients.length
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="polling-info-title" onMouseDown={event => event.target === event.currentTarget && onClose()}>
+      <div className="vision-modal polling-info-modal">
+        <div className="modal-header">
+          <div>
+            <span className="modal-eyebrow">Live updates</span>
+            <h2 id="polling-info-title">Client polling information</h2>
+            <p>{clientCount} browser client{clientCount === 1 ? '' : 's'} currently connected</p>
+          </div>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        <div className="polling-client-state"><span className={`topbar-dot ${pollingActive ? 'success' : 'failed'}`} />{pollingActive ? 'Live polling active' : 'Live polling stopped'}</div>
+        {clients.length ? <div className="polling-client-list">
+          {clients.map((client, index) => (
+            <article className="polling-client-row" key={`${client.clientId || client.ipAddress}-${index}`}>
+              <div className="polling-client-avatar">{String(client.displayName || client.userName || '?').slice(0, 1).toUpperCase()}</div>
+              <div className="polling-client-identity"><strong>{client.displayName || client.userName || 'Unknown user'}</strong><span>{client.userName || 'UNKNOWN'} · {client.roleName || 'Unknown role'}</span></div>
+              <dl>
+                <div><dt>Page</dt><dd>{client.page || 'Unknown page'}</dd></div>
+                <div><dt>IP address</dt><dd>{client.ipAddress || 'Unavailable'}</dd></div>
+                <div><dt>Browser</dt><dd title={client.userAgent || ''}>{browserName(client.userAgent)}</dd></div>
+                <div><dt>Connected</dt><dd>{formatDateTime(client.connectedAt)}</dd></div>
+                <div><dt>Last activity</dt><dd>{formatDateTime(client.lastActivityAt)}</dd></div>
+              </dl>
+            </article>
+          ))}
+        </div> : <div className="soft-empty">No live browser clients are connected.</div>}
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const pendingRefreshSec = useRef(null)
   const [payload, setPayload] = useState(dashboardCache?.payload || null)
@@ -138,6 +181,7 @@ export default function Dashboard() {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(!dashboardCache)
   const [refreshing, setRefreshing] = useState(Boolean(dashboardCache))
+  const [showPollingInfo, setShowPollingInfo] = useState(false)
   const [refreshIntervalSec, setRefreshIntervalSec] = useState(
     Number(dashboardCache?.settings?.refreshSeconds || window.localStorage.getItem('kumoDashboardRefreshSeconds') || 10)
   )
@@ -223,7 +267,7 @@ export default function Dashboard() {
         }
         setPayload(monitorData)
       }
-    }, () => {})
+    }, () => {}, { page: 'Dashboard' })
     return () => source?.close()
   }, [])
 
@@ -294,12 +338,13 @@ export default function Dashboard() {
             <span className={`topbar-dot ${snowflakeOk ? 'success' : mockMode ? 'queued' : 'failed'}`} />
             <span title={ping?.error || ''}>{mockMode ? 'Mock mode' : snowflakeOk ? 'Snowflake connected' : 'Snowflake check failed'}</span>
           </div>
-          <div className="topbar-status realtime-status" title="Live browser connections using /api/events">
+          <button type="button" className="topbar-status realtime-status" onClick={() => setShowPollingInfo(true)} aria-label="Show client polling information">
             <span className={`topbar-dot ${pollingActive ? 'success' : 'failed'}`} />
             <span>{connectedClients} client{connectedClients === 1 ? '' : 's'} · {pollingActive ? 'polling on' : 'polling off'}</span>
-          </div>
+            <span className="realtime-info-icon" aria-hidden="true">i</span>
+          </button>
           <label className="topbar-refresh-control">
-            <span>{refreshing ? 'Refreshing' : 'Refresh'}</span>
+            <span>Refresh</span>
             <select value={refreshIntervalSec} onChange={event => updateRefreshInterval(event.target.value)}>
               {refreshOptions.map(seconds => <option key={seconds} value={seconds}>{seconds}s</option>)}
             </select>
@@ -338,7 +383,7 @@ export default function Dashboard() {
         <MetricCard
           label="Backend refresh"
           value={`${refreshIntervalSec || health?.refreshSeconds || payload?.refreshIntervalMs / 1000 || 5}s`}
-          delta={refreshing ? 'Refreshing' : 'Live polling'}
+          delta="Live polling"
           tone="queued"
           icon="↻"
           footer={`Updated ${formatDateTime(payload?.generatedAt)}`}
@@ -491,6 +536,7 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+      {showPollingInfo && <PollingInfo clients={realtime?.clients || []} pollingActive={pollingActive} onClose={() => setShowPollingInfo(false)} />}
     </section>
   )
 }

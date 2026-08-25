@@ -174,7 +174,26 @@ h2, h3 { color: var(--text-strong); margin: 0; }
 .topbar-dot.success { color: var(--green); }
 .topbar-dot.queued { color: var(--amber); }
 .topbar-dot.failed { color: var(--red); }
-.realtime-status { min-width: 176px; }
+.realtime-status { min-width: 176px; position: relative; font: inherit; cursor: pointer; }
+.realtime-status:hover { border-color: rgba(1, 232, 255, .38); color: var(--text); background: rgba(0, 117, 255, .1); }
+.realtime-info-icon { width: 16px; height: 16px; display: inline-grid; place-items: center; margin-left: 2px; border: 1px solid currentColor; border-radius: 50%; color: var(--muted2); font-size: 9px; font-weight: 850; }
+.polling-info-modal { width: min(620px, calc(100vw - 40px)); max-width: 620px; }
+.polling-info-list { display: grid; gap: 1px; overflow: hidden; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--line-soft); }
+.polling-info-list > div { display: grid; grid-template-columns: 145px 1fr; gap: 18px; padding: 15px 16px; background: rgba(5, 14, 36, .97); }
+.polling-info-list strong { color: var(--text-strong); font-size: 11px; }
+.polling-info-list span { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.polling-client-state { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--muted); font-size: 11px; }
+.polling-client-list { display: grid; gap: 10px; max-height: min(560px, calc(100vh - 230px)); overflow-y: auto; }
+.polling-client-row { display: grid; grid-template-columns: 38px minmax(150px, .7fr) minmax(300px, 1.3fr); gap: 12px; align-items: center; padding: 13px; border: 1px solid var(--line-soft); border-radius: 12px; background: rgba(4, 13, 35, .72); }
+.polling-client-avatar { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 11px; color: white; font-size: 12px; font-weight: 850; background: linear-gradient(135deg, #0075ff, #01e8ff); }
+.polling-client-identity { min-width: 0; }
+.polling-client-identity strong, .polling-client-identity span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.polling-client-identity strong { color: var(--text-strong); font-size: 11px; }
+.polling-client-identity span { margin-top: 3px; color: var(--muted2); font-size: 9px; }
+.polling-client-row dl { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 6px 14px; margin: 0; }
+.polling-client-row dl div { display: grid; grid-template-columns: 72px 1fr; gap: 6px; min-width: 0; }
+.polling-client-row dt { color: var(--muted2); font-size: 9px; }
+.polling-client-row dd { overflow: hidden; margin: 0; color: var(--text); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .topbar-refresh-control {
   min-height: 38px;
   display: inline-flex;

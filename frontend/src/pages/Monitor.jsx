@@ -1122,7 +1122,7 @@ export default function Monitor({ onNavigate }) {
         })
         notify(`Run request failed for ${liveRun.workflowName}: ${liveRun.error || data.error || 'Unknown error'}`)
       }
-    }, () => {})
+    }, () => {}, { page: 'Workflow Monitor' })
     return () => source?.close()
   }, [])
   useEffect(() => {

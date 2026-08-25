@@ -980,6 +980,7 @@ def _realtime_runtime_state():
     )
     return {
         "clientCount": client_count,
+        "clients": realtime_broker.client_details(),
         "pollingActive": polling_active,
         "monitorCache": monitor_state,
         "dashboardCache": dashboard_state,
@@ -1226,7 +1227,17 @@ def refresh_monitor():
 
 @app.route("/api/events")
 def events():
-    response = Response(stream_with_context(realtime_broker.stream()), mimetype="text/event-stream")
+    actor = _actor_context()
+    client_metadata = {
+        "clientId": str(request.args.get("clientId") or "")[:100],
+        "page": str(request.args.get("page") or "Unknown page")[:100],
+        "ipAddress": _client_ip(),
+        "userName": actor.get("userName") or "UNKNOWN",
+        "displayName": actor.get("displayName") or actor.get("userName") or "Unknown user",
+        "roleName": actor.get("roleName") or "Unknown role",
+        "userAgent": _user_agent(),
+    }
+    response = Response(stream_with_context(realtime_broker.stream(client_metadata)), mimetype="text/event-stream")
     response.headers["Cache-Control"] = "no-cache"
     response.headers["X-Accel-Buffering"] = "no"
     response.headers["Connection"] = "keep-alive"

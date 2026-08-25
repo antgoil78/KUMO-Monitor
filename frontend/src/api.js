@@ -86,12 +86,18 @@ export const api = {
   })
 }
 
-export function createKumoEventSource(onEvent, onError) {
+export function createKumoEventSource(onEvent, onError, options = {}) {
   if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
     return null
   }
 
-  const source = new window.EventSource('/api/events')
+  let clientId = window.sessionStorage.getItem('kumoRealtimeClientId')
+  if (!clientId) {
+    clientId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    window.sessionStorage.setItem('kumoRealtimeClientId', clientId)
+  }
+  const params = new URLSearchParams({ clientId, page: options.page || 'Unknown page' })
+  const source = new window.EventSource(`/api/events?${params.toString()}`)
   const eventTypes = ['connected', 'realtime_state', 'monitor_update', 'workflow_run_requested', 'workflow_run_queued', 'workflow_run_status', 'workflow_run_failed']
   function handle(event) {
     try {
