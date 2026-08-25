@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Background, Controls, MarkerType, MiniMap, ReactFlow } from '@xyflow/react'
 import dagre from '@dagrejs/dagre'
 import { api, createKumoEventSource } from '../api.js'
@@ -182,7 +183,70 @@ function SummaryItem({ tone, icon, label, value }) {
   )
 }
 
-function TimelineView({ workflows, rows, loading, nowMs, rangeHours }) {
+function TimelineRun({ run, workflow, nowMs, style, onViewLog }) {
+  const [tooltipPosition, setTooltipPosition] = useState(null)
+  const closeTimerRef = useRef(null)
+  const tooltipId = useId()
+  const startTime = run.START_TIME || run.REQUESTED_AT
+  const requester = String(run.REQUESTED_BY || '').trim() || 'Unknown'
+  const duration = elapsedDuration(run.START_TIME || run.REQUESTED_AT, run.END_TIME, run.STATUS, nowMs)
+
+  function openTooltip(event) {
+    window.clearTimeout(closeTimerRef.current)
+    const rect = event.currentTarget.getBoundingClientRect()
+    const tooltipWidth = 260
+    const left = Math.max(12, Math.min(rect.left + rect.width / 2 - tooltipWidth / 2, window.innerWidth - tooltipWidth - 12))
+    const showAbove = rect.bottom + 190 > window.innerHeight
+    setTooltipPosition({ left, top: showAbove ? rect.top - 8 : rect.bottom + 8, showAbove })
+  }
+
+  function scheduleClose() {
+    closeTimerRef.current = window.setTimeout(() => setTooltipPosition(null), 120)
+  }
+
+  useEffect(() => () => window.clearTimeout(closeTimerRef.current), [])
+
+  const kind = statusKind(run.STATUS)
+  const tooltip = tooltipPosition && (
+    <div
+      className={`timeline-run-tooltip ${tooltipPosition.showAbove ? 'above' : ''}`}
+      style={{ left: tooltipPosition.left, top: tooltipPosition.top }}
+      role="tooltip"
+      onMouseEnter={() => window.clearTimeout(closeTimerRef.current)}
+      onMouseLeave={scheduleClose}
+    >
+      <div className="timeline-run-tooltip-header">
+        <strong>{run.STATUS || 'Unknown'}</strong>
+        <span>{workflow.workflowName}</span>
+      </div>
+      <dl>
+        <div><dt>Start date</dt><dd>{formatDateTime(startTime)}</dd></div>
+        <div><dt>Execution time</dt><dd>{duration}</dd></div>
+        <div><dt>Requested by</dt><dd>{requester}</dd></div>
+      </dl>
+      <button type="button" onClick={() => onViewLog(run, workflow)}>▤ View log</button>
+    </div>
+  )
+
+  return (
+    <>
+      <button
+        type="button"
+        className={`timeline-run ${kind}`}
+        style={style}
+        aria-label={`${workflow.workflowName}: ${run.STATUS || 'unknown'} execution. Started ${formatDateTime(startTime)}, duration ${duration}, requested by ${requester}`}
+        aria-describedby={tooltipPosition ? tooltipId : undefined}
+        onMouseEnter={openTooltip}
+        onMouseLeave={scheduleClose}
+        onFocus={openTooltip}
+        onBlur={scheduleClose}
+      />
+      {tooltip && createPortal(<div id={tooltipId}>{tooltip}</div>, document.body)}
+    </>
+  )
+}
+
+function TimelineView({ workflows, rows, loading, nowMs, rangeHours, onViewLog }) {
   const [collapsedWorkflows, setCollapsedWorkflows] = useState(() => new Set())
   const timelineViewRef = useRef(null)
   const timelineEndRatio = 0.96
@@ -368,19 +432,16 @@ function TimelineView({ workflows, rows, loading, nowMs, rangeHours }) {
               </div>
               <div className="timeline-track">
                 {timelineTicks.map((_, index) => <i key={index} style={{ left: `${(index / 6) * 100 * timelineEndRatio}%` }} />)}
-                {runs.map((run, index) => {
-                  const kind = statusKind(run.STATUS)
-                  return (
-                    <button
-                      type="button"
-                      key={`${run.RUN_ID || index}`}
-                      className={`timeline-run ${kind}`}
-                      style={barStyle(run)}
-                      title={`${run.STATUS || 'Unknown'} · ${formatDateTime(run.START_TIME || run.REQUESTED_AT)} → ${formatDateTime(run.END_TIME)}`}
-                      aria-label={`${workflow.workflowName}: ${run.STATUS || 'unknown'} execution`}
-                    />
-                  )
-                })}
+                {runs.map((run, index) => (
+                  <TimelineRun
+                    key={`${run.RUN_ID || index}`}
+                    run={run}
+                    workflow={workflow}
+                    nowMs={nowMs}
+                    style={barStyle(run)}
+                    onViewLog={onViewLog}
+                  />
+                ))}
                 {runs.length === 0 && <span className="timeline-empty">No runs</span>}
               </div>
             </div>
@@ -394,7 +455,7 @@ function TimelineView({ workflows, rows, loading, nowMs, rangeHours }) {
         <span><i className="queued" /> Queued</span>
         <span><i className="dependency-success" /> After success</span>
         <span><i className="dependency-failure" /> After failure</span>
-        <small>Hover an execution for exact times</small>
+        <small>Hover an execution for details and logs</small>
       </div>
     </div>
   )
@@ -453,6 +514,7 @@ function RowActions({ workflow, isOpen, onOpen, onClose, onAction, disabledRun }
         <div className="row-menu-panel vision-popover">
           <button disabled={!wfEnabled || disabledRun} onClick={() => click('run')}>▶ Run workflow</button>
           {isDbt && <button onClick={() => click('dag')}>⌘ Show DAG run</button>}
+          <button disabled={!workflow.lastRunId} onClick={() => click('log')}>▤ View latest log</button>
           <button onClick={() => click('history')}>◷ History</button>
           <button onClick={() => click('edit')}>✎ Edit</button>
           <div className="menu-divider" />
@@ -832,6 +894,11 @@ function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
             <small>Open latest DBT execution progress.</small>
           </button>
         )}
+        <button className="action-tile" disabled={!view.lastRunId} onClick={() => choose('log')}>
+          <span className="action-icon">▤</span>
+          <strong>View latest log</strong>
+          <small>Inspect history messages, execution progress and run logs.</small>
+        </button>
         <button className="action-tile" onClick={() => choose('history')}>
           <span className="action-icon">◷</span>
           <strong>History</strong>
@@ -1189,6 +1256,15 @@ export default function Monitor({ onNavigate }) {
       setModal(null)
       return onNavigate('dag', { workflow })
     }
+    if (action === 'log') {
+      setModal(null)
+      return onNavigate('executionLog', {
+        runId: workflow.lastRunId,
+        workflowName: workflow.workflowName,
+        workflowId: workflow.workflowId,
+        returnPage: 'monitor'
+      })
+    }
     if (action === 'edit') return setModal({ type: 'edit', workflow })
     setModal(null)
     try {
@@ -1284,7 +1360,19 @@ export default function Monitor({ onNavigate }) {
         {loading ? <div className="empty-state">Loading monitor data...</div> : null}
         {!loading && filtered.length === 0 ? <div className="empty-state">No workflows match the current filters.</div> : null}
         {filtered.length > 0 && viewMode === 'timeline' && (
-          <TimelineView workflows={filtered} rows={timelineRows} loading={timelineLoading} nowMs={nowMs} rangeHours={timelineRangeHours} />
+          <TimelineView
+            workflows={filtered}
+            rows={timelineRows}
+            loading={timelineLoading}
+            nowMs={nowMs}
+            rangeHours={timelineRangeHours}
+            onViewLog={(run, workflow) => onNavigate('executionLog', {
+              workflowName: workflow.workflowName,
+              workflowId: workflow.workflowId,
+              runId: run.RUN_ID,
+              returnPage: 'monitor'
+            })}
+          />
         )}
         {filtered.length > 0 && viewMode === 'table' && (
           <table className="workflow-table monitor-table">

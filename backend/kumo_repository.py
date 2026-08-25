@@ -657,6 +657,67 @@ def load_workflow_history(workflow_id, limit=100):
     return normalize_rows(rows)
 
 
+def _load_execution_source(table_name, run_id, limit=5000):
+    """Load a run-scoped operational table while tolerating optional sources."""
+    if not table_name:
+        return [], "Source is not configured"
+    try:
+        columns = describe_table(table_name)
+        if "RUN_ID" not in columns:
+            return [], f"{table_name} does not contain RUN_ID"
+        order_columns = [col for col in ("LOG_DTTM", "STATUS_DTTM", "SRT", "CREATED_AT", "UPDATED_AT") if col in columns]
+        order_sql = f" ORDER BY {', '.join(order_columns)}" if order_columns else ""
+        rows = _query(
+            f"SELECT * FROM {table_name} WHERE RUN_ID = %(run_id)s{order_sql} LIMIT {int(limit)}",
+            {"run_id": run_id},
+        )
+        return normalize_rows(rows), None
+    except Exception as exc:
+        return [], str(exc)
+
+
+def load_execution_log(run_id, workflow_id=None):
+    if not run_id:
+        raise ValueError("run_id is required")
+
+    history_types = describe_table(config.T_HISTORY)
+    workflow_name_expr = (
+        "COALESCE(h.WORKFLOW_NAME, w.WORKFLOW_NAME, h.WORKFLOW_ID) AS WORKFLOW_NAME"
+        if "WORKFLOW_NAME" in history_types
+        else "COALESCE(w.WORKFLOW_NAME, h.WORKFLOW_ID) AS WORKFLOW_NAME"
+    )
+    workflow_filter = " AND h.WORKFLOW_ID = %(workflow_id)s" if workflow_id else ""
+    history_rows = normalize_rows(_query(
+        f"""
+        SELECT h.*, {workflow_name_expr}
+        FROM {config.T_HISTORY} h
+        LEFT JOIN {config.T_WORKFLOWS} w ON w.WORKFLOW_ID = h.WORKFLOW_ID
+        WHERE h.RUN_ID = %(run_id)s{workflow_filter}
+        LIMIT 1
+        """,
+        {"run_id": run_id, "workflow_id": workflow_id},
+    ))
+
+    sources = {}
+    warnings = {}
+    for key, table_name in (
+        ("executionResult", config.EXECUTION_RESULT_TABLE),
+        ("executionProgress", config.PROGRESS_TABLE),
+        ("runLog", config.RUN_LOG_TABLE),
+    ):
+        source_rows, warning = _load_execution_source(table_name, run_id)
+        sources[key] = source_rows
+        if warning:
+            warnings[key] = warning
+
+    return {
+        "runId": run_id,
+        "history": history_rows[0] if history_rows else None,
+        **sources,
+        "warnings": warnings,
+    }
+
+
 def get_workflow_run_status(workflow_id, run_id):
     if not workflow_id or not run_id:
         return None

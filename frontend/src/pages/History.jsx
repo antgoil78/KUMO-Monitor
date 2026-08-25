@@ -4,35 +4,7 @@ import StatusBadge from '../components/StatusBadge.jsx'
 import { elapsedDuration, formatDateTime } from '../utils/time.js'
 import './History.css'
 
-function HistoryLogModal({ row, onClose }) {
-  if (!row) return null
-
-  const workflowName = row.WORKFLOW_NAME || row.WORKFLOW_ID || 'Workflow'
-  const runId = String(row.RUN_ID || '')
-
-  return (
-    <div className="modal-backdrop history-log-backdrop" role="dialog" aria-modal="true" onMouseDown={event => event.target === event.currentTarget && onClose()}>
-      <div className="vision-modal history-log-modal">
-        <div className="modal-header">
-          <div>
-            <span className="modal-eyebrow">Execution log</span>
-            <h2>{workflowName}</h2>
-            <p>{runId ? `Run ID: ${runId}` : 'Run ID unavailable'}</p>
-          </div>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button>
-        </div>
-
-        <div className="history-log-placeholder">
-          <strong>Log details will be added here later.</strong>
-          <span>Status: {row.STATUS || '-'}</span>
-          <span>Started: {formatDateTime(row.START_TIME || row.REQUESTED_AT)}</span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-export default function History({ workflowName = '', workflowId = '' }) {
+export default function History({ workflowName = '', workflowId = '', onNavigate }) {
   const [rows, setRows] = useState([])
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -41,7 +13,6 @@ export default function History({ workflowName = '', workflowId = '' }) {
   const [workflowFilter, setWorkflowFilter] = useState(workflowName)
   const [selectedWorkflowId, setSelectedWorkflowId] = useState(workflowId)
   const [statusFilter, setStatusFilter] = useState('')
-  const [logRow, setLogRow] = useState(null)
 
   async function load() {
     try {
@@ -202,7 +173,13 @@ export default function History({ workflowName = '', workflowId = '' }) {
                           className="small-button history-icon-button history-log-button"
                           title={`Open log for ${workflowName}`}
                           aria-label={`Open log for ${workflowName}`}
-                          onClick={() => setLogRow(r)}
+                          disabled={!runId}
+                          onClick={() => onNavigate('executionLog', {
+                            runId,
+                            workflowId: r.WORKFLOW_ID,
+                            workflowName,
+                            returnPage: 'history'
+                          })}
                         >
                           <span className="history-log-icon" aria-hidden="true" />
                         </button>
@@ -219,8 +196,6 @@ export default function History({ workflowName = '', workflowId = '' }) {
           </table>
         )}
       </div>
-
-      <HistoryLogModal row={logRow} onClose={() => setLogRow(null)} />
     </section>
   )
 }

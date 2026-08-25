@@ -438,6 +438,27 @@ h2, h3 { color: var(--text-strong); margin: 0; }
 .timeline-track > i { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(105, 139, 255, 0.1); }
 .timeline-run { position: absolute; top: 17px; height: 15px; min-width: 6px; border: 0; border-radius: 5px; padding: 0; background: var(--muted2); box-shadow: 0 0 12px color-mix(in srgb, currentColor 42%, transparent); transition: transform 150ms ease, filter 150ms ease; }
 .timeline-run:hover { transform: scaleY(1.35); filter: brightness(1.25); z-index: 2; }
+.timeline-run-tooltip {
+  position: fixed;
+  z-index: 1000;
+  width: 260px;
+  padding: 12px;
+  border: 1px solid rgba(103, 217, 255, 0.32);
+  border-radius: 10px;
+  color: var(--text);
+  background: rgba(7, 18, 43, 0.98);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.46);
+}
+.timeline-run-tooltip.above { transform: translateY(-100%); }
+.timeline-run-tooltip-header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-bottom: 9px; border-bottom: 1px solid var(--line-soft); }
+.timeline-run-tooltip-header strong { color: var(--cyan); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+.timeline-run-tooltip-header span { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-run-tooltip dl { display: grid; gap: 7px; margin: 10px 0; }
+.timeline-run-tooltip dl div { display: grid; grid-template-columns: 96px 1fr; gap: 8px; }
+.timeline-run-tooltip dt { color: var(--muted2); font-size: 10px; }
+.timeline-run-tooltip dd { overflow: hidden; margin: 0; color: var(--text); font-size: 11px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-run-tooltip button { width: 100%; padding: 7px 10px; border: 1px solid rgba(1, 232, 255, 0.32); border-radius: 7px; color: var(--cyan); background: rgba(0, 117, 255, 0.16); font: inherit; font-size: 11px; font-weight: 750; cursor: pointer; }
+.timeline-run-tooltip button:hover { border-color: rgba(1, 232, 255, 0.7); background: rgba(0, 117, 255, 0.3); color: white; }
 .timeline-run.success { background: var(--green); color: var(--green); }
 .timeline-run.failed { background: var(--red); color: var(--red); }
 .timeline-run.running { background: linear-gradient(90deg, var(--blue), var(--cyan)); color: var(--blue); animation: timeline-pulse 1.5s ease-in-out infinite; }

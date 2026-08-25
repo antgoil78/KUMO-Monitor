@@ -71,6 +71,7 @@ export const api = {
   workflowHistory: (workflowId, limit = 100) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/history?limit=${limit}`),
   workflowDag: (workflowId) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/dag`),
   history: (limit = 200) => requestJson(`/api/history?limit=${limit}`),
+  executionLog: (runId, workflowId = '') => requestJson(`/api/executions/${encodeURIComponent(runId)}/log${workflowId ? `?workflowId=${encodeURIComponent(workflowId)}` : ''}`),
   notifications: () => requestJson('/api/notification-admin'),
   createNotificationGroup: (payload) => requestJson('/api/notification-groups', {
     method: 'POST',

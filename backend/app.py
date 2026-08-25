@@ -1807,6 +1807,31 @@ def history():
         return jsonify({"ok": False, "source": "error", "error": str(exc), "rows": []}), 500
 
 
+@app.route("/api/executions/<run_id>/log")
+def execution_log(run_id):
+    workflow_id = request.args.get("workflowId") or None
+    if config.USE_MOCK or not sf.is_configured():
+        history_row = next((row for row in MOCK_HISTORY if str(row.get("RUN_ID")) == str(run_id)), None)
+        return jsonify({
+            "ok": True,
+            "source": "mock",
+            "runId": run_id,
+            "history": history_row,
+            "executionResult": [],
+            "executionProgress": [],
+            "runLog": [],
+            "warnings": {},
+        })
+    actor = _actor_context()
+    try:
+        result = repo.load_execution_log(run_id, workflow_id)
+        _record_interaction("VIEW_EXECUTION_LOG", actor=actor, entity_type="RUN", entity_id=run_id, workflow_id=workflow_id, response={"ok": True})
+        return jsonify({"ok": True, "source": "snowflake", **result})
+    except Exception as exc:
+        _record_interaction("VIEW_EXECUTION_LOG", actor=actor, entity_type="RUN", entity_id=run_id, workflow_id=workflow_id, status="FAILED", success=False, error_message=str(exc))
+        return _json_error(exc, 500)
+
+
 @app.route("/api/notifications")
 def notifications():
     if config.USE_MOCK or not sf.is_configured():
