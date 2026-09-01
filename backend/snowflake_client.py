@@ -13,6 +13,7 @@ _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 _ingress_user_token = ContextVar("sf_ingress_user_token", default=None)
 _scoped_connection = ContextVar("sf_scoped_connection", default=None)
 _scoped_connection_key = ContextVar("sf_scoped_connection_key", default=None)
+_query_tag = ContextVar("sf_query_tag", default="KUMO_MONITOR_APP")
 
 
 def set_ingress_user_token(token):
@@ -28,6 +29,15 @@ def reset_ingress_user_token(token_handle):
 
 def caller_token_present():
     return bool(_ingress_user_token.get())
+
+
+@contextmanager
+def query_tag(value):
+    handle = _query_tag.set(str(value or "KUMO_MONITOR_APP")[:200])
+    try:
+        yield
+    finally:
+        _query_tag.reset(handle)
 
 
 def _read_spcs_token():
@@ -133,6 +143,13 @@ def _connection_kwargs(include_context=True, include_warehouse=True, force_servi
     if include_warehouse and config.SNOWFLAKE_WAREHOUSE:
         kwargs["warehouse"] = config.SNOWFLAKE_WAREHOUSE
 
+    kwargs["login_timeout"] = max(1, int(config.SNOWFLAKE_LOGIN_TIMEOUT_SECONDS))
+    kwargs["network_timeout"] = max(1, int(config.SNOWFLAKE_NETWORK_TIMEOUT_SECONDS))
+    kwargs["socket_timeout"] = max(1, int(config.SNOWFLAKE_SOCKET_TIMEOUT_SECONDS))
+    kwargs["session_parameters"] = {
+        "STATEMENT_TIMEOUT_IN_SECONDS": max(1, int(config.SNOWFLAKE_STATEMENT_TIMEOUT_SECONDS)),
+        "QUERY_TAG": _query_tag.get(),
+    }
     return kwargs
 
 
@@ -334,7 +351,10 @@ def session_context():
     user_name = str(ctx.get("USER_NAME") or ctx.get("user_name") or "").strip()
     role_name = str(ctx.get("ROLE_NAME") or ctx.get("role_name") or "").strip()
 
-    profile_first, profile_last, snowflake_display_name = _lookup_user_profile(user_name)
+    if config.KUMO_LOOKUP_USER_PROFILE:
+        profile_first, profile_last, snowflake_display_name = _lookup_user_profile(user_name)
+    else:
+        profile_first, profile_last, snowflake_display_name = "", "", ""
     derived_first, derived_last, derived_display = _derive_name_from_user(user_name)
 
     first_name = profile_first or derived_first

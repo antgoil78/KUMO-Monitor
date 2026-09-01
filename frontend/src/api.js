@@ -36,11 +36,8 @@ async function requestJson(url, options = {}) {
 }
 export const api = {
   health: () => requestJson('/api/health'),
+  activity: () => requestJson('/api/activity', { timeoutMs: 5000 }),
   dashboard: () => requestJson('/api/dashboard', { timeoutMs: 8000 }),
-  updateRefreshSettings: (seconds) => requestJson('/api/settings/refresh', {
-    method: 'PATCH',
-    body: JSON.stringify({ seconds })
-  }),
   session: () => requestJson('/api/session'),
   activeUsers: () => requestJson('/api/users/active'),
   snowflakePing: () => requestJson('/api/snowflake/ping'),

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import Sidebar from './components/Sidebar.jsx'
-import { createKumoEventSource } from './api.js'
+import { api, createKumoEventSource } from './api.js'
 import Dashboard from './pages/Dashboard.jsx'
 import Monitor from './pages/Monitor.jsx'
 import History from './pages/History.jsx'
@@ -34,6 +34,22 @@ export default function App() {
       window.dispatchEvent(new CustomEvent('kumo:realtime', { detail: event }))
     }, () => {}, { page: 'Application' })
     return () => source?.close()
+  }, [])
+
+  useEffect(() => {
+    const renew = () => api.activity().catch(() => {})
+    renew()
+    const id = window.setInterval(renew, 30000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') renew()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', renew)
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', renew)
+    }
   }, [])
 
   function navigate(nextPage, context = {}) {

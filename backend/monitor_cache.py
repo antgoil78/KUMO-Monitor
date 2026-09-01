@@ -26,6 +26,7 @@ class MonitorCache:
         self._last_refresh_monotonic = 0.0
         self._last_refresh_at = None
         self._last_duration_ms = None
+        self._last_phase_ms = {}
         self._refresh_count = 0
         self._refreshing = False
         self._refresh_done = threading.Condition(self._lock)
@@ -48,7 +49,13 @@ class MonitorCache:
     def _loop(self):
         self.refresh(force=True)
         while True:
-            self._refresh_requested.wait(timeout=self.refresh_seconds)
+            with self._lock:
+                duration_seconds = float(self._last_duration_ms or 0) / 1000.0
+                interval_seconds = float(self.refresh_seconds)
+            # Keep refresh starts on the configured cadence. Without subtracting
+            # query duration, a 10s query plus a 30s wait becomes a 40s cycle.
+            wait_seconds = max(0.5, interval_seconds - duration_seconds)
+            self._refresh_requested.wait(timeout=wait_seconds)
             self._refresh_requested.clear()
             if self._stop_event.is_set() or not self.is_enabled():
                 break
@@ -95,6 +102,7 @@ class MonitorCache:
                 "lastRefreshAt": self._last_refresh_at,
                 "lastRefreshAgeSeconds": age,
                 "lastDurationMs": self._last_duration_ms,
+                "lastPhaseMs": dict(self._last_phase_ms),
                 "refreshCount": int(self._refresh_count),
                 "lastError": str(self._last_error) if self._last_error else None,
             }
@@ -194,17 +202,28 @@ class MonitorCache:
             return self._fallback_payload(source="mock")
 
         started = time.perf_counter()
-        with sf.connection_scope(use_warehouse=True, include_context=True, force_service=True):
-            workflows_started = time.perf_counter()
-            workflows = repo.load_monitor_rows()
-            engine_started = time.perf_counter()
-            engine = repo.get_engine_state()
-        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        with sf.query_tag("KUMO_MONITOR_SHARED_CACHE"):
+            with sf.connection_scope(use_warehouse=True, include_context=True, force_service=True):
+                connected_at = time.perf_counter()
+                workflows_started = connected_at
+                workflows = repo.load_monitor_rows()
+                engine_started = time.perf_counter()
+                engine = repo.get_engine_state()
+        finished_at = time.perf_counter()
+        phase_ms = {
+            "connection": int((connected_at - started) * 1000),
+            "workflows": int((engine_started - workflows_started) * 1000),
+            "engine": int((finished_at - engine_started) * 1000),
+            "total": int((finished_at - started) * 1000),
+        }
+        with self._lock:
+            self._last_phase_ms = phase_ms
         logger.info(
-            "KUMO_MONITOR_TIMING total_ms=%d workflows_ms=%d engine_ms=%d rows=%d",
-            elapsed_ms,
-            int((engine_started - workflows_started) * 1000),
-            int((time.perf_counter() - engine_started) * 1000),
+            "KUMO_MONITOR_TIMING total_ms=%d connection_ms=%d workflows_ms=%d engine_ms=%d rows=%d",
+            phase_ms["total"],
+            phase_ms["connection"],
+            phase_ms["workflows"],
+            phase_ms["engine"],
             len(workflows or []),
         )
         return {

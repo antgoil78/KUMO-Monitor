@@ -1,4 +1,5 @@
 import json
+import hashlib
 import logging
 import os
 import socket
@@ -36,6 +37,8 @@ logging.basicConfig(level=logging.INFO)
 _RUNTIME_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 _active_users_lock = Lock()
 _active_users = {}
+_session_cache_lock = Lock()
+_session_cache = {}
 _live_run_locks_lock = Lock()
 _live_run_locks = {}
 _shared_run_locks_lock = Lock()
@@ -84,7 +87,11 @@ _dashboard_cache = {
 }
 _dashboard_cache_enabled = False
 _runtime_settings_lock = Lock()
-_dashboard_refresh_seconds = max(5, int(getattr(config, "KUMO_DASHBOARD_CACHE_SECONDS", config.REFRESH_SECONDS) or config.REFRESH_SECONDS))
+_dashboard_refresh_seconds = max(5, int(config.KUMO_DASHBOARD_CACHE_SECONDS or 30))
+_activity_lease_lock = Lock()
+_activity_lease_last_seen = 0.0
+_activity_lease_last_seen_at = None
+_activity_supervisor_thread = None
 
 
 def _build_info():
@@ -424,7 +431,8 @@ class StatusCoordinator:
                 self._remove_run(run["workflowId"], run["runId"])
                 continue
             try:
-                status_row = repo.get_workflow_run_status(run["workflowId"], run["runId"])
+                with sf.query_tag("KUMO_MONITOR_RUN_STATUS"):
+                    status_row = repo.get_workflow_run_status(run["workflowId"], run["runId"])
             except Exception as exc:
                 app.logger.warning("Could not poll workflow run status: %s", exc)
                 continue
@@ -434,7 +442,8 @@ class StatusCoordinator:
                 self._remove_run(run["workflowId"], run["runId"])
 
     def _sync_shared_locks(self):
-        locks = repo.load_active_run_locks()
+        with sf.query_tag("KUMO_MONITOR_RUN_LOCK_POLL"):
+            locks = repo.load_active_run_locks()
         with _shared_run_locks_lock:
             _shared_run_locks.clear()
             for lock in locks:
@@ -500,7 +509,8 @@ class StatusCoordinator:
             return
         now = time.monotonic()
         active_interval = max(0.5, float(getattr(config, "KUMO_STATUS_ACTIVE_POLL_SECONDS", 1) or 1))
-        interval = active_interval
+        idle_interval = max(2.0, float(getattr(config, "KUMO_SHARED_LOCK_SYNC_SECONDS", 5) or 5))
+        interval = active_interval if active_count > 0 else idle_interval
         if client_count <= 0:
             return
         if now - self._last_lock_poll < interval:
@@ -542,8 +552,6 @@ status_coordinator = StatusCoordinator()
 def _set_realtime_client_count(count):
     count = max(0, int(count or 0))
     status_coordinator.set_client_count(count)
-    monitor_cache.set_enabled(count > 0)
-    _set_dashboard_cache_enabled(count > 0)
     try:
         realtime_broker.publish("realtime_state", _realtime_runtime_state())
     except Exception as exc:
@@ -553,12 +561,54 @@ def _set_realtime_client_count(count):
 realtime_broker.set_client_count_callback(_set_realtime_client_count)
 
 
+def _activity_lease_diagnostics():
+    with _activity_lease_lock:
+        last_seen = float(_activity_lease_last_seen or 0)
+        last_seen_at = _activity_lease_last_seen_at
+    lease_seconds = max(30, int(config.KUMO_ACTIVITY_LEASE_SECONDS or 90))
+    age = time.monotonic() - last_seen if last_seen else None
+    return {
+        "active": bool(last_seen and age < lease_seconds),
+        "leaseSeconds": lease_seconds,
+        "ageSeconds": round(age, 1) if age is not None else None,
+        "remainingSeconds": round(max(0.0, lease_seconds - age), 1) if age is not None else 0,
+        "lastActivityAt": last_seen_at,
+    }
+
+
 def _user_key(session_info):
     user_name = str(session_info.get("userName") or "").strip()
     if user_name and user_name.upper() != "UNKNOWN":
         return user_name.upper()
     display_name = str(session_info.get("displayName") or "").strip()
     return display_name.upper() if display_name else "UNKNOWN"
+
+
+def _session_cache_key():
+    token = request.headers.get("Sf-Context-Current-User-Token", "") if has_request_context() else ""
+    if token:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return f"mode:{sf.connection_mode()}"
+
+
+def _cached_session_context():
+    key = _session_cache_key()
+    now = time.monotonic()
+    ttl = max(10, int(config.KUMO_SESSION_CACHE_SECONDS or 300))
+    with _session_cache_lock:
+        cached = _session_cache.get(key)
+        if cached and now - float(cached.get("cachedMonotonic") or 0) < ttl:
+            return dict(cached["session"])
+
+    with sf.query_tag("KUMO_MONITOR_USER_SESSION"):
+        session_info = sf.session_context()
+    with _session_cache_lock:
+        _session_cache[key] = {"session": dict(session_info), "cachedMonotonic": now}
+        if len(_session_cache) > 200:
+            oldest = sorted(_session_cache, key=lambda item: _session_cache[item].get("cachedMonotonic") or 0)[:50]
+            for stale_key in oldest:
+                _session_cache.pop(stale_key, None)
+    return session_info
 
 
 def _register_active_user(session_info, source="session"):
@@ -836,7 +886,7 @@ def _dashboard_session_snapshot():
         }
 
     try:
-        session_info = sf.session_context()
+        session_info = _cached_session_context()
         _register_active_user(session_info, source="dashboard")
         return {"ok": True, **session_info}
     except Exception as exc:
@@ -857,16 +907,21 @@ def _dashboard_session_snapshot():
 
 
 def _dashboard_ping_snapshot():
-    if config.USE_MOCK or not sf.is_configured():
+    monitor_payload = monitor_cache.get()
+    source = monitor_payload.get("source") if isinstance(monitor_payload, dict) else None
+    error = monitor_payload.get("error") if isinstance(monitor_payload, dict) else None
+    if config.USE_MOCK:
         return {
             "ok": False,
             "mode": sf.connection_mode(),
-            "error": "Snowflake is not configured or mock mode is enabled",
+            "error": "Mock mode is enabled",
         }
-    try:
-        return {"ok": True, "mode": sf.connection_mode(), "snowflake": sf.ping()}
-    except Exception as exc:
-        return {"ok": False, "mode": sf.connection_mode(), "error": str(exc)}
+    return {
+        "ok": source == "snowflake" and not error,
+        "mode": sf.connection_mode(),
+        "error": error,
+        "source": "monitor-cache",
+    }
 
 
 def _refresh_dashboard_cache_once():
@@ -985,25 +1040,17 @@ def _runtime_refresh_settings():
     return {
         "refreshSeconds": int(monitor_cache.refresh_seconds),
         "monitorRefreshSeconds": int(monitor_cache.refresh_seconds),
+        "backendCacheRefreshSeconds": int(monitor_cache.refresh_seconds),
         "dashboardRefreshSeconds": dashboard_seconds,
     }
-
-
-def _set_runtime_refresh_seconds(seconds):
-    global _dashboard_refresh_seconds
-    seconds = max(5, min(int(seconds or config.REFRESH_SECONDS), 300))
-    monitor_cache.set_refresh_seconds(seconds)
-    with _runtime_settings_lock:
-        _dashboard_refresh_seconds = seconds
-    _dashboard_cache_wake.set()
-    return _runtime_refresh_settings()
 
 
 def _realtime_runtime_state():
     client_count = realtime_broker.client_count()
     monitor_state = monitor_cache.diagnostics()
     dashboard_state = _dashboard_cache_diagnostics()
-    polling_active = client_count > 0 and (
+    lease_state = _activity_lease_diagnostics()
+    polling_active = bool(lease_state.get("active")) and (
         bool(monitor_state.get("threadAlive"))
         or bool(monitor_state.get("refreshing"))
         or bool(dashboard_state.get("threadAlive"))
@@ -1015,6 +1062,7 @@ def _realtime_runtime_state():
         "pollingActive": polling_active,
         "monitorCache": monitor_state,
         "dashboardCache": dashboard_state,
+        "activityLease": lease_state,
         "coordinator": status_coordinator.diagnostics(),
     }
 
@@ -1087,11 +1135,48 @@ def _json_error(message, status=400):
     return jsonify({"ok": False, "error": str(message)}), status
 
 
+def _ensure_background_services():
+    global _activity_supervisor_thread
+    monitor_cache.start()
+    _start_dashboard_cache()
+    with _activity_lease_lock:
+        if _activity_supervisor_thread and _activity_supervisor_thread.is_alive():
+            return
+        _activity_supervisor_thread = Thread(target=_activity_lease_loop, name="kumo-activity-lease", daemon=True)
+        thread = _activity_supervisor_thread
+    thread.start()
+
+
+def _renew_activity_lease():
+    global _activity_lease_last_seen, _activity_lease_last_seen_at
+    with _activity_lease_lock:
+        _activity_lease_last_seen = time.monotonic()
+        _activity_lease_last_seen_at = _now_iso()
+    _ensure_background_services()
+
+
+def _activity_lease_loop():
+    global _activity_supervisor_thread
+    lease_seconds = max(30, int(config.KUMO_ACTIVITY_LEASE_SECONDS or 90))
+    while True:
+        time.sleep(min(5, max(1, lease_seconds // 6)))
+        with _activity_lease_lock:
+            age = time.monotonic() - float(_activity_lease_last_seen or 0)
+            if age < lease_seconds:
+                continue
+            monitor_cache.stop()
+            _stop_dashboard_cache()
+            _activity_supervisor_thread = None
+            return
+
+
 @app.before_request
 def bind_request_context():
     ingress_token = request.headers.get("Sf-Context-Current-User-Token")
     g.sf_token_handle = sf.set_ingress_user_token(ingress_token)
     g.caller_token_present = bool(ingress_token)
+    if request.path.startswith("/api/") and request.path != "/api/health":
+        _renew_activity_lease()
     app.logger.info(
         "REQUEST method=%s path=%s caller_token_present=%s",
         request.method,
@@ -1128,6 +1213,11 @@ def health():
     return jsonify(_health_snapshot())
 
 
+@app.route("/api/activity")
+def activity():
+    return jsonify({"ok": True, **_activity_lease_diagnostics()})
+
+
 def _health_snapshot():
     return {
         "ok": True,
@@ -1143,13 +1233,9 @@ def _health_snapshot():
     }
 
 
-@app.route("/api/settings/refresh", methods=["GET", "PATCH"])
+@app.route("/api/settings/refresh", methods=["GET"])
 def refresh_settings():
-    if request.method == "GET":
-        return jsonify({"ok": True, **_runtime_refresh_settings()})
-    payload = request.get_json(silent=True) or {}
-    seconds = payload.get("seconds") or payload.get("refreshSeconds")
-    return jsonify({"ok": True, **_set_runtime_refresh_seconds(seconds)})
+    return jsonify({"ok": True, **_runtime_refresh_settings()})
 
 
 @app.route("/api/session")
@@ -1168,7 +1254,7 @@ def session_context():
             "callerTokenPresent": False,
         })
     try:
-        session_info = sf.session_context()
+        session_info = _cached_session_context()
         _persist_user_session(session_info, source="session", last_action="SESSION_REFRESH")
         _record_interaction("SESSION_REFRESH", actor=session_info, entity_type="SESSION", status="SUCCESS", success=True)
         return jsonify({"ok": True, **session_info, "activeUsers": _live_active_users()})
@@ -1209,7 +1295,6 @@ def snowflake_ping():
 
 @app.route("/api/dashboard")
 def dashboard():
-    session_info = _dashboard_session_snapshot()
     cache = _dashboard_cache_snapshot()
     active_users = _live_active_users()
     monitor_payload = monitor_cache.get()
@@ -1218,7 +1303,9 @@ def dashboard():
         "ok": True,
         "source": "server-cache",
         "health": _health_snapshot(),
-        "session": session_info,
+        # Identity is intentionally loaded once from /api/session. Dashboard
+        # polling must remain a cache-only operation with no Snowflake query.
+        "session": None,
         "ping": cache.get("ping") or {},
         "activeUsers": {
             "ok": True,
@@ -1317,7 +1404,7 @@ def _actor_context():
             "callerTokenPresent": False,
         }
     try:
-        actor = sf.session_context()
+        actor = _cached_session_context()
         _register_active_user(actor, source="action")
         return actor
     except Exception as exc:
