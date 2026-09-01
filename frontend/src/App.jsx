@@ -11,6 +11,7 @@ import LimReload from './pages/LimReload.jsx'
 import DagView from './pages/DagView.jsx'
 import ExecutionLog from './pages/ExecutionLog.jsx'
 import Admin from './pages/Admin.jsx'
+import Settings from './pages/Settings.jsx'
 
 const pages = {
   dashboard: Dashboard,
@@ -21,7 +22,8 @@ const pages = {
   limReload: LimReload,
   dag: DagView,
   executionLog: ExecutionLog,
-  admin: Admin
+  admin: Admin,
+  settings: Settings
 }
 
 export default function App() {

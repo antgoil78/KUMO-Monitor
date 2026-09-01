@@ -1156,7 +1156,17 @@ def _request_activity_actor():
             }
     except Exception:
         pass
-    return {"userName": "UNKNOWN", "displayName": "Unknown user", "roleName": "Unknown role"}
+    # Local/password mode has one configured Snowflake identity, so it can be
+    # attributed without opening a database connection. In caller-rights SPCS,
+    # only use identity resolved from that caller's token cache above.
+    if sf.connection_mode() == "password":
+        user_name = config.SNOWFLAKE_USER or "UNKNOWN"
+        return {
+            "userName": user_name,
+            "displayName": os.getenv("KUMO_DISPLAY_NAME", "").strip() or user_name,
+            "roleName": config.SNOWFLAKE_ROLE or "Unknown role",
+        }
+    return {"userName": "UNIDENTIFIED", "displayName": "Unidentified client", "roleName": "Unknown role"}
 
 
 def _ensure_background_services():
@@ -1307,8 +1317,10 @@ def session_context():
         })
     try:
         session_info = _cached_session_context()
-        _persist_user_session(session_info, source="session", last_action="SESSION_REFRESH")
-        _record_interaction("SESSION_REFRESH", actor=session_info, entity_type="SESSION", status="SUCCESS", success=True)
+        # Session lookup is a read-only bootstrap request. Keep presence in memory,
+        # but do not block the response on redundant Snowflake audit writes. Actual
+        # user actions are still persisted by _record_interaction().
+        _register_active_user(session_info, source="session")
         return jsonify({"ok": True, **session_info, "activeUsers": _live_active_users()})
     except Exception as exc:
         return jsonify({

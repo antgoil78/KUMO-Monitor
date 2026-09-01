@@ -15,9 +15,16 @@ class ActivityJournal:
         self._entries = deque(maxlen=max(100, int(max_entries)))
 
     def start(self, category, action, label, details=None, actor=None):
+        normalized_category = str(category or "APPLICATION").upper()
+        if not actor and normalized_category in ("APPLICATION", "DATABASE"):
+            actor = {
+                "userName": "BACKEND",
+                "displayName": "KUMO backend",
+                "roleName": "Application service",
+            }
         entry = {
             "id": uuid.uuid4().hex,
-            "category": str(category or "APPLICATION").upper(),
+            "category": normalized_category,
             "action": str(action or "ACTIVITY").upper(),
             "label": str(label or action or "Activity")[:500],
             "status": "RUNNING",
