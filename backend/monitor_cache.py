@@ -10,6 +10,7 @@ from mock_data import MOCK_MONITOR
 import snowflake_client as sf
 import kumo_repository as repo
 from realtime_events import realtime_broker
+from activity_log import activity_journal
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,7 @@ class MonitorCache:
             self._refreshing = True
 
         realtime_broker.publish("monitor_refresh_started", self.diagnostics())
+        cache_activity_id = activity_journal.start("APPLICATION", "CACHE_REFRESH", "Refresh shared monitor cache from Snowflake", details={"refreshSeconds": self.refresh_seconds})
 
         started = time.monotonic()
         try:
@@ -147,6 +149,7 @@ class MonitorCache:
                     should_publish = True
             if should_publish:
                 realtime_broker.publish("monitor_update", payload)
+            activity_journal.finish(cache_activity_id, details={"source": payload.get("source"), "workflowCount": len(payload.get("workflows") or [])})
             return payload
         except Exception as exc:
             fallback = self._error_payload(exc)
@@ -164,6 +167,7 @@ class MonitorCache:
                     should_publish = True
             if should_publish:
                 realtime_broker.publish("monitor_update", fallback)
+            activity_journal.finish(cache_activity_id, status="FAILED", details={"source": fallback.get("source")}, error=exc)
             return fallback
         finally:
             with self._lock:

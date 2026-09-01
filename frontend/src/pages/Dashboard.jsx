@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api.js'
 import StatusBadge, { statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
-import { formatDateTime, formatDateTimeSeconds } from '../utils/time.js'
+import { formatDateTime } from '../utils/time.js'
 
 function percent(value, total) {
   if (!total) return 0
@@ -28,41 +28,6 @@ function MetricCard({ label, value, delta, tone, icon, footer }) {
         {footer && <span className="metric-footer">{footer}</span>}
       </div>
       <div className={`metric-icon ${tone || ''}`}>{icon}</div>
-    </div>
-  )
-}
-
-function HealthCheck({ label, detail, ok, tone }) {
-  const computedTone = tone || (ok ? 'success' : 'failed')
-  return (
-    <div className="health-row">
-      <span className={`health-led ${computedTone}`} />
-      <div>
-        <strong>{label}</strong>
-        <span>{detail}</span>
-      </div>
-    </div>
-  )
-}
-
-function MonitorCacheHealth({ active, ageSeconds, lastRefreshAt, durationMs, phaseMs, refreshCount, refreshSeconds, ok }) {
-  const cycleWaitSeconds = Math.max(0, Number(refreshSeconds || 0) - (Number(durationMs || 0) / 1000))
-  const nextRefreshSeconds = Math.max(0, Math.ceil(cycleWaitSeconds - ageSeconds))
-  return (
-    <div className={`health-row monitor-cache-health ${active ? 'refreshing' : ''}`}>
-      <div className="cache-refresh-graphic" aria-hidden="true">
-        <span className="cache-refresh-ring" />
-        <span className="cache-refresh-core">↻</span>
-      </div>
-      <div>
-        <strong>Monitor cache</strong>
-        <span className="cache-refresh-state">{active ? 'Refreshing from Snowflake…' : 'Waiting for next refresh'}</span>
-        <span>{ok ? `Data freshness: ${ageSeconds} seconds old` : 'No cache data available'}</span>
-        <span>{ok ? `Backend received Snowflake data: ${formatDateTimeSeconds(lastRefreshAt)}` : 'Backend has not received Snowflake data yet'}</span>
-        <span>{active ? 'Next refresh: in progress' : `Next refresh starts in approximately ${nextRefreshSeconds} seconds`}</span>
-        <span>Completed cycle #{refreshCount || 0}{durationMs != null ? ` · Snowflake query took ${durationMs}ms` : ''}</span>
-        {phaseMs && <span>Connect {phaseMs.connection ?? '—'}ms · workflows {phaseMs.workflows ?? '—'}ms · engine {phaseMs.engine ?? '—'}ms</span>}
-      </div>
     </div>
   )
 }
@@ -193,7 +158,6 @@ function PollingInfo({ clients, pollingActive, onClose }) {
 }
 
 export default function Dashboard() {
-  const cacheAnimationTimer = useRef(null)
   const [payload, setPayload] = useState(dashboardCache?.payload || null)
   const [health, setHealth] = useState(dashboardCache?.health || null)
   const [ping, setPing] = useState(dashboardCache?.ping || null)
@@ -204,9 +168,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(!dashboardCache)
   const [refreshing, setRefreshing] = useState(Boolean(dashboardCache))
   const [showPollingInfo, setShowPollingInfo] = useState(false)
-  const [nowMs, setNowMs] = useState(Date.now())
-  const [cacheRefreshing, setCacheRefreshing] = useState(Boolean(dashboardCache?.realtime?.monitorCache?.refreshing))
-  const [lastClientRefreshAt, setLastClientRefreshAt] = useState(dashboardCache?.cachedAt || null)
   const [refreshIntervalSec, setRefreshIntervalSec] = useState(
     Number(window.sessionStorage.getItem('kumoDashboardClientRefreshSeconds') || 10)
   )
@@ -248,7 +209,6 @@ export default function Dashboard() {
       setSession(sessionData)
       setActiveUsers(usersData)
       setRealtime(realtimeData)
-      setLastClientRefreshAt(receivedAt)
       if (data.cache?.dashboardError) setError(`Dashboard cache: ${data.cache.dashboardError}`)
     } catch (err) {
       if (!dashboardCache) setError(err.message || String(err))
@@ -265,11 +225,6 @@ export default function Dashboard() {
       setRefreshing(false)
     }
   }
-
-  useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -322,24 +277,10 @@ export default function Dashboard() {
         setRealtime(realtimeData)
         setActiveUsers(liveUsers)
       }
-      if (event?.type === 'monitor_refresh_started') {
-        if (cacheAnimationTimer.current) clearTimeout(cacheAnimationTimer.current)
-        setCacheRefreshing(true)
-      }
-      if (event?.type === 'monitor_refresh_completed') {
-        const monitorDiagnostics = event.data || {}
-        setRealtime(previous => ({
-          ...(previous || {}),
-          monitorCache: monitorDiagnostics
-        }))
-        if (cacheAnimationTimer.current) clearTimeout(cacheAnimationTimer.current)
-        cacheAnimationTimer.current = setTimeout(() => setCacheRefreshing(false), 700)
-      }
     }
     window.addEventListener('kumo:realtime', handleRealtime)
     return () => {
       window.removeEventListener('kumo:realtime', handleRealtime)
-      if (cacheAnimationTimer.current) clearTimeout(cacheAnimationTimer.current)
     }
   }, [])
 
@@ -376,17 +317,8 @@ export default function Dashboard() {
   const callerRightsActive = Boolean(session?.callerRightsActive)
   const connectedClients = Number(realtime?.clientCount || 0)
   const pollingActive = Boolean(realtime?.pollingActive)
-  const monitorCache = realtime?.monitorCache || {}
-  const dashboardRuntimeCache = realtime?.dashboardCache || {}
-  const activityLease = realtime?.activityLease || {}
   const engineKind = statusKind(engine.status)
   const engineOk = ['success', 'running'].includes(engineKind)
-  const cacheFresh = Boolean(payload?.generatedAt)
-  const monitorLastRefreshAt = monitorCache.lastRefreshAt || payload?.generatedAt
-  const parsedMonitorRefreshAt = Date.parse(monitorLastRefreshAt || '')
-  const monitorCacheAgeSeconds = Number.isFinite(parsedMonitorRefreshAt)
-    ? Math.max(0, Math.floor((nowMs - parsedMonitorRefreshAt) / 1000))
-    : Math.max(0, Math.floor(Number(monitorCache.lastRefreshAgeSeconds || 0)))
 
   return (
     <section className="page dashboard-page">
@@ -447,12 +379,12 @@ export default function Dashboard() {
           footer="Based on latest workflow status"
         />
         <MetricCard
-          label="Shared cache refresh"
-          value={`${monitorCache.refreshSeconds || health?.refreshSeconds || payload?.refreshIntervalMs / 1000 || 5}s`}
-          delta="Snowflake → backend"
-          tone="queued"
-          icon="↻"
-          footer={`All clients share data from ${formatDateTime(payload?.generatedAt)}`}
+          label="Successful latest runs"
+          value={loading ? '—' : summary.success}
+          delta={`${successRate}% success`}
+          tone="success"
+          icon="✓"
+          footer="Based on the current shared snapshot"
         />
       </div>
 
@@ -504,48 +436,6 @@ export default function Dashboard() {
           <div className="radial-scale"><span>0%</span><span>100%</span></div>
         </div>
 
-        <div className="vision-card health-card">
-          <div className="card-title-row">
-            <div>
-              <h3>Health Checks</h3>
-              <span>Runtime and Snowflake session</span>
-            </div>
-          </div>
-          <div className="health-list">
-            <HealthCheck label="Backend API" detail={health?.app || 'KUMO Monitor'} ok={Boolean(health?.ok)} />
-            <HealthCheck label="Snowflake session" detail={ping?.mode || health?.snowflakeConnectionMode || 'unknown'} ok={snowflakeOk || mockMode} tone={mockMode ? 'queued' : undefined} />
-            <HealthCheck label="Warehouse" detail={warehouse} ok={snowflakeOk && warehouse !== 'Not selected'} />
-            <HealthCheck label="Workflow engine" detail={engine.status || 'UNKNOWN'} ok={engineOk} tone={engineKind} />
-            <MonitorCacheHealth
-              active={cacheRefreshing || Boolean(monitorCache.refreshing)}
-              ageSeconds={monitorCacheAgeSeconds}
-              lastRefreshAt={monitorLastRefreshAt}
-              durationMs={monitorCache.lastDurationMs}
-              phaseMs={monitorCache.lastPhaseMs}
-              refreshCount={monitorCache.refreshCount}
-              refreshSeconds={monitorCache.refreshSeconds || health?.refreshSeconds || 5}
-              ok={cacheFresh}
-            />
-            <HealthCheck
-              label="Client cache read"
-              detail={`Every ${refreshIntervalSec}s · last read ${formatDateTimeSeconds(lastClientRefreshAt)}`}
-              ok={Boolean(lastClientRefreshAt)}
-              tone="running"
-            />
-            <HealthCheck
-              label="Connected clients"
-              detail={`${connectedClients} SSE connection${connectedClients === 1 ? '' : 's'}`}
-              ok={connectedClients > 0}
-              tone={connectedClients > 0 ? 'success' : 'failed'}
-            />
-            <HealthCheck
-              label="Backend polling"
-              detail={`${pollingActive ? 'Active' : 'Stopped'} · activity lease ${Math.ceil(Number(activityLease.remainingSeconds || 0))}s · monitor #${monitorCache.refreshCount || 0} · dashboard #${dashboardRuntimeCache.refreshCount || 0}`}
-              ok={pollingActive}
-              tone={pollingActive ? 'success' : 'failed'}
-            />
-          </div>
-        </div>
       </div>
 
       <div className="dashboard-bottom-grid">

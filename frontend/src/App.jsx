@@ -10,6 +10,7 @@ import FileIngestion from './pages/FileIngestion.jsx'
 import LimReload from './pages/LimReload.jsx'
 import DagView from './pages/DagView.jsx'
 import ExecutionLog from './pages/ExecutionLog.jsx'
+import Admin from './pages/Admin.jsx'
 
 const pages = {
   dashboard: Dashboard,
@@ -19,7 +20,8 @@ const pages = {
   fileIngestion: FileIngestion,
   limReload: LimReload,
   dag: DagView,
-  executionLog: ExecutionLog
+  executionLog: ExecutionLog,
+  admin: Admin
 }
 
 export default function App() {
@@ -32,9 +34,9 @@ export default function App() {
   useEffect(() => {
     const source = createKumoEventSource((event) => {
       window.dispatchEvent(new CustomEvent('kumo:realtime', { detail: event }))
-    }, () => {}, { page: 'Application' })
+    }, () => {}, { page })
     return () => source?.close()
-  }, [])
+  }, [page])
 
   useEffect(() => {
     const renew = () => api.activity().catch(() => {})

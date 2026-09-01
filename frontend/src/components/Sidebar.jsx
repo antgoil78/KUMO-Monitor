@@ -4,7 +4,8 @@ const navItems = [
   { key: 'history', label: 'History', icon: '↺' },
   { key: 'fileIngestion', label: 'LIM Ingestion', icon: '⇩' },
   { key: 'limReload', label: 'Load / Reload', icon: '↻', child: true },
-  { key: 'notifications', label: 'Notifications', icon: '✉' }
+  { key: 'notifications', label: 'Notifications', icon: '✉' },
+  { key: 'admin', label: 'Admin', icon: '⚙' }
 ]
 
 export default function Sidebar({ activePage, onNavigate }) {

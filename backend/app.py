@@ -23,6 +23,7 @@ from monitor_cache import monitor_cache
 from mock_data import MOCK_HISTORY, MOCK_MONITOR
 from realtime_events import realtime_broker
 import snowflake_client as sf
+from activity_log import activity_journal
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 
@@ -1045,6 +1046,12 @@ def _runtime_refresh_settings():
     }
 
 
+def _set_runtime_refresh_seconds(seconds):
+    seconds = max(5, min(int(seconds or config.REFRESH_SECONDS), 300))
+    monitor_cache.set_refresh_seconds(seconds)
+    return _runtime_refresh_settings()
+
+
 def _realtime_runtime_state():
     client_count = realtime_broker.client_count()
     monitor_state = monitor_cache.diagnostics()
@@ -1135,6 +1142,23 @@ def _json_error(message, status=400):
     return jsonify({"ok": False, "error": str(message)}), status
 
 
+def _request_activity_actor():
+    try:
+        key = _session_cache_key()
+        with _session_cache_lock:
+            cached = _session_cache.get(key)
+            session_info = dict((cached or {}).get("session") or {})
+        if session_info:
+            return {
+                "userName": session_info.get("userName") or "UNKNOWN",
+                "displayName": session_info.get("displayName") or session_info.get("userName") or "Unknown user",
+                "roleName": session_info.get("roleName") or "Unknown role",
+            }
+    except Exception:
+        pass
+    return {"userName": "UNKNOWN", "displayName": "Unknown user", "roleName": "Unknown role"}
+
+
 def _ensure_background_services():
     global _activity_supervisor_thread
     monitor_cache.start()
@@ -1177,6 +1201,16 @@ def bind_request_context():
     g.caller_token_present = bool(ingress_token)
     if request.path.startswith("/api/") and request.path != "/api/health":
         _renew_activity_lease()
+    g.activity_log_id = None
+    if request.path != "/api/admin/activity-log":
+        category = "SYSTEM" if request.path in ("/api/health", "/api/activity") else "USER"
+        g.activity_log_id = activity_journal.start(
+            category,
+            "HTTP_REQUEST",
+            f"{request.method} {request.path}",
+            actor=_request_activity_actor(),
+            details={"method": request.method, "path": request.path, "ipAddress": _client_ip()},
+        )
     app.logger.info(
         "REQUEST method=%s path=%s caller_token_present=%s",
         request.method,
@@ -1198,6 +1232,14 @@ def log_response(response):
         response.status_code,
         bool(getattr(g, "caller_token_present", False)),
     )
+    activity_id = getattr(g, "activity_log_id", None)
+    if activity_id:
+        activity_journal.finish(
+            activity_id,
+            status="SUCCESS" if response.status_code < 400 else "FAILED",
+            details={"httpStatus": response.status_code},
+            actor=_request_activity_actor(),
+        )
     return response
 
 
@@ -1218,6 +1260,12 @@ def activity():
     return jsonify({"ok": True, **_activity_lease_diagnostics()})
 
 
+@app.route("/api/admin/activity-log")
+def admin_activity_log():
+    limit = max(1, min(int(request.args.get("limit") or 500), 2000))
+    return jsonify({"ok": True, "activities": activity_journal.snapshot(limit), "generatedAt": _now_iso()})
+
+
 def _health_snapshot():
     return {
         "ok": True,
@@ -1233,9 +1281,13 @@ def _health_snapshot():
     }
 
 
-@app.route("/api/settings/refresh", methods=["GET"])
+@app.route("/api/settings/refresh", methods=["GET", "PATCH"])
 def refresh_settings():
-    return jsonify({"ok": True, **_runtime_refresh_settings()})
+    if request.method == "GET":
+        return jsonify({"ok": True, **_runtime_refresh_settings()})
+    payload = request.get_json(silent=True) or {}
+    seconds = payload.get("seconds") or payload.get("refreshSeconds")
+    return jsonify({"ok": True, **_set_runtime_refresh_seconds(seconds)})
 
 
 @app.route("/api/session")

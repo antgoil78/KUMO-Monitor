@@ -2,11 +2,13 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 import os
 import re
+import time
 
 import snowflake.connector
 from snowflake.connector import DictCursor
 
 import config
+from activity_log import activity_journal
 
 SPCS_TOKEN_FILE = "/snowflake/session/token"
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
@@ -14,6 +16,62 @@ _ingress_user_token = ContextVar("sf_ingress_user_token", default=None)
 _scoped_connection = ContextVar("sf_scoped_connection", default=None)
 _scoped_connection_key = ContextVar("sf_scoped_connection_key", default=None)
 _query_tag = ContextVar("sf_query_tag", default="KUMO_MONITOR_APP")
+
+
+def _sql_summary(sql):
+    value = re.sub(r"'(?:''|[^'])*'", "'?'", str(sql or ""))
+    return re.sub(r"\s+", " ", value).strip()[:500]
+
+
+class _TrackedCursor:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, sql, params=None, *args, **kwargs):
+        summary = _sql_summary(sql)
+        operation = (summary.split(" ", 1)[0] if summary else "SQL").upper()
+        activity_id = activity_journal.start("DATABASE", operation, summary or operation, details={"queryTag": _query_tag.get()})
+        try:
+            self._cursor.execute(sql, params or {}, *args, **kwargs)
+            activity_journal.finish(activity_id, details={"queryId": getattr(self._cursor, "sfqid", None)})
+            return self
+        except Exception as exc:
+            activity_journal.finish(activity_id, status="FAILED", details={"queryId": getattr(self._cursor, "sfqid", None)}, error=exc)
+            raise
+
+    def executemany(self, sql, seqparams, *args, **kwargs):
+        summary = _sql_summary(sql)
+        activity_id = activity_journal.start("DATABASE", "EXECUTEMANY", summary or "EXECUTEMANY", details={"queryTag": _query_tag.get()})
+        try:
+            self._cursor.executemany(sql, seqparams, *args, **kwargs)
+            activity_journal.finish(activity_id, details={"queryId": getattr(self._cursor, "sfqid", None)})
+            return self
+        except Exception as exc:
+            activity_journal.finish(activity_id, status="FAILED", error=exc)
+            raise
+
+    def __iter__(self):
+        return iter(self._cursor)
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class _TrackedConnection:
+    def __init__(self, connection):
+        self._connection = connection
+
+    def cursor(self, *args, **kwargs):
+        return _TrackedCursor(self._connection.cursor(*args, **kwargs))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._connection.__exit__(exc_type, exc, tb)
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
 
 
 def set_ingress_user_token(token):
@@ -155,7 +213,15 @@ def _connection_kwargs(include_context=True, include_warehouse=True, force_servi
 
 @contextmanager
 def connection(use_warehouse=True, include_context=True, force_service=False):
-    conn = snowflake.connector.connect(**_connection_kwargs(include_context=include_context, include_warehouse=use_warehouse, force_service=force_service))
+    mode = connection_mode()
+    activity_id = activity_journal.start("DATABASE", "CONNECT", f"Open Snowflake connection ({mode})", details={"queryTag": _query_tag.get(), "mode": mode})
+    try:
+        raw_conn = snowflake.connector.connect(**_connection_kwargs(include_context=include_context, include_warehouse=use_warehouse, force_service=force_service))
+        conn = _TrackedConnection(raw_conn)
+        activity_journal.finish(activity_id)
+    except Exception as exc:
+        activity_journal.finish(activity_id, status="FAILED", error=exc)
+        raise
     try:
         # Some connector/session combinations do not activate the warehouse even when
         # warehouse=... is passed. Force it for data queries only, not for /api/session.
