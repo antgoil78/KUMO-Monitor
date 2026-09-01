@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Background, Controls, MarkerType, MiniMap, ReactFlow } from '@xyflow/react'
 import dagre from '@dagrejs/dagre'
-import { api, createKumoEventSource } from '../api.js'
+import { api } from '../api.js'
 import StatusBadge, { isWorkflowBusy, statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import { elapsedDuration, formatDateTime } from '../utils/time.js'
@@ -1081,7 +1081,8 @@ export default function Monitor({ onNavigate }) {
     return () => { cancelled = true }
   }, [viewMode, timelineLoaded])
   useEffect(() => {
-    const source = createKumoEventSource((event) => {
+    function handleRealtime(browserEvent) {
+      const event = browserEvent.detail
       const type = event?.type
       const data = event?.data || {}
       if (type === 'monitor_update') {
@@ -1122,8 +1123,9 @@ export default function Monitor({ onNavigate }) {
         })
         notify(`Run request failed for ${liveRun.workflowName}: ${liveRun.error || data.error || 'Unknown error'}`)
       }
-    }, () => {}, { page: 'Workflow Monitor' })
-    return () => source?.close()
+    }
+    window.addEventListener('kumo:realtime', handleRealtime)
+    return () => window.removeEventListener('kumo:realtime', handleRealtime)
   }, [])
   useEffect(() => {
     const id = setInterval(() => loadRealtimeState(), 1000)

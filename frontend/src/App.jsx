@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import Sidebar from './components/Sidebar.jsx'
+import { createKumoEventSource } from './api.js'
 import Dashboard from './pages/Dashboard.jsx'
 import Monitor from './pages/Monitor.jsx'
 import History from './pages/History.jsx'
@@ -25,6 +26,15 @@ export default function App() {
   const [page, setPage] = useState('dashboard')
   const [pageContext, setPageContext] = useState({})
   const Page = pages[page] || Dashboard
+
+  // Keep one presence connection open for the lifetime of the application,
+  // including pages that do not otherwise consume realtime status events.
+  useEffect(() => {
+    const source = createKumoEventSource((event) => {
+      window.dispatchEvent(new CustomEvent('kumo:realtime', { detail: event }))
+    }, () => {}, { page: 'Application' })
+    return () => source?.close()
+  }, [])
 
   function navigate(nextPage, context = {}) {
     setPageContext(context)

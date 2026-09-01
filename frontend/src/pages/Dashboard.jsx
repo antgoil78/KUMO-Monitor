@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, createKumoEventSource } from '../api.js'
+import { api } from '../api.js'
 import StatusBadge, { statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import { formatDateTime } from '../utils/time.js'
@@ -245,18 +245,43 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    const source = createKumoEventSource((event) => {
+    function handleRealtime(browserEvent) {
+      const event = browserEvent.detail
       if (event?.type === 'connected') {
         load({ silent: Boolean(dashboardCache) })
       }
       if (event?.type === 'realtime_state') {
         const realtimeData = event.data || null
+        const liveUsersByName = new Map()
+        for (const client of realtimeData?.clients || []) {
+          const key = String(client.userName || '').trim().toUpperCase()
+          if (!key || key === 'UNKNOWN') continue
+          const existing = liveUsersByName.get(key)
+          const lastSeenAt = client.lastActivityAt || client.connectedAt
+          if (!existing) {
+            liveUsersByName.set(key, {
+              userName: client.userName,
+              displayName: client.displayName || client.userName,
+              roleName: client.roleName || 'Unknown role',
+              firstSeenAt: client.connectedAt,
+              lastSeenAt,
+              connectionCount: 1
+            })
+          } else {
+            existing.connectionCount += 1
+            if (lastSeenAt && lastSeenAt > (existing.lastSeenAt || '')) existing.lastSeenAt = lastSeenAt
+            if (client.connectedAt && client.connectedAt < (existing.firstSeenAt || client.connectedAt)) existing.firstSeenAt = client.connectedAt
+          }
+        }
+        const liveUsers = [...liveUsersByName.values()].sort((a, b) => String(b.lastSeenAt || '').localeCompare(String(a.lastSeenAt || '')))
         dashboardCache = {
           ...(dashboardCache || {}),
           realtime: realtimeData,
+          activeUsers: liveUsers,
           cachedAt: new Date().toISOString()
         }
         setRealtime(realtimeData)
+        setActiveUsers(liveUsers)
       }
       if (event?.type === 'monitor_update') {
         const monitorData = event.data || null
@@ -267,8 +292,9 @@ export default function Dashboard() {
         }
         setPayload(monitorData)
       }
-    }, () => {}, { page: 'Dashboard' })
-    return () => source?.close()
+    }
+    window.addEventListener('kumo:realtime', handleRealtime)
+    return () => window.removeEventListener('kumo:realtime', handleRealtime)
   }, [])
 
   useEffect(() => {

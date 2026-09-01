@@ -612,6 +612,37 @@ def _merge_active_users(persistent_users):
     return rows
 
 
+def _live_active_users():
+    """Return one presence row per user with a currently open SSE connection."""
+    users = {}
+    for client in realtime_broker.client_details():
+        key = _user_key(client)
+        if not key or key == "UNKNOWN":
+            continue
+        connected_at = client.get("connectedAt")
+        last_activity_at = client.get("lastActivityAt") or connected_at
+        existing = users.get(key)
+        if existing:
+            existing["connectionCount"] = int(existing.get("connectionCount") or 1) + 1
+            if last_activity_at and last_activity_at > (existing.get("lastSeenAt") or ""):
+                existing["lastSeenAt"] = last_activity_at
+            if connected_at and connected_at < (existing.get("firstSeenAt") or connected_at):
+                existing["firstSeenAt"] = connected_at
+            continue
+        users[key] = {
+            "userName": client.get("userName") or key,
+            "displayName": client.get("displayName") or client.get("userName") or key,
+            "roleName": client.get("roleName") or "Unknown role",
+            "firstSeenAt": connected_at,
+            "lastSeenAt": last_activity_at,
+            "source": "live-connection",
+            "connectionCount": 1,
+        }
+    rows = list(users.values())
+    rows.sort(key=lambda row: row.get("lastSeenAt") or "", reverse=True)
+    return rows
+
+
 def _client_ip():
     forwarded = request.headers.get("X-Forwarded-For", "")
     if forwarded:
@@ -847,10 +878,10 @@ def _refresh_dashboard_cache_once():
     error = None
     try:
         ping = _dashboard_ping_snapshot()
-        users = _load_persistent_users()
+        users = _live_active_users()
         active_users = {
             "ok": True,
-            "source": "snowflake" if _audit_enabled() else "memory",
+            "source": "live-connections",
             "users": users,
             "count": len(users),
         }
@@ -1140,7 +1171,7 @@ def session_context():
         session_info = sf.session_context()
         _persist_user_session(session_info, source="session", last_action="SESSION_REFRESH")
         _record_interaction("SESSION_REFRESH", actor=session_info, entity_type="SESSION", status="SUCCESS", success=True)
-        return jsonify({"ok": True, **session_info, "activeUsers": _load_persistent_users()})
+        return jsonify({"ok": True, **session_info, "activeUsers": _live_active_users()})
     except Exception as exc:
         return jsonify({
             "ok": False,
@@ -1159,15 +1190,14 @@ def session_context():
 
 @app.route("/api/users/active")
 def active_users():
-    snapshot = _dashboard_cache_snapshot()
-    active_users = _merge_active_users((snapshot.get("activeUsers") or {}).get("users") or [])
+    active_users = _live_active_users()
     return jsonify({
-        **(snapshot.get("activeUsers") or {}),
         "ok": True,
+        "source": "live-connections",
         "users": active_users,
         "count": len(active_users),
-        "cached": True,
-        "cacheGeneratedAt": snapshot.get("generatedAt"),
+        "cached": False,
+        "generatedAt": _now_iso(),
     })
 
 
@@ -1181,7 +1211,7 @@ def snowflake_ping():
 def dashboard():
     session_info = _dashboard_session_snapshot()
     cache = _dashboard_cache_snapshot()
-    active_users = _merge_active_users((cache.get("activeUsers") or {}).get("users") or [])
+    active_users = _live_active_users()
     monitor_payload = monitor_cache.get()
     _reconcile_live_run_locks(monitor_payload)
     return jsonify({
@@ -1191,8 +1221,8 @@ def dashboard():
         "session": session_info,
         "ping": cache.get("ping") or {},
         "activeUsers": {
-            **(cache.get("activeUsers") or {}),
             "ok": True,
+            "source": "live-connections",
             "users": active_users,
             "count": len(active_users),
         },
