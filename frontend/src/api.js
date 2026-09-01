@@ -98,7 +98,7 @@ export function createKumoEventSource(onEvent, onError, options = {}) {
   }
   const params = new URLSearchParams({ clientId, page: options.page || 'Unknown page' })
   const source = new window.EventSource(`/api/events?${params.toString()}`)
-  const eventTypes = ['connected', 'realtime_state', 'monitor_update', 'workflow_run_requested', 'workflow_run_queued', 'workflow_run_status', 'workflow_run_failed']
+  const eventTypes = ['connected', 'realtime_state', 'monitor_update', 'monitor_refresh_started', 'monitor_refresh_completed', 'workflow_run_requested', 'workflow_run_queued', 'workflow_run_status', 'workflow_run_failed']
   function handle(event) {
     try {
       const payload = event.data ? JSON.parse(event.data) : null

@@ -120,6 +120,8 @@ class MonitorCache:
                 return self._payload
             self._refreshing = True
 
+        realtime_broker.publish("monitor_refresh_started", self.diagnostics())
+
         started = time.monotonic()
         try:
             payload = self._build_payload()
@@ -159,6 +161,7 @@ class MonitorCache:
             with self._lock:
                 self._refreshing = False
                 self._refresh_done.notify_all()
+            realtime_broker.publish("monitor_refresh_completed", self.diagnostics())
 
     def _signature(self, payload):
         """Return a stable signature for fields that change the visible monitor state."""

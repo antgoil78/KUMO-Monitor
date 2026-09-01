@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
 import StatusBadge, { statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
-import { formatDateTime } from '../utils/time.js'
+import { formatDateTime, formatDateTimeSeconds } from '../utils/time.js'
 
 function percent(value, total) {
   if (!total) return 0
@@ -40,6 +40,26 @@ function HealthCheck({ label, detail, ok, tone }) {
       <div>
         <strong>{label}</strong>
         <span>{detail}</span>
+      </div>
+    </div>
+  )
+}
+
+function MonitorCacheHealth({ active, ageSeconds, lastRefreshAt, durationMs, refreshCount, refreshSeconds, ok }) {
+  const nextRefreshSeconds = Math.max(0, Number(refreshSeconds || 0) - ageSeconds)
+  return (
+    <div className={`health-row monitor-cache-health ${active ? 'refreshing' : ''}`}>
+      <div className="cache-refresh-graphic" aria-hidden="true">
+        <span className="cache-refresh-ring" />
+        <span className="cache-refresh-core">↻</span>
+      </div>
+      <div>
+        <strong>Monitor cache</strong>
+        <span className="cache-refresh-state">{active ? 'Refreshing from Snowflake…' : 'Waiting for next refresh'}</span>
+        <span>{ok ? `Data freshness: ${ageSeconds} seconds old` : 'No cache data available'}</span>
+        <span>{ok ? `Backend received Snowflake data: ${formatDateTimeSeconds(lastRefreshAt)}` : 'Backend has not received Snowflake data yet'}</span>
+        <span>{active ? 'Next refresh: in progress' : `Next refresh starts in approximately ${nextRefreshSeconds} seconds`}</span>
+        <span>Completed cycle #{refreshCount || 0}{durationMs != null ? ` · Snowflake query took ${durationMs}ms` : ''}</span>
       </div>
     </div>
   )
@@ -172,6 +192,7 @@ function PollingInfo({ clients, pollingActive, onClose }) {
 
 export default function Dashboard() {
   const pendingRefreshSec = useRef(null)
+  const cacheAnimationTimer = useRef(null)
   const [payload, setPayload] = useState(dashboardCache?.payload || null)
   const [health, setHealth] = useState(dashboardCache?.health || null)
   const [ping, setPing] = useState(dashboardCache?.ping || null)
@@ -182,6 +203,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(!dashboardCache)
   const [refreshing, setRefreshing] = useState(Boolean(dashboardCache))
   const [showPollingInfo, setShowPollingInfo] = useState(false)
+  const [nowMs, setNowMs] = useState(Date.now())
+  const [cacheRefreshing, setCacheRefreshing] = useState(Boolean(dashboardCache?.realtime?.monitorCache?.refreshing))
   const [refreshIntervalSec, setRefreshIntervalSec] = useState(
     Number(dashboardCache?.settings?.refreshSeconds || window.localStorage.getItem('kumoDashboardRefreshSeconds') || 10)
   )
@@ -245,6 +268,11 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
     function handleRealtime(browserEvent) {
       const event = browserEvent.detail
       if (event?.type === 'connected') {
@@ -292,9 +320,25 @@ export default function Dashboard() {
         }
         setPayload(monitorData)
       }
+      if (event?.type === 'monitor_refresh_started') {
+        if (cacheAnimationTimer.current) clearTimeout(cacheAnimationTimer.current)
+        setCacheRefreshing(true)
+      }
+      if (event?.type === 'monitor_refresh_completed') {
+        const monitorDiagnostics = event.data || {}
+        setRealtime(previous => ({
+          ...(previous || {}),
+          monitorCache: monitorDiagnostics
+        }))
+        if (cacheAnimationTimer.current) clearTimeout(cacheAnimationTimer.current)
+        cacheAnimationTimer.current = setTimeout(() => setCacheRefreshing(false), 700)
+      }
     }
     window.addEventListener('kumo:realtime', handleRealtime)
-    return () => window.removeEventListener('kumo:realtime', handleRealtime)
+    return () => {
+      window.removeEventListener('kumo:realtime', handleRealtime)
+      if (cacheAnimationTimer.current) clearTimeout(cacheAnimationTimer.current)
+    }
   }, [])
 
   useEffect(() => {
@@ -347,6 +391,11 @@ export default function Dashboard() {
   const engineKind = statusKind(engine.status)
   const engineOk = ['success', 'running'].includes(engineKind)
   const cacheFresh = Boolean(payload?.generatedAt)
+  const monitorLastRefreshAt = monitorCache.lastRefreshAt || payload?.generatedAt
+  const parsedMonitorRefreshAt = Date.parse(monitorLastRefreshAt || '')
+  const monitorCacheAgeSeconds = Number.isFinite(parsedMonitorRefreshAt)
+    ? Math.max(0, Math.floor((nowMs - parsedMonitorRefreshAt) / 1000))
+    : Math.max(0, Math.floor(Number(monitorCache.lastRefreshAgeSeconds || 0)))
 
   return (
     <section className="page dashboard-page">
@@ -476,7 +525,15 @@ export default function Dashboard() {
             <HealthCheck label="Snowflake session" detail={ping?.mode || health?.snowflakeConnectionMode || 'unknown'} ok={snowflakeOk || mockMode} tone={mockMode ? 'queued' : undefined} />
             <HealthCheck label="Warehouse" detail={warehouse} ok={snowflakeOk && warehouse !== 'Not selected'} />
             <HealthCheck label="Workflow engine" detail={engine.status || 'UNKNOWN'} ok={engineOk} tone={engineKind} />
-            <HealthCheck label="Monitor cache" detail={cacheFresh ? `Fresh ${formatDateTime(payload?.generatedAt)}` : 'No data'} ok={cacheFresh} />
+            <MonitorCacheHealth
+              active={cacheRefreshing || Boolean(monitorCache.refreshing)}
+              ageSeconds={monitorCacheAgeSeconds}
+              lastRefreshAt={monitorLastRefreshAt}
+              durationMs={monitorCache.lastDurationMs}
+              refreshCount={monitorCache.refreshCount}
+              refreshSeconds={monitorCache.refreshSeconds || refreshIntervalSec}
+              ok={cacheFresh}
+            />
             <HealthCheck
               label="Connected clients"
               detail={`${connectedClients} SSE connection${connectedClients === 1 ? '' : 's'}`}
