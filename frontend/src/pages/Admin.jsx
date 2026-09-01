@@ -22,10 +22,6 @@ function StatusItem({ label, value, ok = true, detail }) {
   )
 }
 
-function Metric({ label, value, detail, tone = '' }) {
-  return <div className={`vision-card admin-metric ${tone}`}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>
-}
-
 export default function Admin() {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
@@ -108,35 +104,22 @@ export default function Admin() {
 
   const realtime = data?.realtime || {}
   const monitor = realtime.monitorCache || {}
-  const dashboardCache = realtime.dashboardCache || {}
-  const lease = realtime.activityLease || {}
-  const users = data?.activeUsers?.users || []
-  const clients = realtime.clients || []
   const refreshSeconds = Number(data?.settings?.backendCacheRefreshSeconds || monitor.refreshSeconds || 30)
   const lastRefreshMs = Date.parse(monitor.lastRefreshAt || '')
   const ageSeconds = Number.isFinite(lastRefreshMs) ? Math.max(0, Math.floor((nowMs - lastRefreshMs) / 1000)) : null
   const phases = monitor.lastPhaseMs || {}
-  const distinctUsers = useMemo(() => new Set(clients.map(client => String(client.userName || '').toUpperCase()).filter(name => name && name !== 'UNKNOWN')).size, [clients])
   const filteredActivities = useMemo(() => activityFilter === 'ALL' ? activities : activities.filter(item => item.category === activityFilter), [activities, activityFilter])
 
   return (
     <section className="page admin-page">
       <div className="page-header admin-header">
-        <div><p className="breadcrumb">Pages / Admin</p><h1>Application Administration</h1><p>Runtime status, shared Snowflake cache, and connected-user activity.</p></div>
+        <div><p className="breadcrumb">Pages / Admin</p><h1>Application Administration</h1><p>Shared Snowflake cache settings and live application activity.</p></div>
         <button type="button" className="button" onClick={load}>↻ Refresh status</button>
       </div>
 
       {error && <div className="alert error">{error}</div>}
 
-      <div className="admin-metric-grid">
-        <Metric label="Application" value={data?.health?.ok ? 'Healthy' : 'Unavailable'} detail={data?.health?.runtimeId || data?.health?.app || 'Loading…'} tone="success" />
-        <Metric label="Shared cache" value={monitor.refreshing ? 'Refreshing' : monitor.enabled ? 'Running' : 'Stopped'} detail={`Cycle #${monitor.refreshCount || 0}`} tone={monitor.refreshing ? 'running' : 'queued'} />
-        <Metric label="Connected clients" value={realtime.clientCount ?? '—'} detail={`${distinctUsers} distinct user${distinctUsers === 1 ? '' : 's'}`} />
-        <Metric label="Activity lease" value={lease.active ? `${Math.ceil(Number(lease.remainingSeconds || 0))}s` : 'Expired'} detail={lease.active ? 'Polling permitted' : 'Snowflake polling stopped'} tone={lease.active ? 'success' : 'failed'} />
-      </div>
-
-      <div className="admin-grid">
-        <div className="vision-card admin-cache-card">
+      <div className="vision-card admin-cache-card admin-cache-compact">
           <div className="card-title-row">
             <div><h3>Shared monitor cache</h3><span>One Snowflake refresh cycle shared by every client</span></div>
             <div className={`admin-cache-spinner ${monitor.refreshing ? 'active' : ''}`} aria-label={monitor.refreshing ? 'Refreshing from Snowflake' : 'Waiting'}>↻</div>
@@ -155,21 +138,7 @@ export default function Admin() {
             <StatusItem label="Last database refresh" value={formatDateTimeSeconds(monitor.lastRefreshAt)} ok={!monitor.lastError && Boolean(monitor.lastRefreshAt)} detail={ageSeconds == null ? 'No completed refresh' : `${ageSeconds} seconds old`} />
             <StatusItem label="Latest duration" value={monitor.lastDurationMs == null ? '—' : `${monitor.lastDurationMs}ms`} ok={!monitor.lastError} detail={`Connect ${phases.connection ?? '—'}ms · workflows ${phases.workflows ?? '—'}ms · engine ${phases.engine ?? '—'}ms`} />
             <StatusItem label="Latest error" value={monitor.lastError || 'None'} ok={!monitor.lastError} />
-            <StatusItem label="Status cache" value={dashboardCache.threadAlive ? 'Alive' : 'Stopped'} ok={Boolean(dashboardCache.threadAlive)} detail={`Cycle #${dashboardCache.refreshCount || 0} · every ${dashboardCache.refreshSeconds || 30}s`} />
           </div>
-        </div>
-
-        <div className="vision-card admin-users-card">
-          <div className="card-title-row"><div><h3>Current users</h3><span>Deduplicated from live browser connections</span></div><strong>{users.length}</strong></div>
-          <div className="admin-user-list">
-            {users.length ? users.map(user => (
-              <div className="admin-user" key={user.userName}>
-                <span>{String(user.displayName || user.userName || '?').slice(0, 1).toUpperCase()}</span>
-                <div><strong>{user.displayName || user.userName}</strong><small>{user.userName} · {user.roleName || 'Unknown role'}</small><small>{user.connectionCount || 1} connection{Number(user.connectionCount || 1) === 1 ? '' : 's'}</small></div>
-              </div>
-            )) : <div className="soft-empty">No connected users.</div>}
-          </div>
-        </div>
       </div>
 
       <div className="vision-card admin-activity-card">

@@ -32,6 +32,16 @@ function MetricCard({ label, value, delta, tone, icon, footer }) {
   )
 }
 
+function HealthCheck({ label, detail, ok, tone }) {
+  const computedTone = tone || (ok ? 'success' : 'failed')
+  return (
+    <div className="health-row">
+      <span className={`health-led ${computedTone}`} />
+      <div><strong>{label}</strong><span>{detail}</span></div>
+    </div>
+  )
+}
+
 function ActiveUsersCard({ users = [], currentUserName }) {
   const normalized = Array.isArray(users) ? users : []
 
@@ -317,6 +327,7 @@ export default function Dashboard() {
   const callerRightsActive = Boolean(session?.callerRightsActive)
   const connectedClients = Number(realtime?.clientCount || 0)
   const pollingActive = Boolean(realtime?.pollingActive)
+  const activityLease = realtime?.activityLease || {}
   const engineKind = statusKind(engine.status)
   const engineOk = ['success', 'running'].includes(engineKind)
 
@@ -434,6 +445,20 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="radial-scale"><span>0%</span><span>100%</span></div>
+        </div>
+
+        <div className="vision-card health-card">
+          <div className="card-title-row">
+            <div><h3>Health Checks</h3><span>Application runtime and Snowflake session</span></div>
+          </div>
+          <div className="health-list">
+            <HealthCheck label="Backend API" detail={health?.app || 'KUMO Monitor'} ok={Boolean(health?.ok)} />
+            <HealthCheck label="Snowflake session" detail={ping?.mode || health?.snowflakeConnectionMode || 'unknown'} ok={snowflakeOk || mockMode} tone={mockMode ? 'queued' : undefined} />
+            <HealthCheck label="Warehouse" detail={warehouse} ok={snowflakeOk && warehouse !== 'Not selected'} />
+            <HealthCheck label="Workflow engine" detail={engine.status || 'UNKNOWN'} ok={engineOk} tone={engineKind} />
+            <HealthCheck label="Connected clients" detail={`${connectedClients} browser connection${connectedClients === 1 ? '' : 's'}`} ok={connectedClients > 0} />
+            <HealthCheck label="Backend polling" detail={`${pollingActive ? 'Active' : 'Stopped'} · activity lease ${Math.ceil(Number(activityLease.remainingSeconds || 0))}s`} ok={pollingActive} />
+          </div>
         </div>
 
       </div>
