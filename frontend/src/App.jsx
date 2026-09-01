@@ -34,25 +34,39 @@ export default function App() {
   // Keep one presence connection open for the lifetime of the application,
   // including pages that do not otherwise consume realtime status events.
   useEffect(() => {
-    const source = createKumoEventSource((event) => {
-      window.dispatchEvent(new CustomEvent('kumo:realtime', { detail: event }))
-    }, () => {}, { page })
-    return () => source?.close()
+    let cancelled = false
+    let source = null
+    api.session().catch(() => null).then(() => {
+      if (cancelled) return
+      source = createKumoEventSource((event) => {
+        window.dispatchEvent(new CustomEvent('kumo:realtime', { detail: event }))
+      }, () => {}, { page })
+    })
+    return () => { cancelled = true; source?.close() }
   }, [page])
 
   useEffect(() => {
     const renew = () => api.activity().catch(() => {})
-    renew()
-    const id = window.setInterval(renew, 30000)
+    let id = null
+    let ready = false
+    let cancelled = false
+    api.session().catch(() => null).then(() => {
+      if (cancelled) return
+      ready = true
+      renew()
+      id = window.setInterval(renew, 30000)
+    })
     const onVisible = () => {
-      if (document.visibilityState === 'visible') renew()
+      if (ready && document.visibilityState === 'visible') renew()
     }
+    const onFocus = () => { if (ready) renew() }
     document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', renew)
+    window.addEventListener('focus', onFocus)
     return () => {
-      window.clearInterval(id)
+      cancelled = true
+      if (id) window.clearInterval(id)
       document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', renew)
+      window.removeEventListener('focus', onFocus)
     }
   }, [])
 

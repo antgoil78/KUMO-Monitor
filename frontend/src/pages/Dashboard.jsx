@@ -295,9 +295,14 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    load({ silent: Boolean(dashboardCache) })
-    const id = setInterval(() => load({ silent: true }), Math.max(5, refreshIntervalSec || 10) * 1000)
-    return () => clearInterval(id)
+    let cancelled = false
+    let id = null
+    api.session().catch(() => null).then(() => {
+      if (cancelled) return
+      load({ silent: Boolean(dashboardCache) })
+      id = setInterval(() => load({ silent: true }), Math.max(5, refreshIntervalSec || 10) * 1000)
+    })
+    return () => { cancelled = true; if (id) clearInterval(id) }
   }, [refreshIntervalSec])
 
   function updateRefreshInterval(value) {

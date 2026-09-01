@@ -40,6 +40,8 @@ _active_users_lock = Lock()
 _active_users = {}
 _session_cache_lock = Lock()
 _session_cache = {}
+_client_actors_lock = Lock()
+_client_actors = {}
 _live_run_locks_lock = Lock()
 _live_run_locks = {}
 _shared_run_locks_lock = Lock()
@@ -590,6 +592,44 @@ def _session_cache_key():
     if token:
         return hashlib.sha256(token.encode("utf-8")).hexdigest()
     return f"mode:{sf.connection_mode()}"
+
+
+def _request_client_id():
+    if not has_request_context():
+        return ""
+    return str(request.headers.get("X-Kumo-Client-Id") or request.args.get("clientId") or "").strip()[:100]
+
+
+def _register_client_actor(session_info):
+    client_id = _request_client_id()
+    user_name = str((session_info or {}).get("userName") or "").strip()
+    if not client_id or not user_name or user_name.upper() in ("UNKNOWN", "UNIDENTIFIED"):
+        return
+    actor = {
+        "userName": user_name,
+        "displayName": session_info.get("displayName") or user_name,
+        "roleName": session_info.get("roleName") or "Unknown role",
+    }
+    now = time.monotonic()
+    with _client_actors_lock:
+        _client_actors[client_id] = {"actor": actor, "lastSeenMonotonic": now}
+        stale = [key for key, value in _client_actors.items() if now - float(value.get("lastSeenMonotonic") or 0) > 600]
+        for key in stale:
+            _client_actors.pop(key, None)
+
+
+def _client_actor():
+    client_id = _request_client_id()
+    if not client_id:
+        return None
+    now = time.monotonic()
+    with _client_actors_lock:
+        item = _client_actors.get(client_id)
+        if not item or now - float(item.get("lastSeenMonotonic") or 0) > 600:
+            _client_actors.pop(client_id, None)
+            return None
+        item["lastSeenMonotonic"] = now
+        return dict(item.get("actor") or {})
 
 
 def _cached_session_context():
@@ -1156,6 +1196,9 @@ def _request_activity_actor():
             }
     except Exception:
         pass
+    actor = _client_actor()
+    if actor:
+        return actor
     # Local/password mode has one configured Snowflake identity, so it can be
     # attributed without opening a database connection. In caller-rights SPCS,
     # only use identity resolved from that caller's token cache above.
@@ -1212,7 +1255,7 @@ def bind_request_context():
     if request.path.startswith("/api/") and request.path != "/api/health":
         _renew_activity_lease()
     g.activity_log_id = None
-    if request.path != "/api/admin/activity-log":
+    if request.path not in ("/api/admin/activity-log", "/api/session"):
         category = "SYSTEM" if request.path in ("/api/health", "/api/activity") else "USER"
         g.activity_log_id = activity_journal.start(
             category,
@@ -1303,7 +1346,7 @@ def refresh_settings():
 @app.route("/api/session")
 def session_context():
     if config.USE_MOCK or not sf.is_configured():
-        return jsonify({
+        session_info = {
             "ok": True,
             "displayName": "Andreas Larsson",
             "firstName": "Andreas",
@@ -1314,13 +1357,16 @@ def session_context():
             "mode": "mock",
             "callerRightsActive": False,
             "callerTokenPresent": False,
-        })
+        }
+        _register_client_actor(session_info)
+        return jsonify(session_info)
     try:
         session_info = _cached_session_context()
         # Session lookup is a read-only bootstrap request. Keep presence in memory,
         # but do not block the response on redundant Snowflake audit writes. Actual
         # user actions are still persisted by _record_interaction().
         _register_active_user(session_info, source="session")
+        _register_client_actor(session_info)
         return jsonify({"ok": True, **session_info, "activeUsers": _live_active_users()})
     except Exception as exc:
         return jsonify({
@@ -1408,7 +1454,9 @@ def refresh_monitor():
 
 @app.route("/api/events")
 def events():
-    actor = _actor_context()
+    # The browser opens this stream after /api/session has registered its stable
+    # client ID. Avoid a new Snowflake identity lookup on every SSE reconnect.
+    actor = _request_activity_actor()
     client_metadata = {
         "clientId": str(request.args.get("clientId") or "")[:100],
         "page": str(request.args.get("page") or "Unknown page")[:100],

@@ -1,3 +1,12 @@
+function kumoClientId() {
+  let clientId = window.sessionStorage.getItem('kumoRealtimeClientId')
+  if (!clientId) {
+    clientId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    window.sessionStorage.setItem('kumoRealtimeClientId', clientId)
+  }
+  return clientId
+}
+
 async function requestJson(url, options = {}) {
   const { timeoutMs = 45000, ...fetchOptions } = options
   const controller = new AbortController()
@@ -5,7 +14,7 @@ async function requestJson(url, options = {}) {
   let response
   try {
     response = await fetch(url, {
-      headers: { 'Content-Type': 'application/json', ...(fetchOptions.headers || {}) },
+      headers: { 'Content-Type': 'application/json', 'X-Kumo-Client-Id': kumoClientId(), ...(fetchOptions.headers || {}) },
       credentials: 'same-origin',
       signal: controller.signal,
       ...fetchOptions
@@ -34,6 +43,8 @@ async function requestJson(url, options = {}) {
   }
   return data
 }
+let sessionRequest = null
+
 export const api = {
   health: () => requestJson('/api/health'),
   activity: () => requestJson('/api/activity', { timeoutMs: 5000 }),
@@ -43,7 +54,15 @@ export const api = {
     method: 'PATCH',
     body: JSON.stringify({ seconds })
   }),
-  session: () => requestJson('/api/session'),
+  session: () => {
+    if (!sessionRequest) {
+      sessionRequest = requestJson('/api/session').catch(error => {
+        sessionRequest = null
+        throw error
+      })
+    }
+    return sessionRequest
+  },
   activeUsers: () => requestJson('/api/users/active'),
   snowflakePing: () => requestJson('/api/snowflake/ping'),
   monitor: () => requestJson('/api/monitor'),
@@ -93,11 +112,7 @@ export function createKumoEventSource(onEvent, onError, options = {}) {
     return null
   }
 
-  let clientId = window.sessionStorage.getItem('kumoRealtimeClientId')
-  if (!clientId) {
-    clientId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
-    window.sessionStorage.setItem('kumoRealtimeClientId', clientId)
-  }
+  const clientId = kumoClientId()
   const params = new URLSearchParams({ clientId, page: options.page || 'Unknown page' })
   const source = new window.EventSource(`/api/events?${params.toString()}`)
   const eventTypes = ['connected', 'realtime_state', 'monitor_update', 'monitor_refresh_started', 'monitor_refresh_completed', 'workflow_run_requested', 'workflow_run_queued', 'workflow_run_status', 'workflow_run_failed']
