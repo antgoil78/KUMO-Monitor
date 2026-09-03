@@ -1280,6 +1280,12 @@ pre, code, kbd, samp, .run-id-note code, .schedule-cell code {
   white-space: nowrap;
   color: #88a2cb;
 }
+
+.workflow-run-only-option { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0; padding: 11px 12px; border: 1px solid var(--line-soft); border-radius: 10px; background: rgba(255,255,255,.025); cursor: pointer; }
+.workflow-run-only-option input { margin-top: 3px; accent-color: var(--cyan); }
+.workflow-run-only-option span { display: grid; gap: 3px; }
+.workflow-run-only-option strong { color: var(--text); font-size: 11px; }
+.workflow-run-only-option small { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .modal-eyebrow { display: block; margin-bottom: 8px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .16em; }
 .action-grid {
   display: grid;

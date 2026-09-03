@@ -43,8 +43,13 @@ const RAW_RELOAD_TIMEOUT_MS = 30 * 60 * 1000
 export const fileIngestionApi = {
   subjectAreas: () => requestJson('/api/file-ingestion/reload/subject-areas'),
 
-  overview: (historyDays = 30) =>
-    requestJson(`/api/file-ingestion?historyDays=${encodeURIComponent(historyDays)}`, {
+  overview: () =>
+    requestJson('/api/file-ingestion', {
+      timeoutMs: 5 * 60 * 1000
+    }),
+
+  rawStatus: () =>
+    requestJson('/api/file-ingestion/raw-status', {
       timeoutMs: 5 * 60 * 1000
     }),
 

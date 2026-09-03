@@ -23,10 +23,8 @@ function formatDate(value) {
   }).format(date)
 }
 
-function pct(numerator, denominator) {
-  const n = Number(numerator || 0)
-  const d = Number(denominator || 0)
-  return d ? Math.round((n / d) * 100) : 0
+function displayStatus(value) {
+  return String(value || '').replaceAll('UPDATED', 'READY').replaceAll('Updated', 'Ready')
 }
 
 function statusTone(kind) {
@@ -75,19 +73,15 @@ function SummaryStrip({ summary }) {
       </span>
       <span className="lim-divider" />
       <span className="lim-summary-item success">✓ <strong>{summary.readyGroups}</strong> ready groups</span>
-      <span className="lim-summary-item success">↻ <strong>{summary.updatedGroups}</strong> updated latest run</span>
-      <span className="lim-summary-item queued">● <strong>{summary.missingGroups}</strong> missing-file groups</span>
+      <span className="lim-summary-item success">✓ <strong>{summary.updatedGroups}</strong> ready latest run</span>
       <span className="lim-summary-item failed">✕ <strong>{summary.attentionGroups}</strong> attention</span>
       <span className="lim-summary-item running">▶ <strong>{summary.waitingGroups}</strong> waiting/checked</span>
-      <span className="lim-divider" />
-      <span className="lim-summary-total">
-        <strong>{summary.totalGroups}</strong> groups · <strong>{summary.readyFiles}/{summary.totalFiles}</strong> ready file rows · <strong>{summary.readinessPct}%</strong> · <strong>{summary.missingFiles}</strong> missing files
-      </span>
+      <span className="lim-summary-total"><strong>{summary.totalGroups}</strong> groups in latest run</span>
     </div>
   )
 }
 
-function OverviewTable({ rows, onOpenDetail }) {
+function OverviewTable({ rows, onOpenDetail, showRaw, rawRows }) {
   const [expanded, setExpanded] = useState(() => new Set())
   function toggle(group) {
     setExpanded(previous => {
@@ -107,18 +101,16 @@ function OverviewTable({ rows, onOpenDetail }) {
               <th>Package group</th>
               <th>Status</th>
               <th>Latest run</th>
-              <th>Files</th>
-              <th>RAW status</th>
-              <th>Delivery</th>
-              <th>History</th>
-              <th>Loading history</th>
+              {showRaw && <><th>RAW files</th><th>RAW status</th></>}
+              <th>View details</th>
             </tr>
           </thead>
           <tbody>
             {rows.flatMap(row => {
               const isExpanded = expanded.has(row.PKG_GROUP_NAME)
-              const parent = <OverviewRow key={row.PKG_GROUP_NAME} row={row} expanded={isExpanded} onToggle={() => toggle(row.PKG_GROUP_NAME)} onOpenDetail={onOpenDetail} />
-              const children = isExpanded ? (row.sources || []).map(source => <OverviewRow key={`${row.PKG_GROUP_NAME}-${source.SOURCE_ID}`} row={source} source onOpenDetail={onOpenDetail} />) : []
+              const parentRaw = rawRows.get(`${row.PKG_GROUP_NAME}|`) || {}
+              const parent = <OverviewRow key={row.PKG_GROUP_NAME} row={row} rawRow={parentRaw} showRaw={showRaw} expanded={isExpanded} onToggle={() => toggle(row.PKG_GROUP_NAME)} onOpenDetail={onOpenDetail} />
+              const children = isExpanded ? (row.sources || []).map(source => <OverviewRow key={`${row.PKG_GROUP_NAME}-${source.SOURCE_ID}`} row={source} rawRow={rawRows.get(`${row.PKG_GROUP_NAME}|${source.SOURCE_ID}`) || {}} showRaw={showRaw} source onOpenDetail={onOpenDetail} />) : []
               return [parent, ...children]
             })}
           </tbody>
@@ -128,23 +120,19 @@ function OverviewTable({ rows, onOpenDetail }) {
   )
 }
 
-function OverviewRow({ row, source = false, expanded = false, onToggle, onOpenDetail }) {
-  const fileRows = Number(row.FILE_ROWS || 0)
-  const readyRows = Number(row.READY_ROWS || 0)
-  const waitingRows = Number(row.NOT_READY_ROWS || 0)
-  const readiness = pct(readyRows, fileRows)
+function OverviewRow({ row, rawRow = {}, showRaw = false, source = false, expanded = false, onToggle, onOpenDetail }) {
   const tone = statusTone(row.STATUS_KIND)
+  const rawFiles = Number(rawRow.RAW_FILE_COUNT || 0)
+  const rawReady = Number(rawRow.RAW_READY_FILES || 0)
+  const rawWaiting = Number(rawRow.RAW_NOT_READY_FILES || 0)
   return (
     <tr className={source ? 'lim-source-row' : 'lim-subject-row'}>
       <td className="lim-muted">{source ? <span className="lim-source-branch">↳</span> : <button type="button" className="lim-expand-button" onClick={onToggle} aria-expanded={expanded}><span>{expanded ? '−' : '+'}</span>{formatValue(row.SUBJECT_AREA)}</button>}</td>
       <td>{source ? <strong className="lim-source-name">{formatValue(row.SOURCE_ID)}</strong> : <strong className="lim-package-name">{formatValue(row.PKG_GROUP_NAME)}</strong>}</td>
       <td><span className={`lim-status ${tone}`}><span>{statusSymbol(row.STATUS_KIND)}</span>{formatValue(row.STATUS_LABEL, 'No data')}</span></td>
-      <td><div className="lim-primary-value">{formatValue(row.LATEST_STATUS_LIST, 'No latest run')}</div><div className="lim-sub-value">Ready run: {formatDate(row.LATEST_CONTROL_DATE)}</div></td>
-      <td><div><strong>{fileRows}</strong> <span className="lim-muted">in RAW</span></div><div className="lim-sub-value">Loaded: {formatDate(row.RAW_LATEST_LOAD_DTTM)}</div></td>
-      <td><div><span className="success-text">{readyRows} ready</span> <span className="lim-muted">·</span> <span className={waitingRows ? 'lim-warning-text' : 'lim-muted'}>{waitingRows} waiting</span></div><div className="lim-progress"><span style={{ width: `${readiness}%` }} /></div></td>
-      <td className="lim-muted lim-nowrap">{formatDate(row.LATEST_DLVY_END_DATE)}</td>
-      <td>{source ? <span className="lim-muted">—</span> : <><div>{Number(row.HISTORY_DAYS || 0)} days</div><div className="lim-sub-value">{Number(row.HISTORY_ROWS || 0)} rows</div></>}</td>
-      <td><div className="lim-row-actions"><button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, 'history', source ? row.SOURCE_ID : null)}>Open history</button></div></td>
+      <td><div className="lim-primary-value">{displayStatus(row.LATEST_STATUS_LIST) || 'No latest run'}</div><div className="lim-sub-value">{Number(row.LATEST_LOG_ROWS || 0)} results · {formatDate(row.LATEST_CONTROL_DATE)}</div></td>
+      {showRaw && <><td><strong>{rawFiles}</strong><div className="lim-sub-value">Loaded: {formatDate(rawRow.RAW_LATEST_LOAD_DTTM)}</div></td><td><span className="success-text">{rawReady} ready</span> <span className="lim-muted">·</span> <span className={rawWaiting ? 'lim-warning-text' : 'lim-muted'}>{rawWaiting} waiting</span></td></>}
+      <td><div className="lim-row-actions"><button type="button" onClick={() => onOpenDetail(row.PKG_GROUP_NAME, source ? row.SOURCE_ID : null)}>View details</button></div></td>
     </tr>
   )
 }
@@ -166,7 +154,7 @@ function DetailMetrics({ type, metrics = {} }) {
     return (
       <div className="lim-detail-metrics four">
         <Metric label="Rows" value={metrics.rows || 0} />
-        <Metric label="Updated" value={metrics.updated || 0} tone="success" />
+        <Metric label="Ready" value={metrics.updated || 0} tone="success" />
         <Metric label="Attention" value={metrics.attention || 0} tone={metrics.attention ? 'failed' : ''} />
         <Metric label="Rows updated" value={metrics.rowsUpdated || 0} />
       </div>
@@ -257,11 +245,11 @@ function LogTable({ rows }) {
   )
 }
 
-function CompactHistoryTable({ rows, firstError }) {
+function CompactHistoryTable({ rows, firstError, onResolve }) {
   return (
     <div className="lim-history-table-wrap">
       <table className="lim-table lim-history-table">
-        <thead><tr><th>Delivery</th><th>Source</th><th>Package</th><th>Status</th><th>Reason</th></tr></thead>
+        <thead><tr><th>Delivery</th><th>Source</th><th>Package</th><th>Status</th><th>Reason</th><th>Action</th></tr></thead>
         <tbody>{rows.map((row, index) => {
           const status = formatValue(row.STATUS, '')
           const isFirstError = row === firstError
@@ -270,12 +258,159 @@ function CompactHistoryTable({ rows, firstError }) {
               <td className="lim-nowrap">{formatDate(row.DLVY_END_DATE)}</td>
               <td><strong>{formatValue(row.DLVY_SOURCE_ID)}</strong></td>
               <td><div>{formatValue(row.DLVY_PKG_ID)}</div><div className="lim-sub-value">{formatValue(row.DLVY_PKG_YEAR)} · {formatValue(row.DLVY_PKG_YEAR_SEQ_NO)}</div></td>
-              <td><span className={`lim-log-status ${logTone(status)}`}>{status || '—'}</span>{isFirstError && <span className="lim-root-cause-badge">First error</span>}</td>
+              <td><span className={`lim-log-status ${logTone(status)}`}>{displayStatus(status) || '—'}</span>{isFirstError && <span className="lim-root-cause-badge">First error</span>}</td>
               <td className="lim-history-reason">{formatValue(row.REASON)}</td>
+              <td>{isFirstError ? <button type="button" className="lim-resolve-button" onClick={() => onResolve(row)}>Resolution</button> : <span className="lim-muted">—</span>}</td>
             </tr>
           )
         })}</tbody>
       </table>
+    </div>
+  )
+}
+
+function sameValue(left, right) {
+  if (left === null || left === undefined || right === null || right === undefined) return true
+  return String(left).toUpperCase() === String(right).toUpperCase()
+}
+
+function sameDate(left, right) {
+  if (!left || !right) return true
+  const leftDate = new Date(left)
+  const rightDate = new Date(right)
+  if (Number.isNaN(leftDate.getTime()) || Number.isNaN(rightDate.getTime())) return sameValue(left, right)
+  return leftDate.toISOString().slice(0, 10) === rightDate.toISOString().slice(0, 10)
+}
+
+function fileNeedsAttention(row) {
+  return row.RECEIVED_FL === false
+    || row.DW_READY_TO_LOAD_FL === false
+    || row.IS_VALID_SEQUENCE === false
+    || Boolean(row.ROWCOUNT_STATUS && row.ROWCOUNT_STATUS !== 'ROWCOUNT_OK')
+}
+
+function firstAttentionFile(logRows, rawRows) {
+  const firstAttention = logRows.find(row => ATTENTION_STATUSES.has(row.STATUS) && row.STATUS !== 'BLOCKED')
+    || logRows.find(row => ATTENTION_STATUSES.has(row.STATUS))
+  const candidates = rawRows.filter(fileNeedsAttention)
+  if (!firstAttention) return candidates[0] || null
+  return candidates.find(row =>
+    sameValue(row.DLVY_SOURCE_ID, firstAttention.DLVY_SOURCE_ID)
+    && sameValue(row.DLVY_PKG_ID, firstAttention.DLVY_PKG_ID)
+    && sameValue(row.DLVY_PKG_YEAR, firstAttention.DLVY_PKG_YEAR)
+    && sameValue(row.DLVY_PKG_YEAR_SEQ_NO, firstAttention.DLVY_PKG_YEAR_SEQ_NO)
+    && sameDate(row.DLVY_END_DATE, firstAttention.DLVY_END_DATE)
+  ) || candidates[0] || null
+}
+
+function AttentionFile({ file }) {
+  if (!file) return null
+  const issues = []
+  if (file.RECEIVED_FL === false) issues.push('File not received')
+  if (file.DW_READY_TO_LOAD_FL === false) issues.push('Not ready for DW load')
+  if (file.IS_VALID_SEQUENCE === false) issues.push('Invalid sequence')
+  if (file.ROWCOUNT_STATUS && file.ROWCOUNT_STATUS !== 'ROWCOUNT_OK') issues.push(formatValue(file.ROWCOUNT_STATUS))
+  return (
+    <div className="lim-attention-file">
+      <span>First file needing attention</span>
+      <strong>{formatValue(file.FILE_NAME)}</strong>
+      <p>{issues.join(' · ') || 'Needs attention'} · {formatValue(file.DLVY_SOURCE_ID)} · delivery {formatDate(file.DLVY_END_DATE)}</p>
+    </div>
+  )
+}
+
+function FirstErrorSummary({ error, file, onResolve }) {
+  if (!error) return null
+  return (
+    <div className="lim-first-error-card">
+      <div className="lim-first-error-content">
+        <span>First error to resolve</span>
+        <strong>{formatValue(error.STATUS)} · {formatValue(error.DLVY_SOURCE_ID)} · delivery {formatDate(error.DLVY_END_DATE)}</strong>
+        <p>{formatValue(error.REASON)}</p>
+        {file && <small>File: {formatValue(file.FILE_NAME)}</small>}
+      </div>
+      <button type="button" className="lim-resolve-button prominent" onClick={() => onResolve(error)}>Resolution</button>
+    </div>
+  )
+}
+
+function RemainingResults({ rows }) {
+  const [expanded, setExpanded] = useState(false)
+  if (!rows.length) return null
+  const blocked = rows.filter(row => row.STATUS === 'BLOCKED').length
+  return (
+    <details className="lim-remaining-results" onToggle={event => setExpanded(event.currentTarget.open)}>
+      <summary>
+        <div><strong>Remaining results</strong><span>Expand to load the rest of this run</span></div>
+        <span>{rows.length} rows{blocked ? ` · ${blocked} blocked` : ''}</span>
+      </summary>
+      {expanded && <CompactHistoryTable rows={rows} firstError={null} onResolve={() => {}} />}
+    </details>
+  )
+}
+
+function sqlString(value) {
+  return String(value ?? '').replaceAll("'", "''")
+}
+
+function previousSequence(value) {
+  const text = String(value ?? '')
+  const number = Number.parseInt(text, 10)
+  return Number.isFinite(number) && number > 0 ? String(number - 1).padStart(text.length, '0') : text
+}
+
+function resolutionFor(error, file) {
+  const reason = String(error?.REASON || '').toUpperCase()
+  const isSequence = reason.includes('INVALID_SEQUENCE') || file?.IS_VALID_SEQUENCE === false
+  const isRowcount = reason.includes('ROWCOUNT') || Boolean(file?.ROWCOUNT_STATUS && file.ROWCOUNT_STATUS !== 'ROWCOUNT_OK')
+
+  if (isSequence) {
+    const source = sqlString(error.DLVY_SOURCE_ID)
+    const group = sqlString(error.PKG_GROUP_NAME)
+    const receivedYear = sqlString(error.DLVY_PKG_YEAR)
+    const receivedSequence = sqlString(error.DLVY_PKG_YEAR_SEQ_NO)
+    const configuredYear = sqlString(error.CONFIGURED_PKG_YEAR)
+    const configuredSequence = sqlString(error.CONFIGURED_SEQUENCE)
+    const nextExpectedBase = previousSequence(error.DLVY_PKG_YEAR_SEQ_NO)
+    return {
+      title: 'Correct the expected package sequence',
+      description: `The received sequence ${receivedSequence} cannot follow the configured sequence ${configuredSequence || '—'}. Review the gap, then update the stored sequence to ${nextExpectedBase} so ${receivedSequence} becomes the next expected package.`,
+      warning: 'Review whether the missing sequence is intentionally skipped before running this update.',
+      sql: `-- Review the current configured sequence\nSELECT PKG_GROUP_NAME, SOURCE_ID, DLVY_PKG_YEAR, DLVY_PKG_YEAR_SEQ_NO, UPDATED_AT\nFROM KUMO_ADMIN.WORKFLOW_MANAGER.RAW_LIM_PKG_GROUP_SOURCE\nWHERE PKG_GROUP_NAME = '${group}'\n  AND UPPER(SOURCE_ID) = '${source}';\n\n-- Advance the stored sequence immediately before the received package\nUPDATE KUMO_ADMIN.WORKFLOW_MANAGER.RAW_LIM_PKG_GROUP_SOURCE\nSET DLVY_PKG_YEAR = '${receivedYear}',\n    DLVY_PKG_YEAR_SEQ_NO = '${nextExpectedBase}',\n    UPDATED_AT = CURRENT_TIMESTAMP()\nWHERE PKG_GROUP_NAME = '${group}'\n  AND UPPER(SOURCE_ID) = '${source}'\n  AND DLVY_PKG_YEAR = '${configuredYear}'\n  AND DLVY_PKG_YEAR_SEQ_NO = '${configuredSequence}';`
+    }
+  }
+
+  if (isRowcount && file) {
+    const fileName = sqlString(file.FILE_NAME)
+    const rawTable = /^[A-Z0-9_$.]+$/i.test(file.RAW_TABLE || '') ? file.RAW_TABLE : 'KUMO_TST.RAW_LIM.RAW_LIM_CACT'
+    return {
+      title: 'Investigate the row-count mismatch',
+      description: `The control metadata expects ${formatValue(file.EXPECTED_ROWS)} rows, while RAW contains ${formatValue(file.ACTUAL_ROWS)}. Run these read-only statements in a Snowflake worksheet to inspect the discrepancy.`,
+      sql: `SET file_name = '${fileName}';\n\n-- Expected and detected row counts from LIM metadata\nSELECT FILE_NAME, EXPECTED_ROWS, DATA_ROWS, ACTUAL_ROWS, ROWCOUNT_STATUS\nFROM KUMO_TST.RAW_LIM.RAW_LIM_META\nWHERE FILE_NAME = $file_name\nORDER BY LOADED_AT DESC;\n\n-- Inspect the rows loaded for this file\nSELECT *\nFROM ${rawTable}\nWHERE REGEXP_REPLACE(DW_FILE_NM, '\\\\.gz$', '', 1, 0, 'i') = $file_name\nLIMIT 200;\n\n-- Aggregate the total loaded row count\nSELECT REGEXP_REPLACE(DW_FILE_NM, '\\\\.gz$', '', 1, 0, 'i') AS FILE_NAME, COUNT(*) AS ACTUAL_ROW_COUNT\nFROM ${rawTable}\nWHERE REGEXP_REPLACE(DW_FILE_NM, '\\\\.gz$', '', 1, 0, 'i') = $file_name\nGROUP BY 1;`
+    }
+  }
+
+  return { title: 'Resolution not available yet', description: 'This error type does not yet have a generated resolution.', sql: '' }
+}
+
+function SuggestedResolution({ error, file, onClose }) {
+  const [copied, setCopied] = useState(false)
+  const resolution = resolutionFor(error, file)
+  async function copySql() {
+    await navigator.clipboard.writeText(resolution.sql)
+    setCopied(true)
+  }
+  return (
+    <div className="lim-resolution-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
+      <div className="lim-resolution-panel" role="dialog" aria-modal="true" aria-label="Suggested resolution">
+        <div className="lim-resolution-header">
+          <div><span>Suggested resolution</span><h3>{resolution.title}</h3></div>
+          <button type="button" onClick={onClose} aria-label="Close resolution">×</button>
+        </div>
+        <p>{resolution.description}</p>
+        {resolution.warning && <div className="alert warning">{resolution.warning}</div>}
+        {resolution.sql && <><div className="lim-sql-heading"><strong>Snowflake SQL</strong><button type="button" onClick={copySql}>{copied ? 'Copied' : 'Copy SQL'}</button></div><pre className="lim-resolution-sql"><code>{resolution.sql}</code></pre></>}
+      </div>
     </div>
   )
 }
@@ -320,52 +455,99 @@ function HistoryGroups({ rows }) {
   )
 }
 
-function DetailModal({ detail, onClose }) {
+function LatestRunDetails({ detail, onClose, standalone = false }) {
+  const [resolutionError, setResolutionError] = useState(null)
   if (!detail) return null
 
-  return (
-    <div className="modal-backdrop lim-modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
-      <div className="vision-modal lim-detail-modal" role="dialog" aria-modal="true">
+  const rows = detail.data?.rows || []
+  const firstError = rows.find(row => ATTENTION_STATUSES.has(row.STATUS) && row.STATUS !== 'BLOCKED')
+    || rows.find(row => ATTENTION_STATUSES.has(row.STATUS))
+  const remainingRows = firstError ? rows.filter(row => row !== firstError) : rows
+  const runDate = rows.reduce((latest, row) => {
+    if (!row.CONTROL_DATE) return latest
+    return !latest || new Date(row.CONTROL_DATE) > new Date(latest) ? row.CONTROL_DATE : latest
+  }, null)
+
+  const panel = (
+      <div className={standalone ? 'vision-card-flat lim-detail-page-card' : 'vision-modal lim-detail-modal'}>
         <div className="modal-header">
           <div>
             <span className="modal-eyebrow">LIM ingestion</span>
-            <h2>Loading history · {detail.groupName}{detail.sourceId ? ` · ${detail.sourceId}` : ''}</h2>
-            <p>Newest runs first · deliveries ordered oldest to newest within each run · last {HISTORY_DAYS} days</p>
+            <h2>Latest run details · {detail.groupName}{detail.sourceId ? ` · ${detail.sourceId}` : ''}</h2>
+            <p>{runDate ? `Run ${formatDate(runDate)}` : 'Latest run'} · showing the latest run only</p>
           </div>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button>
+          <button type="button" className={standalone ? 'button' : 'modal-close'} onClick={onClose} aria-label={standalone ? 'Back to File Ingestion Monitor' : 'Close'}>{standalone ? '← Back' : '×'}</button>
         </div>
 
         {detail.loading ? (
-          <div className="lim-detail-loading">Loading history...</div>
+          <div className="lim-detail-loading">Loading latest run details...</div>
         ) : detail.error ? (
           <div className="alert error">{detail.error}</div>
         ) : (
           <>
-            <DetailMetrics type={detail.type} metrics={detail.data?.metrics} />
-            {detail.data?.rows?.length ? (
-              <HistoryGroups rows={detail.data.rows} />
+            <DetailMetrics type="ready" metrics={detail.data?.metrics} />
+            {firstError ? (
+              <>
+                <FirstErrorSummary error={firstError} file={detail.data?.attentionFile} onResolve={setResolutionError} />
+                <RemainingResults rows={remainingRows} />
+              </>
+            ) : rows.length ? (
+              <RemainingResults rows={rows} />
             ) : (
               <div className="lim-empty-detail">No rows to display.</div>
             )}
           </>
         )}
+        {resolutionError && <SuggestedResolution error={resolutionError} file={detail.data?.attentionFile} onClose={() => setResolutionError(null)} />}
       </div>
+  )
+
+  if (standalone) {
+    return <section className="page lim-page lim-detail-page">{panel}</section>
+  }
+  return (
+    <div className="modal-backdrop lim-modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
+      {panel}
     </div>
   )
 }
 
-export default function FileIngestion() {
+export function FileIngestionDetail({ groupName, sourceId = null, onNavigate }) {
+  const [detail, setDetail] = useState({ groupName, sourceId, loading: true, error: null, data: null })
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadDetail() {
+      try {
+        const [latest, raw] = await Promise.all([
+          fileIngestionApi.ready(groupName, sourceId),
+          fileIngestionApi.raw(groupName, sourceId)
+        ])
+        if (!cancelled) setDetail({ groupName, sourceId, loading: false, error: null, data: { ...latest, attentionFile: firstAttentionFile(latest.rows || [], raw.rows || []) } })
+      } catch (err) {
+        if (!cancelled) setDetail({ groupName, sourceId, loading: false, error: err.message, data: null })
+      }
+    }
+    loadDetail()
+    return () => { cancelled = true }
+  }, [groupName, sourceId])
+
+  return <LatestRunDetails detail={detail} standalone onClose={() => onNavigate('fileIngestion')} />
+}
+
+export default function FileIngestion({ onNavigate }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [query, setQuery] = useState('')
-  const [detail, setDetail] = useState(null)
+  const [rawLoading, setRawLoading] = useState(false)
+  const [rawRows, setRawRows] = useState(() => new Map())
 
   async function load() {
     setLoading(true)
     setError(null)
     try {
-      const result = await fileIngestionApi.overview(HISTORY_DAYS)
+      const result = await fileIngestionApi.overview()
       setData(result)
     } catch (err) {
       setError(err.message)
@@ -374,9 +556,30 @@ export default function FileIngestion() {
     }
   }
 
+  function refreshAll() {
+    load()
+    loadRawStatus()
+  }
+
   useEffect(() => {
     load()
+    loadRawStatus()
   }, [])
+
+  async function loadRawStatus() {
+    setRawLoading(true)
+    try {
+      const result = await fileIngestionApi.rawStatus()
+      setRawRows(new Map((result.rows || []).map(row => [
+        `${row.PKG_GROUP_NAME}|${row.SOURCE_ID || ''}`,
+        row
+      ])))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setRawLoading(false)
+    }
+  }
 
   const filteredRows = useMemo(() => {
     const rows = data?.overview || []
@@ -388,18 +591,8 @@ export default function FileIngestion() {
     )
   }, [data, query])
 
-  async function openDetail(groupName, type, sourceId = null) {
-    setDetail({ groupName, sourceId, type, loading: true, error: null, data: null })
-    try {
-      const result = type === 'raw'
-        ? await fileIngestionApi.raw(groupName, sourceId)
-        : type === 'ready'
-          ? await fileIngestionApi.ready(groupName, sourceId)
-          : await fileIngestionApi.history(groupName, HISTORY_DAYS, sourceId)
-      setDetail({ groupName, sourceId, type, loading: false, error: null, data: result })
-    } catch (err) {
-      setDetail({ groupName, sourceId, type, loading: false, error: err.message, data: null })
-    }
+  function openDetail(groupName, sourceId = null) {
+    onNavigate('fileIngestionDetail', { groupName, sourceId })
   }
 
   const emptySummary = {
@@ -418,8 +611,8 @@ export default function FileIngestion() {
             Monitor LIM package groups, file readiness, rowcount checks and SET_READY processing.
           </p>
         </div>
-        <button type="button" className="ghost-refresh" onClick={load} disabled={loading}>
-          {loading ? 'Refreshing...' : '↻ Refresh'}
+        <button type="button" className="ghost-refresh" onClick={refreshAll} disabled={loading || rawLoading}>
+          {loading || rawLoading ? 'Refreshing...' : '↻ Refresh'}
         </button>
       </div>
 
@@ -430,7 +623,7 @@ export default function FileIngestion() {
           Monitoring <strong>{data?.summary?.totalGroups || 0}</strong> active package groups across{' '}
           <strong>{data?.subjectAreas || 0}</strong> subject areas
         </span>
-        <span>History window: last <strong>{data?.historyDays || HISTORY_DAYS}</strong> days</span>
+        <span>Scope: <strong>latest SET_READY run only</strong></span>
       </div>
 
       <SummaryStrip summary={data?.summary || emptySummary} />
@@ -440,12 +633,10 @@ export default function FileIngestion() {
           <h2>Ingestion overview</h2>
           <span>{filteredRows.length} package groups</span>
         </div>
-        <input
-          className="search-input lim-search"
-          value={query}
-          onChange={event => setQuery(event.target.value)}
-          placeholder="Search subject area, package group or status..."
-        />
+        <div className="lim-overview-controls">
+          {rawLoading && <span className="lim-raw-loading">Loading RAW status…</span>}
+          <input className="search-input lim-search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search subject area, package group or status..." />
+        </div>
       </div>
 
       {loading && !data ? (
@@ -453,10 +644,9 @@ export default function FileIngestion() {
       ) : !filteredRows.length ? (
         <div className="table-card lim-empty-state">No active package groups found.</div>
       ) : (
-        <OverviewTable rows={filteredRows} onOpenDetail={openDetail} />
+        <OverviewTable rows={filteredRows} onOpenDetail={openDetail} showRaw rawRows={rawRows} />
       )}
 
-      <DetailModal detail={detail} onClose={() => setDetail(null)} />
     </section>
   )
 }

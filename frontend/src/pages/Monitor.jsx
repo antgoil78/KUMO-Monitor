@@ -850,6 +850,7 @@ function DagModal({ workflow, onClose }) {
   )
 }
 function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
+  const [runOnlyThisWorkflow, setRunOnlyThisWorkflow] = useState(false)
   const view = pendingRun ? {
     ...workflow,
     lastStatus: pendingRun.status || 'INITIATING',
@@ -868,7 +869,7 @@ function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
     ? `Usually triggered when ${view.parentWorkflowName} ${dependencyCondition}. This starts it independently.`
     : 'This workflow has an upstream dependency. This starts it independently.'
   async function choose(action) {
-    await onAction(action, view)
+    await onAction(action, view, { skipChildren: action === 'run' && runOnlyThisWorkflow })
   }
 
   return (
@@ -881,6 +882,10 @@ function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
         {view.lastRunId && <code>{view.lastRunId}</code>}
       </div>
       {runLock && <div className="alert info compact">This workflow is locked for a pending run. Run ID: <code>{runLock.runId || 'pending'}</code></div>}
+      <label className="workflow-run-only-option">
+        <input type="checkbox" checked={runOnlyThisWorkflow} onChange={event => setRunOnlyThisWorkflow(event.target.checked)} disabled={!wfEnabled || busy} />
+        <span><strong>Run only this workflow</strong><small>Skip both ON_SUCCESS and ON_FAIL child workflows for this manual run.</small></span>
+      </label>
       <div className="action-grid">
         <button className="action-tile primary" disabled={!wfEnabled || busy} onClick={() => choose('run')}>
           <span className="action-icon">▶</span>
@@ -1244,7 +1249,7 @@ export default function Monitor({ onNavigate }) {
     window.setTimeout(() => setActionMessage(null), 7000)
   }
 
-  async function handleAction(action, workflow) {
+  async function handleAction(action, workflow, options = {}) {
     setOpenMenuId(null)
     setActionMessage(null)
     if (action === 'history') {
@@ -1271,13 +1276,13 @@ export default function Monitor({ onNavigate }) {
     setModal(null)
     try {
       if (action === 'run') {
-        const result = await api.runWorkflow(workflow.workflowId, workflow.workflowName)
+        const result = await api.runWorkflow(workflow.workflowId, workflow.workflowName, Boolean(options.skipChildren))
         applyLiveRunUpdate({
           ...result,
           workflowId: workflow.workflowId,
           workflowName: workflow.workflowName,
         })
-        notify(`Initiated ${workflow.workflowName}. Waiting for dispatcher pickup...`)
+        notify(`Initiated ${workflow.workflowName}${options.skipChildren ? ' without child workflows' : ''}. Waiting for dispatcher pickup...`)
       }
       if (action === 'toggle-workflow') {
         await api.setWorkflowEnabled(workflow.workflowId, !workflow.workflowEnabled)

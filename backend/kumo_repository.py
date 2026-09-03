@@ -1088,7 +1088,7 @@ def latest_run_id_for_workflow(workflow_id, active_only=False):
         return None
 
 
-def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requested_by=None):
+def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requested_by=None, skip_children=False):
     """Direct Streamlit-compatible queue insert path.
 
     This is the fallback path. It persists QUEUED in history and queue. The UI
@@ -1101,6 +1101,7 @@ def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requeste
         "workflow_id": workflow_id,
         "trigger_source": trigger_source,
         "requested_by": requested_by or "",
+        "skip_children": bool(skip_children),
     }
 
     with sf.connection(use_warehouse=True, include_context=True, force_service=True) as conn:
@@ -1123,6 +1124,9 @@ def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requeste
             if "UPDATED_AT" in h_types:
                 h_cols.append("UPDATED_AT")
                 h_vals.append("SYSDATE()")
+            if "SKIP_CHILDREN" in h_types:
+                h_cols.append("SKIP_CHILDREN")
+                h_vals.append("%(skip_children)s")
 
             _fetch_with_cursor(cur, f"INSERT INTO {config.T_HISTORY} ({', '.join(h_cols)}) VALUES ({', '.join(h_vals)})", params)
 
@@ -1143,6 +1147,9 @@ def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requeste
             if "REQUESTED_BY" in q_types:
                 q_cols.append("REQUESTED_BY")
                 q_vals.append("%(requested_by)s" if requested_by else "CURRENT_USER()")
+            if "SKIP_CHILDREN" in q_types:
+                q_cols.append("SKIP_CHILDREN")
+                q_vals.append("%(skip_children)s")
 
             _fetch_with_cursor(cur, f"INSERT INTO {config.T_QUEUE} ({', '.join(q_cols)}) VALUES ({', '.join(q_vals)})", params)
         finally:
@@ -1179,14 +1186,14 @@ def _request_run_via_procedure(workflow_id, trigger_source="MANUAL", requested_b
     return None
 
 
-def request_run(workflow_id, trigger_source="MANUAL", requested_by=None):
+def request_run(workflow_id, trigger_source="MANUAL", requested_by=None, skip_children=False):
     """Create/start a manual workflow run.
 
     procedure = call SP_WORKFLOW_REQUEST_RUN first, then fallback to queue insert.
     queue = direct insert into WORKFLOW_HISTORY and WORKFLOW_RUN_QUEUE.
     """
     mode = getattr(config, "KUMO_MANUAL_RUN_MODE", "queue")
-    if mode == "procedure":
+    if mode == "procedure" and not skip_children:
         try:
             run_id = _request_run_via_procedure(workflow_id, trigger_source, requested_by)
             if run_id:
@@ -1196,7 +1203,7 @@ def request_run(workflow_id, trigger_source="MANUAL", requested_by=None):
             # procedure signature differs.
             pass
 
-    return _request_run_via_queue_insert(workflow_id, trigger_source, requested_by)
+    return _request_run_via_queue_insert(workflow_id, trigger_source, requested_by, skip_children)
 
 
 def task_name_for_workflow(workflow_id):

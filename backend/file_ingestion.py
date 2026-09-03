@@ -120,7 +120,7 @@ def _status_label(kind):
         "ATTENTION": "Attention",
         "ROWCOUNT_ISSUE": "Rowcount issue",
         "MISSING_FILES": "Missing files",
-        "UPDATED": "Updated",
+        "UPDATED": "Ready",
         "READY": "Ready",
         "LATEST_NO_UPDATE": "Checked",
         "WAITING": "Waiting",
@@ -446,123 +446,47 @@ def _load_overview(history_days):
     with sf.connection(use_warehouse=True, include_context=True, force_service=True) as conn:
         cur = conn.cursor(DictCursor)
         try:
-            catalog = _load_catalog(cur)
             source_catalog = _load_source_catalog(cur)
+            catalog_map = {}
+            for source_row in source_catalog:
+                group = source_row.get("PKG_GROUP_NAME")
+                if group and group not in catalog_map:
+                    catalog_map[group] = {
+                        "SUBJECT_AREA": source_row.get("SUBJECT_AREA") or "Unknown subject area",
+                        "PKG_GROUP_NAME": group,
+                    }
+            catalog = list(catalog_map.values())
             groups = [str(row.get("PKG_GROUP_NAME")) for row in catalog if row.get("PKG_GROUP_NAME")]
             if not groups:
                 return {"overview": [], "summary": _build_summary([]), "subjectAreas": 0}
 
             placeholders, params = _group_params(groups)
 
-            cur.execute(
-                f"""
-                SELECT PKG_GROUP_NAME,
-                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL') AS FILE_ROWS,
-                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND RECEIVED_FL = TRUE) AS RECEIVED_ROWS,
-                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND RECEIVED_FL = FALSE) AS MISSING_ROWS,
-                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND DW_READY_TO_LOAD_FL = TRUE) AS READY_ROWS,
-                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND DW_READY_TO_LOAD_FL = FALSE) AS NOT_READY_ROWS,
-                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND ROWCOUNT_STATUS = 'ROWCOUNT_OK') AS ROWCOUNT_OK_ROWS,
-                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND ROWCOUNT_STATUS IS NOT NULL AND ROWCOUNT_STATUS <> 'ROWCOUNT_OK') AS ROWCOUNT_BAD_ROWS,
-                       MAX(DLVY_END_DATE) AS LATEST_DLVY_END_DATE,
-                       MAX(LOADED_AT) AS LAST_LOADED_AT
-                FROM {RAW_LIM_META_TABLE}
-                WHERE PKG_GROUP_NAME IN ({placeholders})
-                GROUP BY PKG_GROUP_NAME
-                """,
-                params,
-            )
-            meta_rows = normalize_rows(cur.fetchall())
+            # RAW metadata and history are intentionally detail-only. Querying
+            # them here makes the landing page scan large blocked backlogs.
+            meta_rows = []
+            source_meta_rows = []
+            raw_readiness_rows = []
 
             cur.execute(
                 f"""
                 SELECT PKG_GROUP_NAME,
-                       UPPER(DLVY_SOURCE_ID) AS SOURCE_ID,
-                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL') AS FILE_ROWS,
-                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND RECEIVED_FL = TRUE) AS RECEIVED_ROWS,
-                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND RECEIVED_FL = FALSE) AS MISSING_ROWS,
-                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND DW_READY_TO_LOAD_FL = TRUE) AS READY_ROWS,
-                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND DW_READY_TO_LOAD_FL = FALSE) AS NOT_READY_ROWS,
-                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND ROWCOUNT_STATUS = 'ROWCOUNT_OK') AS ROWCOUNT_OK_ROWS,
-                       COUNT_IF(UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL' AND ROWCOUNT_STATUS IS NOT NULL AND ROWCOUNT_STATUS <> 'ROWCOUNT_OK') AS ROWCOUNT_BAD_ROWS,
-                       MAX(DLVY_END_DATE) AS LATEST_DLVY_END_DATE,
-                       MAX(LOADED_AT) AS LAST_LOADED_AT
-                FROM {RAW_LIM_META_TABLE}
+                       IFF(GROUPING(UPPER(DLVY_SOURCE_ID)) = 1, NULL, UPPER(DLVY_SOURCE_ID)) AS SOURCE_ID,
+                       COUNT(*) AS LATEST_LOG_ROWS,
+                       COUNT_IF(STATUS = 'UPDATED') AS LATEST_UPDATED_ROWS,
+                       COUNT_IF(STATUS IN ('STOPPED', 'FAILED', 'SKIPPED', 'BLOCKED')) AS LATEST_ATTENTION_ROWS,
+                       LISTAGG(DISTINCT STATUS, ', ') WITHIN GROUP (ORDER BY STATUS) AS LATEST_STATUS_LIST,
+                       MAX(CONTROL_DATE) AS LATEST_CONTROL_DATE
+                FROM {SET_READY_LATEST_TABLE}
                 WHERE PKG_GROUP_NAME IN ({placeholders})
-                  AND DLVY_SOURCE_ID IS NOT NULL
-                GROUP BY PKG_GROUP_NAME, UPPER(DLVY_SOURCE_ID)
+                GROUP BY GROUPING SETS ((PKG_GROUP_NAME), (PKG_GROUP_NAME, UPPER(DLVY_SOURCE_ID)))
                 """,
                 params,
             )
-            source_meta_rows = normalize_rows(cur.fetchall())
-
-            try:
-                raw_readiness_rows = _load_raw_table_readiness(cur, catalog)
-            except Exception:
-                current_app.logger.exception("Failed to load readiness from RAW LIM tables")
-                raw_readiness_rows = []
-
-            try:
-                cur.execute(
-                    f"""
-                    SELECT PKG_GROUP_NAME,
-                           COUNT(*) AS LATEST_LOG_ROWS,
-                           COUNT_IF(STATUS = 'UPDATED') AS LATEST_UPDATED_ROWS,
-                           COUNT_IF(STATUS IN ('STOPPED', 'FAILED', 'SKIPPED', 'BLOCKED')) AS LATEST_ATTENTION_ROWS,
-                           LISTAGG(DISTINCT STATUS, ', ') WITHIN GROUP (ORDER BY STATUS) AS LATEST_STATUS_LIST,
-                           MAX(CONTROL_DATE) AS LATEST_CONTROL_DATE
-                    FROM {SET_READY_LATEST_TABLE}
-                    WHERE PKG_GROUP_NAME IN ({placeholders})
-                    GROUP BY PKG_GROUP_NAME
-                    """,
-                    params,
-                )
-                latest_rows = normalize_rows(cur.fetchall())
-            except Exception:
-                latest_rows = []
-
-            try:
-                cur.execute(
-                    f"""
-                    SELECT PKG_GROUP_NAME,
-                           UPPER(DLVY_SOURCE_ID) AS SOURCE_ID,
-                           COUNT(*) AS LATEST_LOG_ROWS,
-                           COUNT_IF(STATUS = 'UPDATED') AS LATEST_UPDATED_ROWS,
-                           COUNT_IF(STATUS IN ('STOPPED', 'FAILED', 'SKIPPED', 'BLOCKED')) AS LATEST_ATTENTION_ROWS,
-                           LISTAGG(DISTINCT STATUS, ', ') WITHIN GROUP (ORDER BY STATUS) AS LATEST_STATUS_LIST,
-                           MAX(CONTROL_DATE) AS LATEST_CONTROL_DATE
-                    FROM {SET_READY_LATEST_TABLE}
-                    WHERE PKG_GROUP_NAME IN ({placeholders})
-                      AND DLVY_SOURCE_ID IS NOT NULL
-                    GROUP BY PKG_GROUP_NAME, UPPER(DLVY_SOURCE_ID)
-                    """,
-                    params,
-                )
-                source_latest_rows = normalize_rows(cur.fetchall())
-            except Exception:
-                source_latest_rows = []
-
-            try:
-                history_params = dict(params)
-                history_params["history_days"] = int(history_days)
-                cur.execute(
-                    f"""
-                    SELECT PKG_GROUP_NAME,
-                           COUNT(*) AS HISTORY_ROWS,
-                           COUNT(DISTINCT TO_DATE(CONTROL_DATE)) AS HISTORY_DAYS,
-                           COUNT_IF(STATUS = 'UPDATED') AS HISTORY_UPDATED_ROWS,
-                           COUNT_IF(STATUS IN ('STOPPED', 'FAILED', 'SKIPPED', 'BLOCKED')) AS HISTORY_ATTENTION_ROWS,
-                           MAX(CONTROL_DATE) AS HISTORY_LAST_CONTROL_DATE
-                    FROM {SET_READY_HISTORY_TABLE}
-                    WHERE PKG_GROUP_NAME IN ({placeholders})
-                      AND CONTROL_DATE >= DATEADD(day, -%(history_days)s, CURRENT_TIMESTAMP())
-                    GROUP BY PKG_GROUP_NAME
-                    """,
-                    history_params,
-                )
-                history_rows = normalize_rows(cur.fetchall())
-            except Exception:
-                history_rows = []
+            all_latest_rows = normalize_rows(cur.fetchall())
+            latest_rows = [row for row in all_latest_rows if not row.get("SOURCE_ID")]
+            source_latest_rows = [row for row in all_latest_rows if row.get("SOURCE_ID")]
+            history_rows = []
         finally:
             cur.close()
 
@@ -661,19 +585,25 @@ def _load_raw_detail(group_name):
 def _load_ready_detail(group_name):
     rows = sf.query_service(
         f"""
-        SELECT PKG_GROUP_NAME,
-               DLVY_END_DATE,
-               DLVY_SOURCE_ID,
-               DLVY_PKG_ID,
-               DLVY_PKG_YEAR,
-               DLVY_PKG_YEAR_SEQ_NO,
-               STATUS,
-               ROWS_UPDATED,
-               REASON,
-               CONTROL_DATE
-        FROM {SET_READY_LATEST_TABLE}
-        WHERE PKG_GROUP_NAME = %(group_name)s
-        ORDER BY CONTROL_DATE DESC, DLVY_END_DATE DESC, DLVY_SOURCE_ID
+        SELECT log.PKG_GROUP_NAME,
+               log.DLVY_END_DATE,
+               log.DLVY_SOURCE_ID,
+               log.DLVY_PKG_ID,
+               log.DLVY_PKG_YEAR,
+               log.DLVY_PKG_YEAR_SEQ_NO,
+               log.STATUS,
+               log.ROWS_UPDATED,
+               log.REASON,
+               log.CONTROL_DATE,
+               cfg.DLVY_PKG_YEAR AS CONFIGURED_PKG_YEAR,
+               cfg.DLVY_PKG_YEAR_SEQ_NO AS CONFIGURED_SEQUENCE
+        FROM {SET_READY_LATEST_TABLE} log
+        LEFT JOIN {ADMIN_PKG_GROUP_SOURCE} cfg
+          ON cfg.PKG_GROUP_NAME = log.PKG_GROUP_NAME
+         AND UPPER(cfg.SOURCE_ID) = UPPER(log.DLVY_SOURCE_ID)
+         AND cfg.ACTIVE_FL = TRUE
+        WHERE log.PKG_GROUP_NAME = %(group_name)s
+        ORDER BY log.CONTROL_DATE DESC, log.DLVY_END_DATE DESC, log.DLVY_SOURCE_ID
         """,
         params={"group_name": group_name},
         use_warehouse=True,
@@ -919,6 +849,33 @@ def file_ingestion_reload_subject_areas():
         return jsonify({"ok": True, "source": "snowflake", "subjectAreas": subject_areas})
     except Exception as exc:
         current_app.logger.exception("Failed to list RAW LIM subject areas")
+        return _json_error(exc, 500)
+
+
+@file_ingestion_bp.get("/api/file-ingestion/raw-status")
+def file_ingestion_raw_status():
+    """Load the expensive live RAW readiness snapshot only on demand."""
+    if config.USE_MOCK or not sf.is_configured():
+        return jsonify({"ok": True, "source": "mock", "rows": []})
+    try:
+        with sf.connection(use_warehouse=True, include_context=True, force_service=True) as conn:
+            cur = conn.cursor(DictCursor)
+            try:
+                source_catalog = _load_source_catalog(cur)
+                catalog = list({
+                    (row.get("PKG_GROUP_NAME"), row.get("SUBJECT_AREA"))
+                    for row in source_catalog if row.get("PKG_GROUP_NAME")
+                })
+                catalog = [
+                    {"PKG_GROUP_NAME": group, "SUBJECT_AREA": subject}
+                    for group, subject in catalog
+                ]
+                rows = _load_raw_table_readiness(cur, catalog)
+            finally:
+                cur.close()
+        return jsonify({"ok": True, "source": "snowflake", "rows": rows})
+    except Exception as exc:
+        current_app.logger.exception("Failed to load optional RAW readiness status")
         return _json_error(exc, 500)
 
 

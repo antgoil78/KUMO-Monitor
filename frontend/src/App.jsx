@@ -6,7 +6,7 @@ import Dashboard from './pages/Dashboard.jsx'
 import Monitor from './pages/Monitor.jsx'
 import History from './pages/History.jsx'
 import Notifications from './pages/Notifications.jsx'
-import FileIngestion from './pages/FileIngestion.jsx'
+import FileIngestion, { FileIngestionDetail } from './pages/FileIngestion.jsx'
 import LimReload from './pages/LimReload.jsx'
 import DagView from './pages/DagView.jsx'
 import ExecutionLog from './pages/ExecutionLog.jsx'
@@ -19,6 +19,7 @@ const pages = {
   history: History,
   notifications: Notifications,
   fileIngestion: FileIngestion,
+  fileIngestionDetail: FileIngestionDetail,
   limReload: LimReload,
   dag: DagView,
   executionLog: ExecutionLog,

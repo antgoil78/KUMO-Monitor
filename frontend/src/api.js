@@ -69,9 +69,10 @@ export const api = {
   refreshMonitor: () => requestJson('/api/monitor/refresh', { method: 'POST' }),
   workflowRunLocks: () => requestJson('/api/workflow-run-locks', { timeoutMs: 12000 }),
   realtimeState: () => requestJson('/api/realtime/state', { timeoutMs: 5000 }),
-  runWorkflow: async (workflowId, workflowName = '') => {
+  runWorkflow: async (workflowId, workflowName = '', skipChildren = false) => {
     const encodedId = encodeURIComponent(workflowId)
     const params = new URLSearchParams({ triggerSource: 'MANUAL', workflowName, _: String(Date.now()) })
+    if (skipChildren) params.set('skipChildren', 'true')
     return requestJson(`/api/workflows/${encodedId}/run-fallback?${params.toString()}`)
   },
   workflowDetail: (workflowId, options = {}) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`, options),

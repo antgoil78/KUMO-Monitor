@@ -1575,6 +1575,7 @@ def run_workflow_fallback(workflow_id):
         "triggerSource": request.args.get("triggerSource") or "MANUAL",
         "workflowName": request.args.get("workflowName") or "",
         "requestedBy": request.args.get("requestedBy") or "",
+        "skipChildren": str(request.args.get("skipChildren") or "").lower() in ("1", "true", "yes"),
     }, "GET_FALLBACK")
 
 
@@ -1585,6 +1586,7 @@ def _complete_workflow_run_request(workflow_id, workflow_name, trigger_source, r
                 workflow_id=workflow_id,
                 trigger_source=trigger_source,
                 requested_by=requested_by,
+                skip_children=bool(payload.get("skipChildren", False)),
             )
 
             app.logger.info(
