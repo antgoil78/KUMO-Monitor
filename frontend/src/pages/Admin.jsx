@@ -15,19 +15,32 @@ export default function Admin() {
   const [activities, setActivities] = useState([])
   const [activityFilter, setActivityFilter] = useState('ALL')
   const [activityPaused, setActivityPaused] = useState(false)
+  const [activityLimit, setActivityLimit] = useState(750)
+  const [activityLimitDraft, setActivityLimitDraft] = useState('750')
+  const [totalAvailable, setTotalAvailable] = useState(0)
 
   useEffect(() => {
     if (activityPaused) return undefined
     let cancelled = false
-    const loadActivities = () => api.adminActivityLog(750).then(result => {
-      if (!cancelled) setActivities(result.activities || [])
+    const loadActivities = () => api.adminActivityLog(activityLimit).then(result => {
+      if (!cancelled) {
+        setActivities(result.activities || [])
+        setTotalAvailable(Number(result.totalAvailable || 0))
+      }
     }).catch(err => {
       if (!cancelled) setError(err.message || String(err))
     })
     loadActivities()
     const id = window.setInterval(loadActivities, 2000)
     return () => { cancelled = true; window.clearInterval(id) }
-  }, [activityPaused])
+  }, [activityPaused, activityLimit])
+
+  function applyActivityLimit(event) {
+    event.preventDefault()
+    const limit = Math.max(1, Math.min(2000, Number.parseInt(activityLimitDraft, 10) || 750))
+    setActivityLimitDraft(String(limit))
+    setActivityLimit(limit)
+  }
 
   const filteredActivities = useMemo(() => activityFilter === 'ALL' ? activities : activities.filter(item => item.category === activityFilter), [activities, activityFilter])
 
@@ -43,13 +56,19 @@ export default function Admin() {
         <div className="card-title-row admin-log-title">
           <div><h3>Live application log</h3><span>User actions, application work, system activity, and every Snowflake call</span></div>
           <div className="admin-log-actions">
+            <form className="admin-log-limit" onSubmit={applyActivityLimit}>
+              <label htmlFor="activity-entry-limit">Entries</label>
+              <input id="activity-entry-limit" type="number" min="1" max="2000" step="1" value={activityLimitDraft} onChange={event => setActivityLimitDraft(event.target.value)} />
+              <button type="submit" className="button">Apply</button>
+            </form>
             <select value={activityFilter} onChange={event => setActivityFilter(event.target.value)}>
               <option value="ALL">All activity</option><option value="USER">User activity</option><option value="DATABASE">Database calls</option><option value="APPLICATION">Application</option><option value="SYSTEM">System</option>
             </select>
             <button type="button" className="button" onClick={() => setActivityPaused(value => !value)}>{activityPaused ? '▶ Resume' : 'Ⅱ Pause'}</button>
+            <a className="button" href="/api/admin/activity-log/download" download>⇩ Download full log</a>
           </div>
         </div>
-        <div className="admin-log-summary"><span>{filteredActivities.length} entries</span><span className="admin-log-live-dot" />{activityPaused ? 'Paused' : 'Live · updates every 2s'}</div>
+        <div className="admin-log-summary"><span>Showing {filteredActivities.length} of {totalAvailable} retained entries</span><span className="admin-log-live-dot" />{activityPaused ? 'Paused' : 'Live · updates every 2s'}</div>
         <div className="admin-terminal" role="log" aria-live="polite">
           <div className="admin-terminal-bar"><span className="terminal-dot red" /><span className="terminal-dot amber" /><span className="terminal-dot green" /><code>kumo-monitor --follow --newest-first</code></div>
           <div className="admin-terminal-output">

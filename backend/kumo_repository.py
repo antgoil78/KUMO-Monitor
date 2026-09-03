@@ -1702,10 +1702,10 @@ def load_dag_run(workflow_id):
                 SELECT LOG_DTTM, ORIGIN, MESSAGE
                 FROM {config.RUN_LOG_TABLE}
                 WHERE RUN_ID = %(run_id)s
-                  AND MESSAGE LIKE 'ERROR:%'
+                  AND MESSAGE LIKE %(error_pattern)s
                 ORDER BY LOG_DTTM
                 """,
-                {"run_id": run_id},
+                {"run_id": run_id, "error_pattern": "ERROR:%"},
             ))
         except Exception:
             errors = []

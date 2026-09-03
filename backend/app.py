@@ -1255,7 +1255,7 @@ def bind_request_context():
     if request.path.startswith("/api/") and request.path != "/api/health":
         _renew_activity_lease()
     g.activity_log_id = None
-    if request.path not in ("/api/admin/activity-log", "/api/session"):
+    if request.path not in ("/api/admin/activity-log", "/api/admin/activity-log/download", "/api/session"):
         category = "SYSTEM" if request.path in ("/api/health", "/api/activity") else "USER"
         g.activity_log_id = activity_journal.start(
             category,
@@ -1316,7 +1316,42 @@ def activity():
 @app.route("/api/admin/activity-log")
 def admin_activity_log():
     limit = max(1, min(int(request.args.get("limit") or 500), 2000))
-    return jsonify({"ok": True, "activities": activity_journal.snapshot(limit), "generatedAt": _now_iso()})
+    return jsonify({
+        "ok": True,
+        "activities": activity_journal.snapshot(limit),
+        **activity_journal.diagnostics(),
+        "generatedAt": _now_iso(),
+    })
+
+
+@app.route("/api/admin/activity-log/download")
+def download_activity_log():
+    rows = activity_journal.snapshot_all()
+    lines = []
+    for item in rows:
+        actor = item.get("actor") or {}
+        details = item.get("details") or {}
+        duration = "-" if item.get("durationMs") is None else f"{item.get('durationMs')}ms"
+        line = " ".join([
+            str(item.get("startedAt") or "-"),
+            f"[{item.get('category') or 'APPLICATION'}]",
+            str(item.get("status") or "UNKNOWN"),
+            duration,
+            str(actor.get("userName") or actor.get("displayName") or "BACKEND"),
+            str(item.get("action") or "ACTIVITY"),
+            str(item.get("label") or ""),
+            json.dumps(details, default=str, separators=(",", ":")),
+        ])
+        if item.get("error"):
+            line += f" error={json.dumps(str(item.get('error')))}"
+        lines.append(line)
+    body = "\n".join(lines) + ("\n" if lines else "")
+    filename = datetime.now(timezone.utc).strftime("kumo-application-log-%Y%m%d-%H%M%SZ.log")
+    return Response(
+        body,
+        mimetype="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def _health_snapshot():
@@ -2026,8 +2061,11 @@ def workflow_dag(workflow_id):
         return jsonify({"ok": True, "run": {"RUN_ID": "mock-run", "STATUS": "RUNNING"}, "nodes": [], "edges": [], "errors": []})
     actor = _actor_context()
     try:
-        result = repo.load_dag_run(workflow_id)
-        _record_interaction("VIEW_DAG_RUN", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, response={"ok": True})
+        # The DAG data and its audit records are all application-owned, so reuse
+        # one service-context Snowflake connection for the complete request.
+        with sf.connection_scope(use_warehouse=True, include_context=True, force_service=True):
+            result = repo.load_dag_run(workflow_id)
+            _record_interaction("VIEW_DAG_RUN", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, response={"ok": True})
         return jsonify({"ok": True, **result})
     except Exception as exc:
         _record_interaction("VIEW_DAG_RUN", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, status="FAILED", success=False, error_message=str(exc))

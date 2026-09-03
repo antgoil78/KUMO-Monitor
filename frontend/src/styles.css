@@ -338,8 +338,12 @@ h2, h3 { color: var(--text-strong); margin: 0; }
 .admin-client-table td strong { color: white; }
 .admin-client-table td small { margin-top: 3px; color: var(--muted2); }
 .admin-log-title { align-items: center; }
-.admin-log-actions { display: flex; gap: 8px; align-items: center; }
+.admin-log-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .admin-log-actions select { height: 36px; border: 1px solid rgba(105,139,255,.3); border-radius: 10px; background: rgba(9,23,55,.96); color: white; padding: 0 10px; font-size: 10px; }
+.admin-log-actions .button { height: 36px; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; text-decoration: none; }
+.admin-log-limit { display: flex; align-items: center; gap: 7px; }
+.admin-log-limit label { color: var(--muted); font-size: 10px; }
+.admin-log-limit input { width: 78px; height: 36px; border: 1px solid rgba(105,139,255,.3); border-radius: 10px; background: rgba(9,23,55,.96); color: white; padding: 0 9px; }
 .admin-log-summary { position: relative; z-index: 1; display: flex; align-items: center; justify-content: flex-end; gap: 7px; margin: -8px 0 10px; color: var(--muted2); font-size: 9px; }
 .admin-log-summary span:first-child { margin-right: auto; }
 .admin-log-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px var(--green); }

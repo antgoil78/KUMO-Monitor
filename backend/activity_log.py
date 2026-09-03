@@ -12,7 +12,8 @@ def _now_iso():
 class ActivityJournal:
     def __init__(self, max_entries=2000):
         self._lock = threading.RLock()
-        self._entries = deque(maxlen=max(100, int(max_entries)))
+        self._max_entries = max(100, int(max_entries))
+        self._entries = deque(maxlen=self._max_entries)
 
     def start(self, category, action, label, details=None, actor=None):
         normalized_category = str(category or "APPLICATION").upper()
@@ -60,13 +61,24 @@ class ActivityJournal:
         return activity_id
 
     def snapshot(self, limit=500):
-        limit = max(1, min(int(limit or 500), 2000))
+        limit = max(1, min(int(limit or 500), self._max_entries))
         with self._lock:
             rows = list(self._entries)[-limit:]
             return [
                 {k: v for k, v in dict(item).items() if not str(k).startswith("_")}
                 for item in reversed(rows)
             ]
+
+    def snapshot_all(self):
+        with self._lock:
+            return [
+                {k: v for k, v in dict(item).items() if not str(k).startswith("_")}
+                for item in self._entries
+            ]
+
+    def diagnostics(self):
+        with self._lock:
+            return {"totalAvailable": len(self._entries), "retentionLimit": self._max_entries}
 
 
 activity_journal = ActivityJournal()
