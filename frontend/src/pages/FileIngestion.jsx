@@ -110,7 +110,24 @@ function OverviewTable({ rows, onOpenDetail, showRaw, rawRows }) {
               const isExpanded = expanded.has(row.PKG_GROUP_NAME)
               const parentRaw = rawRows.get(`${row.PKG_GROUP_NAME}|`) || {}
               const parent = <OverviewRow key={row.PKG_GROUP_NAME} row={row} rawRow={parentRaw} showRaw={showRaw} expanded={isExpanded} onToggle={() => toggle(row.PKG_GROUP_NAME)} onOpenDetail={onOpenDetail} />
-              const children = isExpanded ? (row.sources || []).map(source => <OverviewRow key={`${row.PKG_GROUP_NAME}-${source.SOURCE_ID}`} row={source} rawRow={rawRows.get(`${row.PKG_GROUP_NAME}|${source.SOURCE_ID}`) || {}} showRaw={showRaw} source onOpenDetail={onOpenDetail} />) : []
+              const configuredSources = row.sources || []
+              const configuredIds = new Set(configuredSources.map(source => source.SOURCE_ID))
+              const rawOnlySources = Array.from(rawRows.keys())
+                .filter(key => key.startsWith(`${row.PKG_GROUP_NAME}|`) && key !== `${row.PKG_GROUP_NAME}|`)
+                .map(key => key.split('|')[1])
+                .filter(sourceId => sourceId && !configuredIds.has(sourceId))
+                .map(sourceId => ({
+                  SUBJECT_AREA: row.SUBJECT_AREA,
+                  PKG_GROUP_NAME: row.PKG_GROUP_NAME,
+                  SOURCE_ID: sourceId,
+                  STATUS_KIND: 'ATTENTION',
+                  STATUS_LABEL: 'RAW-only source',
+                  LATEST_STATUS_LIST: '',
+                  LATEST_LOG_ROWS: 0
+                }))
+              const childSources = [...configuredSources, ...rawOnlySources]
+                .sort((left, right) => String(left.SOURCE_ID).localeCompare(String(right.SOURCE_ID)))
+              const children = isExpanded ? childSources.map(source => <OverviewRow key={`${row.PKG_GROUP_NAME}-${source.SOURCE_ID}`} row={source} rawRow={rawRows.get(`${row.PKG_GROUP_NAME}|${source.SOURCE_ID}`) || {}} showRaw={showRaw} source onOpenDetail={onOpenDetail} />) : []
               return [parent, ...children]
             })}
           </tbody>
@@ -453,7 +470,69 @@ WHERE EXPECTED_FILE = $expected_file;
     return {
       title: 'Investigate the row-count mismatch',
       description: `The control metadata expects ${formatValue(file.EXPECTED_ROWS)} rows, while RAW contains ${formatValue(file.ACTUAL_ROWS)}. Run these read-only statements in a Snowflake worksheet to inspect the discrepancy.`,
-      sql: `SET file_name = '${fileName}';\n\n-- Expected and detected row counts from LIM metadata\nSELECT FILE_NAME, EXPECTED_ROWS, DATA_ROWS, ACTUAL_ROWS, ROWCOUNT_STATUS\nFROM KUMO_TST.RAW_LIM.RAW_LIM_META\nWHERE FILE_NAME = $file_name\nORDER BY LOADED_AT DESC;\n\n-- Inspect the rows loaded for this file\nSELECT *\nFROM ${rawTable}\nWHERE REGEXP_REPLACE(DW_FILE_NM, '\\\\.gz$', '', 1, 0, 'i') = $file_name\nLIMIT 200;\n\n-- Aggregate the total loaded row count\nSELECT REGEXP_REPLACE(DW_FILE_NM, '\\\\.gz$', '', 1, 0, 'i') AS FILE_NAME, COUNT(*) AS ACTUAL_ROW_COUNT\nFROM ${rawTable}\nWHERE REGEXP_REPLACE(DW_FILE_NM, '\\\\.gz$', '', 1, 0, 'i') = $file_name\nGROUP BY 1;`
+      warning: 'The duplicate-removal DELETE is commented out. Review which physical copy should be retained before running it.',
+      sql: `SET file_name = '${fileName}';
+
+-- Canonical LIM filename parser (physical files may have a timestamp suffix)
+-- Example: <canonical>_20260707123948.gz
+
+-- 1. Expected and detected row counts from LIM metadata
+SELECT FILE_NAME, EXPECTED_ROWS, DATA_ROWS, ACTUAL_ROWS, ROWCOUNT_STATUS
+FROM KUMO_TST.RAW_LIM.RAW_LIM_META
+WHERE FILE_NAME = $file_name
+QUALIFY RUN_DTTM = MAX(RUN_DTTM) OVER (PARTITION BY FILE_NAME);
+
+-- 2. List every physical file that maps to this canonical file
+SELECT DW_FILE_NM, DW_FILE_CHECK_SUM, MIN(DW_LOAD_DTTM) AS LOADED_AT,
+       COUNT(*) AS PHYSICAL_ROWS,
+       COUNT_IF(SUBSTR(TRIM(DATA), 1, 2) = '00') AS HEADER_ROWS,
+       COUNT_IF(SUBSTR(TRIM(DATA), 1, 2) = '10') AS DATA_ROWS,
+       COUNT_IF(SUBSTR(TRIM(DATA), 1, 2) = '99') AS FOOTER_ROWS
+FROM ${rawTable}
+WHERE REGEXP_SUBSTR(REGEXP_SUBSTR(DW_FILE_NM, '[^/]+$'),
+      '^[A-Z0-9]{10}_[0-9]{3}_[0-9]{3}_0000_[0-9]{9}_[0-9]{8}') = $file_name
+GROUP BY DW_FILE_NM, DW_FILE_CHECK_SUM
+ORDER BY LOADED_AT DESC;
+
+-- 3. Inspect actual records, separated by physical file
+SELECT DW_FILE_NM, DW_FILE_ROW_NUMBER, SUBSTR(TRIM(DATA), 1, 2) AS RECORD_TYPE, DATA
+FROM ${rawTable}
+WHERE REGEXP_SUBSTR(REGEXP_SUBSTR(DW_FILE_NM, '[^/]+$'),
+      '^[A-Z0-9]{10}_[0-9]{3}_[0-9]{3}_0000_[0-9]{9}_[0-9]{8}') = $file_name
+ORDER BY DW_FILE_NM, DW_FILE_ROW_NUMBER
+LIMIT 500;
+
+-- 4. Identify duplicate physical copies; DUPLICATE_NUMBER 1 is retained
+WITH PHYSICAL_FILES AS (
+  SELECT DW_FILE_NM, DW_FILE_CHECK_SUM, MIN(DW_LOAD_DTTM) AS LOADED_AT,
+         COUNT(*) AS PHYSICAL_ROWS
+  FROM ${rawTable}
+  WHERE REGEXP_SUBSTR(REGEXP_SUBSTR(DW_FILE_NM, '[^/]+$'),
+        '^[A-Z0-9]{10}_[0-9]{3}_[0-9]{3}_0000_[0-9]{9}_[0-9]{8}') = $file_name
+  GROUP BY DW_FILE_NM, DW_FILE_CHECK_SUM
+)
+SELECT *, ROW_NUMBER() OVER (ORDER BY LOADED_AT DESC, DW_FILE_NM DESC) AS DUPLICATE_NUMBER
+FROM PHYSICAL_FILES
+ORDER BY DUPLICATE_NUMBER;
+
+-- 5. Remove older duplicate physical copies, retaining the newest copy
+-- DELETE FROM ${rawTable} target
+-- USING (
+--   SELECT DW_FILE_NM
+--   FROM (
+--     SELECT DW_FILE_NM,
+--            ROW_NUMBER() OVER (ORDER BY MIN(DW_LOAD_DTTM) DESC, DW_FILE_NM DESC) AS COPY_NUMBER
+--     FROM ${rawTable}
+--     WHERE REGEXP_SUBSTR(REGEXP_SUBSTR(DW_FILE_NM, '[^/]+$'),
+--           '^[A-Z0-9]{10}_[0-9]{3}_[0-9]{3}_0000_[0-9]{9}_[0-9]{8}') = $file_name
+--     GROUP BY DW_FILE_NM
+--   )
+--   WHERE COPY_NUMBER > 1
+-- ) duplicates
+-- WHERE target.DW_FILE_NM = duplicates.DW_FILE_NM;
+
+-- 6. Refresh metadata after removal, then rerun the READY workflow
+-- CALL KUMO_ADMIN.WORKFLOW_MANAGER.SP_RAW_LIM_META_REFRESH('${sqlString(file.DLVY_SUBJECT_AREA_ID)}');`
     }
   }
 
