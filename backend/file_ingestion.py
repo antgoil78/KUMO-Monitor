@@ -506,10 +506,16 @@ def _load_raw_detail(group_name):
     meta_rows = sf.query_service(
         f"""
         SELECT RAW_TABLE,
+               ORIGINAL_FILE_NAME,
                FILE_NAME,
+               FILE_KEY,
+               CONTROL_FILE_NAME,
                FILE_TYPE,
                PKG_GROUP_NAME,
                DLVY_SOURCE_ID,
+               DLVY_SUBJECT_AREA_ID,
+               DLVY_LIM_OBJ_SEQ_NO,
+               DLVY_LIM_OBJ_VER_NO,
                DLVY_PKG_ID,
                DLVY_PKG_YEAR,
                DLVY_PKG_YEAR_SEQ_NO,
@@ -521,11 +527,11 @@ def _load_raw_detail(group_name):
                IS_VALID_SEQUENCE,
                ALL_SOURCES_FL,
                EXPECTED_ROWS,
+               DATA_ROWS,
                ACTUAL_ROWS,
                LOADED_AT
         FROM {RAW_LIM_META_TABLE}
         WHERE PKG_GROUP_NAME = %(group_name)s
-          AND UPPER(COALESCE(FILE_TYPE, '')) <> 'CONTROL'
         ORDER BY DLVY_END_DATE DESC, DLVY_SOURCE_ID, FILE_NAME
         """,
         params={"group_name": group_name},

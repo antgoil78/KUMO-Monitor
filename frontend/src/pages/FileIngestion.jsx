@@ -294,6 +294,11 @@ function firstAttentionFile(logRows, rawRows) {
     || logRows.find(row => ATTENTION_STATUSES.has(row.STATUS))
   const candidates = rawRows.filter(fileNeedsAttention)
   if (!firstAttention) return candidates[0] || null
+  const referencedFile = String(firstAttention.REASON || '').match(/(?:ROWCOUNT_MISMATCH|DATAROW_MISMATCH|INVALID_SEQUENCE|MISSING(?:_FILE)?)=([^;\s(]+)/i)?.[1]
+  if (referencedFile) {
+    const exactFile = rawRows.find(row => sameValue(row.FILE_NAME, referencedFile))
+    if (exactFile) return exactFile
+  }
   return candidates.find(row =>
     sameValue(row.DLVY_SOURCE_ID, firstAttention.DLVY_SOURCE_ID)
     && sameValue(row.DLVY_PKG_ID, firstAttention.DLVY_PKG_ID)
@@ -361,8 +366,70 @@ function previousSequence(value) {
 
 function resolutionFor(error, file) {
   const reason = String(error?.REASON || '').toUpperCase()
+  const isMissing = reason.includes('MISSING') || file?.RECEIVED_FL === false
   const isSequence = reason.includes('INVALID_SEQUENCE') || file?.IS_VALID_SEQUENCE === false
   const isRowcount = reason.includes('ROWCOUNT') || Boolean(file?.ROWCOUNT_STATUS && file.ROWCOUNT_STATUS !== 'ROWCOUNT_OK')
+
+  if (isMissing && file) {
+    const expectedFile = sqlString(file.FILE_NAME)
+    const controlFile = sqlString(file.CONTROL_FILE_NAME)
+    const rawTable = /^[A-Z0-9_$.]+$/i.test(file.RAW_TABLE || '') ? file.RAW_TABLE : 'KUMO_TST.RAW_LIM.RAW_LIM_CUAR'
+    const subject = sqlString(file.DLVY_SUBJECT_AREA_ID || 'CUAR')
+    return {
+      title: 'Remove the file from the control-file expectation',
+      description: `${expectedFile} is expected because it is listed in control file ${controlFile || '—'}. The current metadata snapshot should not be edited directly; it will be recreated by the next metadata refresh.`,
+      warning: 'Only remove the control record after confirming that the source intentionally omitted this file. The DELETE statement is commented out until it has been reviewed.',
+      sql: `SET expected_file = '${expectedFile}';
+SET control_file = '${controlFile}';
+
+-- 1. Confirm the current missing-file metadata
+SELECT FILE_NAME, CONTROL_FILE_NAME, DLVY_SOURCE_ID, DLVY_PKG_ID,
+       DLVY_PKG_YEAR, DLVY_PKG_YEAR_SEQ_NO, DLVY_END_DATE,
+       EXPECTED_BY_CONTROL_FL, RECEIVED_FL, RUN_DTTM
+FROM KUMO_TST.RAW_LIM.RAW_LIM_META
+WHERE FILE_NAME = $expected_file
+ORDER BY RUN_DTTM DESC;
+
+-- 2. Parse the control record that creates this expectation
+WITH CONTROL_RECORDS AS (
+  SELECT DW_FILE_NM, DW_FILE_ROW_NUMBER, DATA,
+         UPPER(TRIM(SUBSTR(DATA, 3, 3))) ||
+         UPPER(TRIM(SUBSTR(DATA, 6, 4))) ||
+         TRIM(SUBSTR(DATA, 22, 3)) || '_' ||
+         TRIM(SUBSTR(DATA, 25, 3)) || '_' ||
+         TRIM(SUBSTR(DATA, 10, 3)) || '_0000_' ||
+         TRIM(SUBSTR(DATA, 13, 9)) || '_' ||
+         TO_CHAR(COALESCE(
+           TRY_TO_DATE(SUBSTR(DATA, 38, 10), 'YYYY-MM-DD'),
+           TRY_TO_DATE(SUBSTR(DATA, 38, 8), 'YYYYMMDD')
+         ), 'YYYYMMDD') AS EXPECTED_FILE
+  FROM ${rawTable}
+  WHERE SUBSTR(TRIM(DATA), 1, 2) = '10'
+    AND REGEXP_REPLACE(REGEXP_SUBSTR(DW_FILE_NM, '[^/]+$'), '\\\\.gz$', '', 1, 0, 'i') = $control_file
+)
+SELECT *
+FROM CONTROL_RECORDS
+WHERE EXPECTED_FILE = $expected_file;
+
+-- 3. After reviewing the SELECT above, remove only that expectation
+-- DELETE FROM ${rawTable}
+-- WHERE SUBSTR(TRIM(DATA), 1, 2) = '10'
+--   AND REGEXP_REPLACE(REGEXP_SUBSTR(DW_FILE_NM, '[^/]+$'), '\\\\.gz$', '', 1, 0, 'i') = $control_file
+--   AND UPPER(TRIM(SUBSTR(DATA, 3, 3))) ||
+--       UPPER(TRIM(SUBSTR(DATA, 6, 4))) ||
+--       TRIM(SUBSTR(DATA, 22, 3)) || '_' ||
+--       TRIM(SUBSTR(DATA, 25, 3)) || '_' ||
+--       TRIM(SUBSTR(DATA, 10, 3)) || '_0000_' ||
+--       TRIM(SUBSTR(DATA, 13, 9)) || '_' ||
+--       TO_CHAR(COALESCE(
+--         TRY_TO_DATE(SUBSTR(DATA, 38, 10), 'YYYY-MM-DD'),
+--         TRY_TO_DATE(SUBSTR(DATA, 38, 8), 'YYYYMMDD')
+--       ), 'YYYYMMDD') = $expected_file;
+
+-- 4. Rebuild metadata and rerun the READY workflow afterward
+-- CALL KUMO_ADMIN.WORKFLOW_MANAGER.SP_RAW_LIM_META_REFRESH('${subject}');`
+    }
+  }
 
   if (isSequence) {
     const source = sqlString(error.DLVY_SOURCE_ID)
