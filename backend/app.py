@@ -2067,7 +2067,7 @@ def workflow_dag(workflow_id):
         # The DAG data and its audit records are all application-owned, so reuse
         # one service-context Snowflake connection for the complete request.
         with sf.connection_scope(use_warehouse=True, include_context=True, force_service=True):
-            result = repo.load_dag_run(workflow_id)
+            result = repo.load_dag_run(workflow_id, request.args.get("runId"))
             _record_interaction("VIEW_DAG_RUN", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, response={"ok": True})
         return jsonify({"ok": True, **result})
     except Exception as exc:

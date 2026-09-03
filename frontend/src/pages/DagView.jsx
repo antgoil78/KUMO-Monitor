@@ -65,9 +65,9 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
     let cancelled = false
     setDag(null)
     setError(null)
-    api.workflowDag(id).then(data => !cancelled && setDag(data)).catch(err => !cancelled && setError(err.message))
+    api.workflowDag(id, workflow?.lastRunId).then(data => !cancelled && setDag(data)).catch(err => !cancelled && setError(err.message))
     return () => { cancelled = true }
-  }, [id])
+  }, [id, workflow?.lastRunId])
 
   const allNodes = dag?.nodes || []
   const visibleNodes = useMemo(() => {

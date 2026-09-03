@@ -1671,17 +1671,26 @@ def clone_workflow(workflow_id):
     return get_workflow_detail(new_id)
 
 
-def load_dag_run(workflow_id):
+def load_dag_run(workflow_id, run_id=None):
+    run_filter = "AND RUN_ID = %(run_id)s" if run_id else ""
+    params = {"workflow_id": workflow_id}
+    if run_id:
+        params["run_id"] = run_id
     h = normalize_rows(_query(
         f"""
         SELECT RUN_ID, STATUS
         FROM {config.T_HISTORY}
         WHERE WORKFLOW_ID = %(workflow_id)s
-          AND STATUS IN ('INITIATING','QUEUED','RUNNING','SUCCESS','FAILED','COMPLETED')
-        ORDER BY COALESCE(START_TIME, REQUESTED_AT, END_TIME) DESC NULLS LAST
+          AND UPPER(COALESCE(STATUS, '')) IN (
+            'INITIATING','QUEUED','PENDING','REQUESTED','SCHEDULED','STARTING',
+            'RUNNING','IN_PROGRESS','EXECUTING','SUCCESS','SUCCEEDED','FAILED',
+            'FAILURE','ERROR','COMPLETED','OK','CANCELLED','CANCELED','SKIPPED'
+          )
+          {run_filter}
+        ORDER BY COALESCE(REQUESTED_AT, START_TIME, END_TIME) DESC NULLS LAST, RUN_ID DESC
         LIMIT 1
         """,
-        {"workflow_id": workflow_id},
+        params,
     ))
     if not h:
         return {"workflowId": workflow_id, "run": None, "nodes": [], "edges": [], "errors": []}

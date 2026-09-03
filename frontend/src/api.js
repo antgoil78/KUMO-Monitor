@@ -91,7 +91,9 @@ export const api = {
     body: JSON.stringify({ enabled })
   }),
   workflowHistory: (workflowId, limit = 100) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/history?limit=${limit}`),
-  workflowDag: (workflowId) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/dag`),
+  workflowDag: (workflowId, runId = '') => requestJson(
+    `/api/workflows/${encodeURIComponent(workflowId)}/dag${runId ? `?runId=${encodeURIComponent(runId)}` : ''}`
+  ),
   history: (limit = 200) => requestJson(`/api/history?limit=${limit}`),
   executionLog: (runId, workflowId = '') => requestJson(`/api/executions/${encodeURIComponent(runId)}/log${workflowId ? `?workflowId=${encodeURIComponent(workflowId)}` : ''}`),
   notifications: () => requestJson('/api/notification-admin'),
