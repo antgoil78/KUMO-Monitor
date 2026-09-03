@@ -494,7 +494,38 @@ WHERE REGEXP_SUBSTR(REGEXP_SUBSTR(DW_FILE_NM, '[^/]+$'),
 GROUP BY DW_FILE_NM, DW_FILE_CHECK_SUM
 ORDER BY LOADED_AT DESC;
 
--- 3. Inspect actual records, separated by physical file
+-- 3. Compare physical files by row count and complete-content signature
+-- Matching CONTENT_SIGNATURE values indicate identical file contents.
+WITH PHYSICAL_SIGNATURES AS (
+  SELECT DW_FILE_NM, DW_FILE_CHECK_SUM,
+         COUNT(*) AS PHYSICAL_ROWS,
+         HASH_AGG(DATA) AS CONTENT_SIGNATURE
+  FROM ${rawTable}
+  WHERE REGEXP_SUBSTR(REGEXP_SUBSTR(DW_FILE_NM, '[^/]+$'),
+        '^[A-Z0-9]{10}_[0-9]{3}_[0-9]{3}_0000_[0-9]{9}_[0-9]{8}') = $file_name
+  GROUP BY DW_FILE_NM, DW_FILE_CHECK_SUM
+)
+SELECT *,
+       COUNT(*) OVER () AS MATCHING_PHYSICAL_FILES,
+       COUNT(DISTINCT CONTENT_SIGNATURE) OVER () AS DISTINCT_CONTENT_VERSIONS,
+       IFF(COUNT(DISTINCT CONTENT_SIGNATURE) OVER () = 1,
+           'IDENTICAL COPIES', 'CONTENT DIFFERS') AS COMPARISON
+FROM PHYSICAL_SIGNATURES
+ORDER BY DW_FILE_NM;
+
+-- 4. Show records repeated across two or more matching physical files
+SELECT DATA,
+       COUNT(DISTINCT DW_FILE_NM) AS FILE_COPIES,
+       COUNT(*) AS TOTAL_OCCURRENCES,
+       LISTAGG(DISTINCT DW_FILE_NM, '\n') WITHIN GROUP (ORDER BY DW_FILE_NM) AS FOUND_IN_FILES
+FROM ${rawTable}
+WHERE REGEXP_SUBSTR(REGEXP_SUBSTR(DW_FILE_NM, '[^/]+$'),
+      '^[A-Z0-9]{10}_[0-9]{3}_[0-9]{3}_0000_[0-9]{9}_[0-9]{8}') = $file_name
+GROUP BY DATA
+HAVING COUNT(DISTINCT DW_FILE_NM) > 1
+ORDER BY FILE_COPIES DESC, TOTAL_OCCURRENCES DESC;
+
+-- 5. Inspect actual records, separated by physical file
 SELECT DW_FILE_NM, DW_FILE_ROW_NUMBER, SUBSTR(TRIM(DATA), 1, 2) AS RECORD_TYPE, DATA
 FROM ${rawTable}
 WHERE REGEXP_SUBSTR(REGEXP_SUBSTR(DW_FILE_NM, '[^/]+$'),
@@ -502,7 +533,7 @@ WHERE REGEXP_SUBSTR(REGEXP_SUBSTR(DW_FILE_NM, '[^/]+$'),
 ORDER BY DW_FILE_NM, DW_FILE_ROW_NUMBER
 LIMIT 500;
 
--- 4. Identify duplicate physical copies; DUPLICATE_NUMBER 1 is retained
+-- 6. Identify duplicate physical copies; DUPLICATE_NUMBER 1 is retained
 WITH PHYSICAL_FILES AS (
   SELECT DW_FILE_NM, DW_FILE_CHECK_SUM, MIN(DW_LOAD_DTTM) AS LOADED_AT,
          COUNT(*) AS PHYSICAL_ROWS
@@ -515,7 +546,7 @@ SELECT *, ROW_NUMBER() OVER (ORDER BY LOADED_AT DESC, DW_FILE_NM DESC) AS DUPLIC
 FROM PHYSICAL_FILES
 ORDER BY DUPLICATE_NUMBER;
 
--- 5. Remove older duplicate physical copies, retaining the newest copy
+-- 7. Remove older duplicate physical copies, retaining the newest copy
 -- DELETE FROM ${rawTable} target
 -- USING (
 --   SELECT DW_FILE_NM
@@ -531,7 +562,7 @@ ORDER BY DUPLICATE_NUMBER;
 -- ) duplicates
 -- WHERE target.DW_FILE_NM = duplicates.DW_FILE_NM;
 
--- 6. Refresh metadata after removal, then rerun the READY workflow
+-- 8. Refresh metadata after removal, then rerun the READY workflow
 -- CALL KUMO_ADMIN.WORKFLOW_MANAGER.SP_RAW_LIM_META_REFRESH('${sqlString(file.DLVY_SUBJECT_AREA_ID)}');`
     }
   }
