@@ -100,6 +100,18 @@ function FriendlyJson({ value }) {
   )
 }
 
+function ParentModels({ value }) {
+  const structured = structuredValue(value)
+  const source = Array.isArray(structured) ? structured : String(value || '').split(';')
+  const parents = source.map(parent => String(parent || '').trim()).filter(Boolean)
+  if (!parents.length) return <span>—</span>
+  return (
+    <div className="execution-parent-list">
+      {parents.map((parent, index) => <code key={`${parent}-${index}`}>{parent}</code>)}
+    </div>
+  )
+}
+
 function LogTable({ rows, sourceKey, onViewValue }) {
   const columns = columnsFor(rows, sourceKey)
   if (!rows.length) return <div className="execution-log-empty">No rows found for this run.</div>
@@ -110,15 +122,15 @@ function LogTable({ rows, sourceKey, onViewValue }) {
         <thead><tr>{columns.map(column => <th key={column}>{column.replaceAll('_', ' ')}</th>)}</tr></thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={`${row.LOG_ID || row.SRT || row.LOG_DTTM || index}-${index}`} className={`execution-log-row ${logTone(row.STATUS || row.TYPE || row.ERROR_MESSAGE || row.MESSAGE)}`}>
+            <tr key={`${row.LOG_ID || row.SRT || row.LOG_DTTM || index}-${index}`} className={`execution-log-row ${logTone(row.TYPE)}`}>
               {columns.map(column => {
                 const value = row[column]
                 const structured = structuredValue(value)
-                const opensViewer = ['LATEST_SQL', 'SQL'].includes(column) || structured || String(value ?? '').length > 240
-                const tone = ['STATUS', 'TYPE', 'MESSAGE', 'ERROR_MESSAGE'].includes(column) ? logTone(value) : ''
+                const opensViewer = column !== 'MODEL_NAME_PARENT' && (['LATEST_SQL', 'SQL'].includes(column) || structured || String(value ?? '').length > 240)
+                const tone = column === 'TYPE' ? logTone(value) : ''
                 return (
-                  <td key={column} className={`${['MESSAGE', 'ERROR_MESSAGE'].includes(column) ? 'execution-log-message-cell' : opensViewer ? 'execution-view-cell' : ''} ${tone}`}>
-                    {column === 'STATUS' ? <StatusBadge status={value} /> : structured ? <FriendlyJson value={value} /> : <span>{opensViewer ? valuePreview(value) : displayValue(column, value)}</span>}
+                  <td key={column} className={`${['MESSAGE', 'ERROR_MESSAGE'].includes(column) ? 'execution-log-message-cell' : opensViewer ? 'execution-view-cell' : ''} ${column === 'MODEL_NAME_PARENT' ? 'execution-parent-cell' : ''} ${tone}`}>
+                    {column === 'STATUS' ? <StatusBadge status={value} /> : column === 'MODEL_NAME_PARENT' ? <ParentModels value={value} /> : structured ? <FriendlyJson value={value} /> : <span>{opensViewer ? valuePreview(value) : displayValue(column, value)}</span>}
                     {opensViewer && <button type="button" className="execution-view-value" onClick={() => onViewValue({ column, value, modelName: row.MODEL_NAME })}>View</button>}
                   </td>
                 )

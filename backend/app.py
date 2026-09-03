@@ -2047,8 +2047,9 @@ def workflow_history(workflow_id):
         return jsonify({"ok": True, "source": "mock", "rows": [r for r in MOCK_HISTORY if r.get("WORKFLOW_ID") == workflow_id]})
     actor = _actor_context()
     try:
-        rows = repo.load_workflow_history(workflow_id, limit)
-        _record_interaction("VIEW_WORKFLOW_HISTORY", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, payload={"limit": limit}, response={"rowCount": len(rows)})
+        with sf.connection_scope(use_warehouse=True, include_context=True, force_service=True):
+            rows = repo.load_workflow_history(workflow_id, limit)
+            _record_interaction("VIEW_WORKFLOW_HISTORY", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, payload={"limit": limit}, response={"rowCount": len(rows)})
         return jsonify({"ok": True, "source": "snowflake", "rows": rows})
     except Exception as exc:
         _record_interaction("VIEW_WORKFLOW_HISTORY", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, status="FAILED", success=False, error_message=str(exc), payload={"limit": limit})
@@ -2078,7 +2079,8 @@ def history():
     if config.USE_MOCK or not sf.is_configured():
         return jsonify({"ok": True, "source": "mock", "rows": MOCK_HISTORY})
     try:
-        rows = repo.load_history(limit)
+        with sf.connection_scope(use_warehouse=True, include_context=True, force_service=True):
+            rows = repo.load_history(limit)
         return jsonify({"ok": True, "source": "snowflake", "rows": rows})
     except Exception as exc:
         app.logger.exception("Failed to load history")
@@ -2102,8 +2104,9 @@ def execution_log(run_id):
         })
     actor = _actor_context()
     try:
-        result = repo.load_execution_log(run_id, workflow_id)
-        _record_interaction("VIEW_EXECUTION_LOG", actor=actor, entity_type="RUN", entity_id=run_id, workflow_id=workflow_id, response={"ok": True})
+        with sf.connection_scope(use_warehouse=True, include_context=True, force_service=True):
+            result = repo.load_execution_log(run_id, workflow_id)
+            _record_interaction("VIEW_EXECUTION_LOG", actor=actor, entity_type="RUN", entity_id=run_id, workflow_id=workflow_id, response={"ok": True})
         return jsonify({"ok": True, "source": "snowflake", **result})
     except Exception as exc:
         _record_interaction("VIEW_EXECUTION_LOG", actor=actor, entity_type="RUN", entity_id=run_id, workflow_id=workflow_id, status="FAILED", success=False, error_message=str(exc))

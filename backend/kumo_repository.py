@@ -1716,10 +1716,16 @@ def load_dag_run(workflow_id):
     seen_edges = set()
     for row in progress_rows:
         model = str(row.get("MODEL_NAME") or "")
-        parent = str(row.get("MODEL_NAME_PARENT") or "")
+        parent_value = row.get("MODEL_NAME_PARENT")
+        parents = parse_variant_array(parent_value)
+        if not parents:
+            parents = str(parent_value or "").split(";")
         status = str(row.get("STATUS") or "UNKNOWN")
         nodes.append({"id": model, "label": _short_model_name(model), "status": "ERROR" if model in error_models else status})
-        if parent and parent not in (model, "None"):
+        for parent_value in parents:
+            parent = str(parent_value or "").strip()
+            if not parent or parent == model or parent.lower() in ("none", "null"):
+                continue
             key = (parent, model)
             if key not in seen_edges:
                 seen_edges.add(key)
