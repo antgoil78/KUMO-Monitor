@@ -493,6 +493,14 @@ def _load_overview(history_days):
 
             cur.execute(
                 f"""
+                WITH LATEST_PACKAGE_RUNS AS (
+                    SELECT *
+                    FROM {SET_READY_HISTORY_TABLE}
+                    WHERE PKG_GROUP_NAME IN ({placeholders})
+                    QUALIFY CONTROL_DATE = MAX(CONTROL_DATE) OVER (
+                        PARTITION BY PKG_GROUP_NAME
+                    )
+                )
                 SELECT PKG_GROUP_NAME,
                        IFF(GROUPING(UPPER(DLVY_SOURCE_ID)) = 1, NULL, UPPER(DLVY_SOURCE_ID)) AS SOURCE_ID,
                        COUNT(*) AS LATEST_LOG_ROWS,
@@ -500,8 +508,7 @@ def _load_overview(history_days):
                        COUNT_IF(STATUS IN ('STOPPED', 'FAILED', 'SKIPPED', 'BLOCKED')) AS LATEST_ATTENTION_ROWS,
                        LISTAGG(DISTINCT STATUS, ', ') WITHIN GROUP (ORDER BY STATUS) AS LATEST_STATUS_LIST,
                        MAX(CONTROL_DATE) AS LATEST_CONTROL_DATE
-                FROM {SET_READY_LATEST_TABLE}
-                WHERE PKG_GROUP_NAME IN ({placeholders})
+                FROM LATEST_PACKAGE_RUNS
                 GROUP BY GROUPING SETS ((PKG_GROUP_NAME), (PKG_GROUP_NAME, UPPER(DLVY_SOURCE_ID)))
                 """,
                 params,
@@ -614,6 +621,14 @@ def _load_raw_detail(group_name):
 def _load_ready_detail(group_name):
     rows = sf.query_service(
         f"""
+        WITH LATEST_PACKAGE_RUN AS (
+            SELECT *
+            FROM {SET_READY_HISTORY_TABLE}
+            WHERE PKG_GROUP_NAME = %(group_name)s
+            QUALIFY CONTROL_DATE = MAX(CONTROL_DATE) OVER (
+                PARTITION BY PKG_GROUP_NAME
+            )
+        )
         SELECT log.PKG_GROUP_NAME,
                log.DLVY_END_DATE,
                log.DLVY_SOURCE_ID,
@@ -626,12 +641,11 @@ def _load_ready_detail(group_name):
                log.CONTROL_DATE,
                cfg.DLVY_PKG_YEAR AS CONFIGURED_PKG_YEAR,
                cfg.DLVY_PKG_YEAR_SEQ_NO AS CONFIGURED_SEQUENCE
-        FROM {SET_READY_LATEST_TABLE} log
+        FROM LATEST_PACKAGE_RUN log
         LEFT JOIN {ADMIN_PKG_GROUP_SOURCE} cfg
           ON cfg.PKG_GROUP_NAME = log.PKG_GROUP_NAME
          AND UPPER(cfg.SOURCE_ID) = UPPER(log.DLVY_SOURCE_ID)
          AND cfg.ACTIVE_FL = TRUE
-        WHERE log.PKG_GROUP_NAME = %(group_name)s
         ORDER BY log.CONTROL_DATE DESC, log.DLVY_END_DATE DESC, log.DLVY_SOURCE_ID
         """,
         params={"group_name": group_name},
