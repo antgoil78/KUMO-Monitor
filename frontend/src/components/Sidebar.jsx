@@ -19,7 +19,6 @@ export default function Sidebar({ activePage, onNavigate }) {
           <div className="brand-subtitle">Monitor</div>
         </div>
       </div>
-orkflow Manager
       <div className="nav-label">Navigation</div>
       <nav className="nav-list" aria-label="Main navigation">
         {navItems.map(item => (
