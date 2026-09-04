@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fileIngestionApi } from '../fileIngestionApi.js'
+import PageHeader from '../components/PageHeader.jsx'
 import './LimReload.css'
 
 const modes = [
@@ -103,7 +104,7 @@ export default function LimReload() {
 
   return (
     <section className="page lim-reload-page">
-      <div className="lim-heading"><div><p className="eyebrow">RAW LIM / Load & Reload</p><h1>LIM Load / Reload</h1><p className="lim-subtitle">Load staged LIM files using their delivery end date parsed from the filename.</p></div><span className="reload-context">KUMO_ADMIN · KUMO_TST</span></div>
+      <PageHeader breadcrumb="RAW LIM / Load & Reload" title="LIM Load / Reload" subtitle="Load staged LIM files using their delivery end date parsed from the filename." actions={<span className="reload-context">KUMO_ADMIN · KUMO_TST</span>} />
       <form className="reload-layout" onSubmit={submit}>
         <div className="reload-card">
           <div className="reload-section"><label className="reload-label" htmlFor="lim-format">LIM subject area</label><select id="lim-format" value={form.limFormat} onChange={event => patch('limFormat', event.target.value)} disabled={subjectsLoading || !subjectAreas.length}><option value="">{subjectsLoading ? 'Loading subject areas…' : 'Select subject area'}</option>{subjectAreas.map(subject => <option key={subject} value={subject}>{subject}</option>)}</select><small>Discovered from KUMO_TST.RAW_LIM tables named RAW_LIM_&lt;SUBJECT&gt;.</small>{subjectsError && <div className="reload-validation">Could not load subject areas: {subjectsError}</div>}</div>

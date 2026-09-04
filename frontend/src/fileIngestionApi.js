@@ -63,6 +63,14 @@ export const fileIngestionApi = {
       timeoutMs: 5 * 60 * 1000
     }),
 
+  investigateRowcount: (groupName, fileName, sourceId) => {
+    const params = new URLSearchParams({ fileName })
+    if (sourceId) params.set('sourceId', sourceId)
+    return requestJson(`/api/file-ingestion/${encodeURIComponent(groupName)}/investigate-rowcount?${params.toString()}`, {
+      timeoutMs: 5 * 60 * 1000
+    })
+  },
+
   history: (groupName, historyDays = 30, sourceId) =>
     requestJson(
       `/api/file-ingestion/${encodeURIComponent(groupName)}/history?historyDays=${encodeURIComponent(historyDays)}${sourceId ? `&sourceId=${encodeURIComponent(sourceId)}` : ''}`,

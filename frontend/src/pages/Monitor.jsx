@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Background, Controls, MarkerType, MiniMap, ReactFlow } from '@xyflow/react'
 import dagre from '@dagrejs/dagre'
 import { api } from '../api.js'
+import PageHeader from '../components/PageHeader.jsx'
 import StatusBadge, { isWorkflowBusy, statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import { elapsedDuration, formatDateTime } from '../utils/time.js'
@@ -1309,14 +1310,7 @@ export default function Monitor({ onNavigate }) {
   }
   return (
     <section className="page monitor-page">
-      <div className="page-hero monitor-hero">
-        <div>
-          <p className="breadcrumb">Pages / Monitor</p>
-          <h1 className="page-heading">Workflow Monitor</h1>
-          <p className="page-subtitle">Live operational control for KUMO workflow runs, schedules and dependencies.</p>
-        </div>
-        <button className="button refresh-button" onClick={() => load(true)}>↻ Refresh now</button>
-      </div>
+      <PageHeader breadcrumb="Pages / Workflow Monitor" title="Workflow Monitor" subtitle="Live operational control for KUMO workflow runs, schedules and dependencies." actions={<button className="button refresh-button" onClick={() => load(true)}>↻ Refresh now</button>} />
       {error && <div className="alert error">{error}</div>}
       {payload?.error && <div className="alert warning">Backend fallback: {payload.error}</div>}
       {actionMessage && <div className="alert info">{actionMessage}</div>}

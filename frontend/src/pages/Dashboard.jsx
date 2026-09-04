@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api.js'
+import PageHeader from '../components/PageHeader.jsx'
 import StatusBadge, { statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import { formatDateTime } from '../utils/time.js'
@@ -338,12 +339,7 @@ export default function Dashboard() {
 
   return (
     <section className="page dashboard-page">
-      <div className="dashboard-topbar">
-        <div>
-          <p className="breadcrumb">Pages / Dashboard</p>
-          <h1>Dashboard</h1>
-        </div>
-        <div className="dashboard-top-actions">
+      <PageHeader breadcrumb="Pages / Dashboard" title="Dashboard" subtitle="Operational overview of KUMO workflows and platform health." actions={<div className="dashboard-top-actions">
           <div className="topbar-user" title={`${displayName} · ${role}`}>
             <span>{displayName.slice(0, 1).toUpperCase()}</span>
             <div><strong>{displayName}</strong><small>{role}</small></div>
@@ -363,8 +359,7 @@ export default function Dashboard() {
               {refreshOptions.map(seconds => <option key={seconds} value={seconds}>{seconds}s</option>)}
             </select>
           </label>
-        </div>
-      </div>
+        </div>} />
 
       {error && <div className="alert error">{error}</div>}
       {payload?.error && <div className="alert warning">Backend fallback: {payload.error}</div>}

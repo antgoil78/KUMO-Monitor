@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api.js'
+import PageHeader from '../components/PageHeader.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
 import { elapsedDuration, formatDateTime } from '../utils/time.js'
 import './History.css'
@@ -91,14 +92,7 @@ export default function History({ workflowName = '', workflowId = '', onNavigate
 
   return (
     <section className="page history-page">
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">KUMO Monitor</p>
-          <h1>History</h1>
-          <p className="page-subtitle">Run history by workflow, status and execution time.</p>
-        </div>
-        <button className="button" onClick={load}>Refresh</button>
-      </div>
+      <PageHeader breadcrumb="Pages / History" title="History" subtitle="Run history by workflow, status and execution time." actions={<button className="button" onClick={load}>↻ Refresh</button>} />
 
       {error && <div className="alert error">{error}</div>}
 

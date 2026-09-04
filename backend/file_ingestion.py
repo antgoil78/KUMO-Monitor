@@ -29,7 +29,23 @@ DEFAULT_HISTORY_DAYS = 30
 MAX_HISTORY_DAYS = 365
 LIM_DATABASE = os.getenv("KUMO_LIM_DATABASE", "KUMO_TST")
 LIM_ROLE = os.getenv("KUMO_LIM_ROLE", "KUMO_ADMIN")
+LIM_STAGE = os.getenv("KUMO_LIM_STAGE", "KUMO_TST.META.AZURE_LIM_STAGE")
 LIM_FORMAT_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,49}$")
+FQN_PATTERN = re.compile(r"^[A-Z][A-Z0-9_$]{0,254}(?:\.[A-Z][A-Z0-9_$]{0,254}){0,2}$")
+LIM_HEADER_FIELDS = (
+    ("DLVY_REC_TYPE_ID", 0, 2),
+    ("DLVY_SOURCE_ID", 2, 3),
+    ("DLVY_SUBJECT_AREA_ID", 5, 4),
+    ("DLVY_PKG_ID", 9, 3),
+    ("DLVY_PKG_YEAR", 12, 4),
+    ("DLVY_PKG_YEAR_SEQ_NO", 16, 5),
+    ("DLVY_LIM_OBJ_SEQ_NO", 21, 3),
+    ("DLVY_LIM_OBJ_VER_NO", 24, 3),
+    ("DLVY_START_DATE", 27, 10),
+    ("DLVY_END_DATE", 37, 10),
+    ("DLVY_COPY_NAME", 47, 10),
+    ("DLVY_DELTA_EVENT_TYPE", 57, 1),
+)
 
 
 def _json_error(error, status=500):
@@ -77,6 +93,13 @@ def _filter_source(rows, source_id):
         row for row in rows
         if str(row.get("DLVY_SOURCE_ID") or "").strip().upper() == source_id
     ]
+
+
+def _fqn(value, label):
+    value = str(value or "").strip().upper()
+    if not FQN_PATTERN.fullmatch(value):
+        raise ValueError(f"Invalid {label}.")
+    return value
 
 
 def _num(value):
@@ -914,6 +937,193 @@ def file_ingestion_ready(group_name):
         return _json_error(exc, 400)
     except Exception as exc:
         current_app.logger.exception("Failed to load READY LIM detail for %s", group_name)
+        return _json_error(exc, 500)
+
+
+@file_ingestion_bp.get("/api/file-ingestion/<path:group_name>/investigate-rowcount")
+def investigate_rowcount(group_name):
+    """Run sequential, read-only checks for one ROWCOUNT_MISMATCH file."""
+    try:
+        file_name = str(request.args.get("fileName") or "").strip()
+        if not file_name or len(file_name) > 500:
+            return _json_error("A valid fileName is required.", 400)
+        source_id = _source_id()
+
+        if config.USE_MOCK or not sf.is_configured():
+            return jsonify({"ok": True, "source": "mock", "fileName": file_name, "checks": []})
+
+        meta = normalize_rows(sf.query_service(
+            f"""
+            SELECT RAW_TABLE, FILE_NAME, EXPECTED_ROWS, ACTUAL_ROWS, DLVY_SOURCE_ID
+            FROM {RAW_LIM_META_TABLE}
+            WHERE PKG_GROUP_NAME = %(group_name)s
+              AND FILE_NAME = %(file_name)s
+              {"AND UPPER(DLVY_SOURCE_ID) = %(source_id)s" if source_id else ""}
+            ORDER BY RUN_DTTM DESC
+            LIMIT 1
+            """,
+            params={"group_name": group_name, "file_name": file_name, **({"source_id": source_id} if source_id else {})},
+            use_warehouse=True, include_context=True,
+        ))
+        if not meta:
+            return _json_error("The file was not found in the latest LIM metadata.", 404)
+
+        raw_table = _fqn(meta[0].get("RAW_TABLE"), "RAW table")
+        stage = _fqn(LIM_STAGE, "LIM stage")
+        canonical_pattern = (
+            "REGEXP_SUBSTR(REGEXP_SUBSTR(DW_FILE_NM, '[^/]+$'), "
+            "'^[A-Z0-9]{10}_[0-9]{3}_[0-9]{3}_0000_[0-9]{9}_[0-9]{8}')"
+        )
+        # A ROWCOUNT_MISMATCH is reported against the 000_000 control file.
+        # Duplicate-row checks must inspect its actual data files instead: same
+        # source/subject and package suffix, excluding the control object itself.
+        data_file_prefix = file_name[:7]
+        package_suffix = file_name[14:] if len(file_name) > 14 else ""
+        data_file_filter = (
+            f"{canonical_pattern} LIKE %(data_file_pattern)s "
+            f"AND {canonical_pattern} <> %(file_name)s"
+        )
+        investigation_params = {
+            "file_name": file_name,
+            "data_file_pattern": f"{data_file_prefix}%{package_suffix}",
+        }
+        physical_files = normalize_rows(sf.query_service(
+            f"""
+            SELECT DW_FILE_NM, DW_FILE_CHECK_SUM, MIN(DW_LOAD_DTTM) AS LOADED_AT,
+                   COUNT(*) AS PHYSICAL_ROWS,
+                   COUNT_IF(SUBSTR(TRIM(DATA), 1, 2) = '10') AS DATA_ROWS,
+                   HASH_AGG(DATA) AS CONTENT_SIGNATURE
+            FROM {raw_table}
+            WHERE {canonical_pattern} = %(file_name)s
+            GROUP BY DW_FILE_NM, DW_FILE_CHECK_SUM
+            ORDER BY LOADED_AT DESC
+            """,
+            params={"file_name": file_name}, use_warehouse=True, include_context=True,
+        ))
+        duplicate_file_count = max(0, len(physical_files) - 1)
+        headers = []
+        if duplicate_file_count:
+            parsed_header_sql = ",\n                   ".join(
+                f"TRIM(SUBSTR(DATA, {offset + 1}, {length})) AS {name}"
+                for name, offset, length in LIM_HEADER_FIELDS
+            )
+            headers = normalize_rows(sf.query_service(
+                f"""
+                SELECT DW_FILE_NM, DW_FILE_ROW_NUMBER,
+                       {parsed_header_sql}
+                FROM {raw_table}
+                WHERE {canonical_pattern} = %(file_name)s
+                  AND SUBSTR(TRIM(DATA), 1, 2) = '00'
+                ORDER BY DW_FILE_NM, DW_FILE_ROW_NUMBER
+                """,
+                params={"file_name": file_name}, use_warehouse=True, include_context=True,
+            ))
+        checks = [{
+            "key": "duplicate_files", "title": "Duplicate files",
+            "status": "WARNING" if duplicate_file_count else "PASS",
+            "summary": f"{len(physical_files)} physical files match; {duplicate_file_count} possible duplicate copies.",
+            "rows": physical_files, "headers": headers,
+        }]
+
+        duplicate_rows = normalize_rows(sf.query_service(
+            f"""
+            WITH DATA_ROWS AS (
+              SELECT {canonical_pattern} AS DATA_FILE_NAME,
+                     DW_FILE_NM, DW_FILE_ROW_NUMBER, DATA,
+                     SUBSTR(DATA, 59) AS DATA_WITHOUT_DLVY_FIELDS
+              FROM {raw_table}
+              WHERE {data_file_filter}
+                AND SUBSTR(TRIM(DATA), 1, 2) = '10'
+            ), DUPLICATES AS (
+              SELECT 'WITH_DLVY_FIELDS' AS COMPARISON, DATA_FILE_NAME, DW_FILE_NM,
+                     DATA AS COMPARED_DATA, COUNT(*) AS OCCURRENCES,
+                     MIN(DW_FILE_ROW_NUMBER) AS FIRST_ROW_NUMBER,
+                     MAX(DW_FILE_ROW_NUMBER) AS LAST_ROW_NUMBER
+              FROM DATA_ROWS
+              GROUP BY DATA_FILE_NAME, DW_FILE_NM, DATA
+              HAVING COUNT(*) > 1
+              UNION ALL
+              SELECT 'WITHOUT_DLVY_FIELDS' AS COMPARISON, DATA_FILE_NAME, DW_FILE_NM,
+                     DATA_WITHOUT_DLVY_FIELDS AS COMPARED_DATA, COUNT(*) AS OCCURRENCES,
+                     MIN(DW_FILE_ROW_NUMBER) AS FIRST_ROW_NUMBER,
+                     MAX(DW_FILE_ROW_NUMBER) AS LAST_ROW_NUMBER
+              FROM DATA_ROWS
+              GROUP BY DATA_FILE_NAME, DW_FILE_NM, DATA_WITHOUT_DLVY_FIELDS
+              HAVING COUNT(*) > 1
+            )
+            SELECT * FROM DUPLICATES
+            ORDER BY COMPARISON, OCCURRENCES DESC, DW_FILE_NM
+            LIMIT 200
+            """,
+            params=investigation_params, use_warehouse=True, include_context=True,
+        ))
+        checks.append({
+            "key": "duplicate_rows", "title": "Duplicate rows within each file",
+            "status": "WARNING" if duplicate_rows else "PASS",
+            "summary": f"Found {len(duplicate_rows)} duplicate groups when comparing with and without DLVY fields." if duplicate_rows else "No duplicates were found within a file, with or without DLVY fields.",
+            "rows": duplicate_rows,
+        })
+
+        cross_file_rows = normalize_rows(sf.query_service(
+            f"""
+            WITH DATA_ROWS AS (
+              SELECT {canonical_pattern} AS DATA_FILE_NAME,
+                     DW_FILE_NM, DATA, SUBSTR(DATA, 59) AS DATA_WITHOUT_DLVY_FIELDS
+              FROM {raw_table}
+              WHERE {data_file_filter}
+                AND SUBSTR(TRIM(DATA), 1, 2) = '10'
+            ), DUPLICATES AS (
+              SELECT 'WITH_DLVY_FIELDS' AS COMPARISON, DATA_FILE_NAME,
+                     DATA AS COMPARED_DATA,
+                     COUNT(DISTINCT DW_FILE_NM) AS FILE_COUNT,
+                     COUNT(*) AS TOTAL_OCCURRENCES,
+                     LISTAGG(DISTINCT DW_FILE_NM, '\n') WITHIN GROUP (ORDER BY DW_FILE_NM) AS FOUND_IN_FILES
+              FROM DATA_ROWS
+              GROUP BY DATA_FILE_NAME, DATA
+              HAVING COUNT(DISTINCT DW_FILE_NM) > 1
+              UNION ALL
+              SELECT 'WITHOUT_DLVY_FIELDS' AS COMPARISON, DATA_FILE_NAME,
+                     DATA_WITHOUT_DLVY_FIELDS AS COMPARED_DATA,
+                     COUNT(DISTINCT DW_FILE_NM) AS FILE_COUNT,
+                     COUNT(*) AS TOTAL_OCCURRENCES,
+                     LISTAGG(DISTINCT DW_FILE_NM, '\n') WITHIN GROUP (ORDER BY DW_FILE_NM) AS FOUND_IN_FILES
+              FROM DATA_ROWS
+              GROUP BY DATA_FILE_NAME, DATA_WITHOUT_DLVY_FIELDS
+              HAVING COUNT(DISTINCT DW_FILE_NM) > 1
+            )
+            SELECT * FROM DUPLICATES
+            ORDER BY COMPARISON, FILE_COUNT DESC, TOTAL_OCCURRENCES DESC
+            LIMIT 200
+            """,
+            params=investigation_params, use_warehouse=True, include_context=True,
+        ))
+        checks.append({
+            "key": "cross_file_duplicate_rows", "title": "Matching rows across duplicate files",
+            "status": "WARNING" if cross_file_rows else "PASS",
+            "summary": f"Found {len(cross_file_rows)} cross-file duplicate groups when comparing with and without DLVY fields." if cross_file_rows else "No rows match across files, with or without DLVY fields.",
+            "rows": cross_file_rows,
+        })
+
+        escaped_pattern = re.escape(file_name).replace("'", "''")
+        stage_rows = normalize_rows(sf.query_service(
+            f"LIST @{stage} PATTERN='.*{escaped_pattern}.*'",
+            use_warehouse=True, include_context=True,
+        ))
+        checks.append({
+            "key": "disk_files", "title": "Files on disk",
+            "status": "PASS" if stage_rows else "WARNING",
+            "summary": f"Found {len(stage_rows)} matching objects in @{stage}." if stage_rows else f"No matching object was found in @{stage}.",
+            "rows": stage_rows[:200],
+        })
+        return jsonify({
+            "ok": True, "source": "snowflake", "fileName": file_name,
+            "expectedRows": meta[0].get("EXPECTED_ROWS"), "actualRows": meta[0].get("ACTUAL_ROWS"),
+            "checks": checks,
+        })
+    except ValueError as exc:
+        return _json_error(exc, 400)
+    except Exception as exc:
+        current_app.logger.exception("Failed ROWCOUNT_MISMATCH investigation for %s", group_name)
         return _json_error(exc, 500)
 
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api.js'
+import PageHeader from '../components/PageHeader.jsx'
 
 function formatLogTime(value) {
   const date = new Date(value)
@@ -46,9 +47,7 @@ export default function Admin() {
 
   return (
     <section className="page admin-page">
-      <div className="page-header admin-header">
-        <div><p className="breadcrumb">Application Administration / Application Log</p><h1>Application Log</h1><p>Live application, user, system, and Snowflake database activity.</p></div>
-      </div>
+      <PageHeader breadcrumb="Application Administration / Application Log" title="Application Log" subtitle="Live application, user, system, and Snowflake database activity." />
 
       {error && <div className="alert error">{error}</div>}
 

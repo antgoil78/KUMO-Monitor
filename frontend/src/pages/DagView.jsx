@@ -3,6 +3,7 @@ import { Background, Controls, MarkerType, MiniMap, ReactFlow } from '@xyflow/re
 import dagre from '@dagrejs/dagre'
 
 import { api } from '../api.js'
+import PageHeader from '../components/PageHeader.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import StatusBadge, { statusKind } from '../components/StatusBadge.jsx'
 
@@ -92,18 +93,11 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
     window.setTimeout(() => setNotice(''), 3500)
   }
 
-  if (!id) return <section className="page dag-page"><div className="alert warning">No workflow was selected.</div><button className="button" onClick={() => onNavigate('monitor')}>Back to monitor</button></section>
+  if (!id) return <section className="page dag-page"><PageHeader breadcrumb="Pages / Workflow Monitor / DAG" title="DAG Run" subtitle="No workflow was selected." actions={<button className="button" onClick={() => onNavigate('monitor')}>← Back to monitor</button>} /><div className="alert warning">Select a workflow from Workflow Monitor to view its DAG.</div></section>
 
   return (
     <section className="page dag-page">
-      <div className="page-hero dag-page-hero">
-        <div>
-          <p className="breadcrumb">Pages / Workflow Monitor / DAG</p>
-          <h1 className="page-heading">DAG Run</h1>
-          <p className="page-subtitle">{name} · interactive DBT model dependencies</p>
-        </div>
-        <button className="button" onClick={() => onNavigate('monitor')}>← Back to monitor</button>
-      </div>
+      <PageHeader breadcrumb="Pages / Workflow Monitor / DAG" title="DAG Run" subtitle={`${name} · interactive DBT model dependencies`} actions={<button className="button" onClick={() => onNavigate('monitor')}>← Back to monitor</button>} />
       {error && <div className="alert error">{error}</div>}
       {notice && <div className="alert info">{notice}</div>}
       {!dag && !error && <div className="empty-state">Loading DAG...</div>}

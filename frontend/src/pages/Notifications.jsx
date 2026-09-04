@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api.js'
+import PageHeader from '../components/PageHeader.jsx'
 import './Notifications.css'
 
 
@@ -285,24 +286,14 @@ export default function Notifications() {
 
   return (
     <section className="page notifications-page">
-      <div className="page-hero">
-        <div>
-          <p className="eyebrow">KUMO Monitor</p>
-          <h1 className="page-heading">Notifications</h1>
-          <p className="page-subtitle">
-            Manage email distribution groups and review notification settings across workflows.
-          </p>
-        </div>
-
-        <button
+      <PageHeader breadcrumb="Pages / Notifications" title="Notifications" subtitle="Manage email distribution groups and review notification settings across workflows." actions={<button
           type="button"
-          className="refresh-button"
+          className="button refresh-button"
           onClick={load}
           disabled={loading}
         >
           {loading ? 'Refreshing…' : '↻ Refresh'}
-        </button>
-      </div>
+        </button>} />
 
       {error && <div className="alert error notification-alert">{error}</div>}
       {message && <div className="notification-toast">{message}</div>}

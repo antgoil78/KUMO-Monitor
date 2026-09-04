@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { api } from '../api.js'
+import PageHeader from '../components/PageHeader.jsx'
 import { formatDateTimeSeconds } from '../utils/time.js'
 
 const backendIntervals = [5, 10, 30, 60, 120, 300]
@@ -79,10 +80,7 @@ export default function Settings() {
 
   return (
     <section className="page admin-page">
-      <div className="page-header admin-header">
-        <div><p className="breadcrumb">Application Administration / Settings</p><h1>Settings</h1><p>Configure the shared backend cache refresh cycle.</p></div>
-        <button type="button" className="button" onClick={load}>↻ Refresh status</button>
-      </div>
+      <PageHeader breadcrumb="Application Administration / Settings" title="Settings" subtitle="Configure the shared backend cache refresh cycle." actions={<button type="button" className="button" onClick={load}>↻ Refresh status</button>} />
 
       {error && <div className="alert error">{error}</div>}
 

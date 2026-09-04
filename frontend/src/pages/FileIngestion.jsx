@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fileIngestionApi } from '../fileIngestionApi.js'
+import PageHeader from '../components/PageHeader.jsx'
 import './FileIngestion.css'
 
 const HISTORY_DAYS = 30
 const ATTENTION_STATUSES = new Set(['FAILED', 'STOPPED', 'SKIPPED', 'BLOCKED'])
+const LIM_HEADER_FIELDS = [
+  'DLVY_REC_TYPE_ID', 'DLVY_SOURCE_ID', 'DLVY_SUBJECT_AREA_ID', 'DLVY_PKG_ID',
+  'DLVY_PKG_YEAR', 'DLVY_PKG_YEAR_SEQ_NO', 'DLVY_LIM_OBJ_SEQ_NO',
+  'DLVY_LIM_OBJ_VER_NO', 'DLVY_START_DATE', 'DLVY_END_DATE', 'DLVY_COPY_NAME',
+  'DLVY_DELTA_EVENT_TYPE'
+]
 
 function formatValue(value, fallback = '—') {
   if (value === null || value === undefined || value === '') return fallback
@@ -341,7 +348,12 @@ function AttentionFile({ file }) {
   )
 }
 
-function FirstErrorSummary({ error, file, onResolve }) {
+function isRowcountMismatch(error, file) {
+  return String(error?.REASON || '').toUpperCase().includes('ROWCOUNT_MISMATCH')
+    || Boolean(file?.ROWCOUNT_STATUS && file.ROWCOUNT_STATUS !== 'ROWCOUNT_OK')
+}
+
+function FirstErrorSummary({ error, file, onResolve, onInvestigate, investigating }) {
   if (!error) return null
   return (
     <div className="lim-first-error-card">
@@ -351,7 +363,10 @@ function FirstErrorSummary({ error, file, onResolve }) {
         <p>{formatValue(error.REASON)}</p>
         {file && <small>File: {formatValue(file.FILE_NAME)}</small>}
       </div>
-      <button type="button" className="lim-resolve-button prominent" onClick={() => onResolve(error)}>Resolution</button>
+      <div className="lim-first-error-actions">
+        <button type="button" className="lim-resolve-button prominent" onClick={() => onResolve(error)}>Resolution</button>
+        {isRowcountMismatch(error, file) && <button type="button" className="lim-investigate-button prominent" disabled={investigating} onClick={() => onInvestigate(error)}>{investigating ? 'Running checks…' : 'Run Investigation'}</button>}
+      </div>
     </div>
   )
 }
@@ -592,6 +607,57 @@ function SuggestedResolution({ error, file, onClose }) {
   )
 }
 
+function DuplicateFileComparison({ check }) {
+  const headersByFile = new Map((check.headers || []).map(header => [String(header.DW_FILE_NM), header]))
+  const rows = (check.rows || []).map(file => ({ ...file, ...(headersByFile.get(String(file.DW_FILE_NM)) || {}) }))
+  const differingFields = new Set(LIM_HEADER_FIELDS.filter(field => new Set(rows.map(row => String(row[field] ?? ''))).size > 1))
+  return (
+    <div className="lim-table-scroll lim-file-comparison-wrap">
+      <table className="lim-table compact lim-file-comparison">
+        <thead><tr><th>Filename</th><th>Loaded at</th>{LIM_HEADER_FIELDS.map(field => <th key={field}>{field}</th>)}</tr></thead>
+        <tbody>{rows.map((row, index) => <tr key={`${row.DW_FILE_NM}-${index}`}>
+          <td className="lim-file-hover-cell">
+            <strong>{formatValue(row.DW_FILE_NM)}</strong>
+            <div className="lim-file-hover-card">
+              <span><b>Checksum</b>{formatValue(row.DW_FILE_CHECK_SUM)}</span>
+              <span><b>Physical rows</b>{formatValue(row.PHYSICAL_ROWS)}</span>
+              <span><b>Data rows</b>{formatValue(row.DATA_ROWS)}</span>
+              <span><b>Content signature</b>{formatValue(row.CONTENT_SIGNATURE)}</span>
+            </div>
+          </td>
+          <td className="lim-nowrap">{formatDate(row.LOADED_AT)}</td>
+          {LIM_HEADER_FIELDS.map(field => <td key={field} className={differingFields.has(field) ? 'lim-header-difference' : ''}>{formatValue(row[field])}</td>)}
+        </tr>)}</tbody>
+      </table>
+    </div>
+  )
+}
+
+function InvestigationResults({ investigation }) {
+  if (!investigation) return null
+  if (investigation.loading) return <div className="lim-investigation"><div className="lim-detail-loading">Running checks sequentially…</div></div>
+  if (investigation.error) return <div className="lim-investigation"><div className="alert error">{investigation.error}</div></div>
+  const data = investigation.data
+  return (
+    <section className="lim-investigation">
+      <div className="lim-investigation-heading">
+        <div><span>Investigation results</span><strong>{formatValue(data?.fileName)}</strong></div>
+        <span>Expected {formatValue(data?.expectedRows)} · Actual {formatValue(data?.actualRows)}</span>
+      </div>
+      {(data?.checks || []).map((check, index) => {
+        const rows = check.rows || []
+        const columns = rows.length ? Object.keys(rows[0]) : []
+        return <details key={check.key} className={`lim-investigation-check ${String(check.status).toLowerCase()}`} open={index === 0 || check.status === 'WARNING'}>
+          <summary><span className="lim-check-number">{index + 1}</span><div><strong>{check.title}</strong><small>{check.summary}</small></div><b>{check.status}</b></summary>
+          {check.key === 'duplicate_files' && rows.length > 0
+            ? <DuplicateFileComparison check={check} />
+            : rows.length > 0 && <div className="lim-table-scroll"><table className="lim-table compact"><thead><tr>{columns.map(column => <th key={column}>{column.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{columns.map(column => <td key={column}>{formatValue(row[column])}</td>)}</tr>)}</tbody></table></div>}
+        </details>
+      })}
+    </section>
+  )
+}
+
 function HistoryGroups({ rows }) {
   const groups = useMemo(() => {
     const map = new Map()
@@ -634,6 +700,7 @@ function HistoryGroups({ rows }) {
 
 function LatestRunDetails({ detail, onClose, standalone = false }) {
   const [resolutionError, setResolutionError] = useState(null)
+  const [investigation, setInvestigation] = useState(null)
   if (!detail) return null
 
   const rows = detail.data?.rows || []
@@ -645,16 +712,27 @@ function LatestRunDetails({ detail, onClose, standalone = false }) {
     return !latest || new Date(row.CONTROL_DATE) > new Date(latest) ? row.CONTROL_DATE : latest
   }, null)
 
+  async function runInvestigation(error) {
+    const file = detail.data?.attentionFile
+    setInvestigation({ loading: true, error: null, data: null })
+    try {
+      const data = await fileIngestionApi.investigateRowcount(detail.groupName, file?.FILE_NAME, error?.DLVY_SOURCE_ID || detail.sourceId)
+      setInvestigation({ loading: false, error: null, data })
+    } catch (err) {
+      setInvestigation({ loading: false, error: err.message || String(err), data: null })
+    }
+  }
+
   const panel = (
       <div className={standalone ? 'vision-card-flat lim-detail-page-card' : 'vision-modal lim-detail-modal'}>
-        <div className="modal-header">
+        {!standalone && <div className="modal-header">
           <div>
             <span className="modal-eyebrow">LIM ingestion</span>
             <h2>Latest run details · {detail.groupName}{detail.sourceId ? ` · ${detail.sourceId}` : ''}</h2>
             <p>{runDate ? `Run ${formatDate(runDate)}` : 'Latest run'} · showing the latest run only</p>
           </div>
           <button type="button" className={standalone ? 'button' : 'modal-close'} onClick={onClose} aria-label={standalone ? 'Back to File Ingestion Monitor' : 'Close'}>{standalone ? '← Back' : '×'}</button>
-        </div>
+        </div>}
 
         {detail.loading ? (
           <div className="lim-detail-loading">Loading latest run details...</div>
@@ -665,7 +743,8 @@ function LatestRunDetails({ detail, onClose, standalone = false }) {
             <DetailMetrics type="ready" metrics={detail.data?.metrics} />
             {firstError ? (
               <>
-                <FirstErrorSummary error={firstError} file={detail.data?.attentionFile} onResolve={setResolutionError} />
+                <FirstErrorSummary error={firstError} file={detail.data?.attentionFile} onResolve={setResolutionError} onInvestigate={runInvestigation} investigating={investigation?.loading} />
+                <InvestigationResults investigation={investigation} />
                 <RemainingResults rows={remainingRows} />
               </>
             ) : rows.length ? (
@@ -680,7 +759,17 @@ function LatestRunDetails({ detail, onClose, standalone = false }) {
   )
 
   if (standalone) {
-    return <section className="page lim-page lim-detail-page">{panel}</section>
+    return (
+      <section className="page lim-page lim-detail-page">
+        <PageHeader
+          breadcrumb="RAW LIM / File Ingestion Monitor / Latest Run"
+          title={`Latest run details · ${detail.groupName}${detail.sourceId ? ` · ${detail.sourceId}` : ''}`}
+          subtitle={`${runDate ? `Run ${formatDate(runDate)}` : 'Latest run'} · showing the latest run only`}
+          actions={<button type="button" className="button" onClick={onClose}>← Back</button>}
+        />
+        {panel}
+      </section>
+    )
   }
   return (
     <div className="modal-backdrop lim-modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
@@ -780,18 +869,9 @@ export default function FileIngestion({ onNavigate }) {
 
   return (
     <section className="page lim-page">
-      <div className="lim-heading">
-        <div>
-          <p className="eyebrow">RAW LIM</p>
-          <h1>File Ingestion Monitor</h1>
-          <p className="lim-subtitle">
-            Monitor LIM package groups, file readiness, rowcount checks and SET_READY processing.
-          </p>
-        </div>
-        <button type="button" className="ghost-refresh" onClick={refreshAll} disabled={loading || rawLoading}>
+      <PageHeader breadcrumb="RAW LIM / File Ingestion Monitor" title="File Ingestion Monitor" subtitle="Monitor LIM package groups, file readiness, rowcount checks and SET_READY processing." actions={<button type="button" className="button ghost-refresh" onClick={refreshAll} disabled={loading || rawLoading}>
           {loading || rawLoading ? 'Refreshing...' : '↻ Refresh'}
-        </button>
-      </div>
+        </button>} />
 
       {error && <div className="alert error">{error}</div>}
 

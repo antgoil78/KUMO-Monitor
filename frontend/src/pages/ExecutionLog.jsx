@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api.js'
+import PageHeader from '../components/PageHeader.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
 import { elapsedDuration, formatDateTime } from '../utils/time.js'
 import './ExecutionLog.css'
@@ -183,22 +184,15 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
   }, [data, activeSource, search])
 
   if (!runId) {
-    return <section className="page"><div className="alert warning">No execution run was selected.</div><button className="button" onClick={() => onNavigate('monitor')}>Back to monitor</button></section>
+    return <section className="page execution-log-page"><PageHeader breadcrumb="Pages / Execution Log" title="Execution Log" subtitle="No execution run was selected." actions={<button className="button" onClick={() => onNavigate('monitor')}>← Back to monitor</button>} /><div className="alert warning">Select a run from Workflow Monitor or History to view its execution log.</div></section>
   }
 
   return (
     <section className="page execution-log-page">
-      <div className="page-hero execution-log-hero">
-        <div>
-          <p className="breadcrumb">Pages / Execution log</p>
-          <h1 className="page-heading">{resolvedName}</h1>
-          <p className="page-subtitle">Run <code>{runId}</code></p>
-        </div>
-        <div className="execution-log-header-actions">
+      <PageHeader breadcrumb="Pages / Execution Log" title={resolvedName} subtitle={<>Run <code>{runId}</code></>} actions={<div className="execution-log-header-actions">
           <button className="button" onClick={load} disabled={loading}>↻ Refresh</button>
           <button className="button" onClick={() => onNavigate(returnPage, returnPage === 'history' ? { workflowName, workflowId } : {})}>← Back</button>
-        </div>
-      </div>
+        </div>} />
 
       {error && <div className="alert error">{error}</div>}
       {loading && !data && <div className="empty-state">Loading execution log...</div>}
