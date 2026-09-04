@@ -16,10 +16,10 @@ export default function Sidebar({ activePage, onNavigate }) {
         <div className="brand-mark"><span className="brand-dot">◆</span></div>
         <div>
           <div className="brand-kumo">KUMO</div>
-          <div className="brand-subtitle">Workflow Manager</div>
+          <div className="brand-subtitle">Monitor</div>
         </div>
       </div>
-
+orkflow Manager
       <div className="nav-label">Navigation</div>
       <nav className="nav-list" aria-label="Main navigation">
         {navItems.map(item => (
