@@ -32,7 +32,7 @@ function formatDate(value) {
 }
 
 function displayStatus(value) {
-  return String(value || '').replaceAll('UPDATED', 'READY').replaceAll('Updated', 'Ready')
+  return String(value || '').replaceAll('UPDATED', 'READY').replaceAll('Updated', 'Ready').replaceAll('_', ' ')
 }
 
 function statusTone(kind) {
@@ -50,7 +50,7 @@ function statusSymbol(kind) {
 }
 
 function logTone(status) {
-  if (status === 'UPDATED') return 'success'
+  if (['UPDATED', 'RESOLVED', 'READY_TO_RETRY'].includes(status)) return 'success'
   if (ATTENTION_STATUSES.has(status)) return 'failed'
   if (status) return 'queued'
   return 'muted'
@@ -638,11 +638,12 @@ function DuplicateFileComparison({ check, selectedFiles, onToggleFile }) {
         <thead><tr><th className="lim-remove-column">Remove</th><th>Physical filename</th><th>Canonical file</th><th>Data rows</th><th>Loaded at</th>{LIM_HEADER_FIELDS.map(field => <th key={field}>{field}</th>)}</tr></thead>
         <tbody>{rows.map((row, index) => {
           const selectionId = String(row.SELECTION_ID || row.DW_FILE_NM)
-          return <tr key={`${selectionId}-${index}`} className={row.IS_DUPLICATE ? 'lim-duplicate-file-row' : ''}>
-          <td className="lim-remove-column"><input type="checkbox" checked={selectedFiles.has(selectionId)} onChange={() => onToggleFile(selectionId)} aria-label={`Quarantine ${row.DW_FILE_NM}`} /></td>
+          return <tr key={`${selectionId}-${index}`} className={row.IS_QUARANTINED ? 'lim-quarantined-file-row' : row.IS_DUPLICATE ? 'lim-duplicate-file-row' : ''}>
+          <td className="lim-remove-column"><input type="checkbox" disabled={row.IS_QUARANTINED} checked={!row.IS_QUARANTINED && selectedFiles.has(selectionId)} onChange={() => onToggleFile(selectionId)} aria-label={row.IS_QUARANTINED ? `${row.DW_FILE_NM} is already quarantined` : `Quarantine ${row.DW_FILE_NM}`} /></td>
           <td className="lim-file-hover-cell">
             <FileDetailsHover row={row} />
             {row.IS_DUPLICATE && <span className="lim-duplicate-file-badge">Duplicate ×{row.DUPLICATE_COPIES}</span>}
+            {row.IS_QUARANTINED && <span className="lim-quarantined-file-badge">Quarantined</span>}
           </td>
           <td>{formatValue(row.DATA_FILE_NAME)}</td>
           <td><strong>{formatValue(row.DATA_ROWS, '0')}</strong></td>
@@ -656,6 +657,7 @@ function DuplicateFileComparison({ check, selectedFiles, onToggleFile }) {
 
 function InvestigationResults({ investigation, onResolveDuplicates, resolving, resolutionResult }) {
   const [selectedFiles, setSelectedFiles] = useState(() => new Set())
+  const [pendingQuarantine, setPendingQuarantine] = useState(null)
   const duplicateFileKey = (investigation?.data?.checks || [])
     .filter(check => ['duplicate_files', 'duplicate_data_files', 'disk_files'].includes(check.key))
     .flatMap(check => check.rows || []).map(row => row.SELECTION_ID || row.DW_FILE_NM).join('|')
@@ -672,6 +674,11 @@ function InvestigationResults({ investigation, onResolveDuplicates, resolving, r
       return next
     })
   }
+  async function confirmQuarantine() {
+    if (!pendingQuarantine?.files?.length) return
+    await onResolveDuplicates(pendingQuarantine.files)
+    setPendingQuarantine(null)
+  }
   return (
     <section className="lim-investigation">
       <div className="lim-investigation-heading">
@@ -682,13 +689,20 @@ function InvestigationResults({ investigation, onResolveDuplicates, resolving, r
         const rows = check.rows || []
         const columns = rows.length ? Object.keys(rows[0]) : []
         const removableCheck = ['duplicate_files', 'duplicate_data_files', 'disk_files'].includes(check.key)
-        const rowNames = new Set(rows.map(row => String(row.SELECTION_ID || row.DW_FILE_NM)))
+        const activeRows = rows.filter(row => !row.IS_QUARANTINED)
+        const rowNames = new Set(activeRows.map(row => String(row.SELECTION_ID || row.DW_FILE_NM)))
         const selectedForCheck = [...selectedFiles].filter(fileName => rowNames.has(fileName))
         return <details key={check.key} className={`lim-investigation-check ${String(check.status).toLowerCase()}`} open={index === 0 || check.status === 'WARNING'}>
           <summary><span className="lim-check-number">{index + 1}</span><div><strong>{check.title}</strong><small>{check.summary}</small></div><b>{check.status}</b></summary>
-          {removableCheck && (check.key === 'disk_files' ? rows.length > 0 : rows.length > 1) && <div className="lim-duplicate-action">
+          {removableCheck && (check.key === 'disk_files' ? activeRows.length > 0 : rows.length > 1) && <div className="lim-duplicate-action">
             <div><strong>Quarantine files</strong><span>Select files to remove from RAW and rename on disk with a deleted_ prefix so they cannot load again.</span></div>
-            <button type="button" disabled={resolving || selectedForCheck.length === 0} onClick={() => onResolveDuplicates(selectedForCheck)}>{resolving ? 'Quarantining…' : `Quarantine selected (${selectedForCheck.length})`}</button>
+            <button type="button" disabled={resolving || selectedForCheck.length === 0} onClick={() => setPendingQuarantine({ checkKey: check.key, files: selectedForCheck, names: activeRows.filter(row => selectedForCheck.includes(String(row.SELECTION_ID || row.DW_FILE_NM))).map(row => row.DW_FILE_NM) })}>{resolving ? 'Quarantining…' : `Quarantine selected (${selectedForCheck.length})`}</button>
+          </div>}
+          {pendingQuarantine?.checkKey === check.key && <div className="lim-quarantine-confirm" role="alertdialog" aria-label="Confirm file quarantine">
+            <strong>Are you sure you want to quarantine these files?</strong>
+            <p>This removes their loaded rows from RAW, copies each staged object to the same folder with a <code>deleted_</code> filename prefix, verifies the copy, and then removes the original filename.</p>
+            <ul>{pendingQuarantine.names.map(name => <li key={name}>{name} → <strong>deleted_{name}</strong></li>)}</ul>
+            <div><button type="button" className="cancel" disabled={resolving} onClick={() => setPendingQuarantine(null)}>Cancel</button><button type="button" className="confirm" disabled={resolving} onClick={confirmQuarantine}>{resolving ? 'Quarantining…' : 'Yes, quarantine selected'}</button></div>
           </div>}
           {removableCheck && resolutionResult && <div className={`alert ${resolutionResult.error ? 'error' : 'success'}`}>{resolutionResult.error || `Quarantined ${resolutionResult.stageFilesRenamed || 0} file(s) with a deleted_ prefix and removed ${resolutionResult.rawRowsDeleted || 0} corresponding RAW row(s).`}</div>}
           {removableCheck && rows.length > 0
@@ -769,8 +783,6 @@ function LatestRunDetails({ detail, onClose, standalone = false }) {
 
   async function resolveDuplicates(removeFiles) {
     const file = detail.data?.attentionFile
-    const confirmed = window.confirm(`Quarantine ${removeFiles.length} selected file(s)? Their RAW rows will be removed and the staged files will be renamed with a deleted_ prefix.`)
-    if (!confirmed) return
     setResolvingDuplicates(true)
     setDuplicateResolution(null)
     try {

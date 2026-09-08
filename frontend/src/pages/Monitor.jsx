@@ -600,24 +600,33 @@ function Modal({ title, subtitle, onClose, children, wide = false }) {
     </div>
   )
 }
-function MultiSelect({ label, options, value, onChange }) {
+function DependencySelect({ label, tone, options, value, onChange }) {
   const selected = new Set(value || [])
-  function toggle(id) {
-    const next = new Set(selected)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    onChange(Array.from(next))
+  const selectedOptions = (value || []).map(id => options.find(option => option.workflowId === id) || { workflowId: id, label: id })
+  const availableOptions = options.filter(option => !selected.has(option.workflowId))
+  function add(id) {
+    if (!id || selected.has(id)) return
+    onChange([...(value || []), id])
+  }
+  function remove(id) {
+    onChange((value || []).filter(selectedId => selectedId !== id))
   }
   return (
-    <div className="form-field">
+    <div className={`form-field dependency-editor ${tone}`}>
       <label>{label}</label>
-      <div className="multi-list">
-        {options.length === 0 ? <span className="muted-dash">No workflows available</span> : options.map(option => (
-          <label className="multi-item" key={option.workflowId}>
-            <input type="checkbox" checked={selected.has(option.workflowId)} onChange={() => toggle(option.workflowId)} />
-            <span>{option.label}</span>
-          </label>
-        ))}
+      <select value="" onChange={event => add(event.target.value)} disabled={!availableOptions.length}>
+        <option value="">{availableOptions.length ? 'Choose a workflow to add…' : 'No more workflows available'}</option>
+        {availableOptions.map(option => <option key={option.workflowId} value={option.workflowId}>{option.label}</option>)}
+      </select>
+      <div className="dependency-selected-list">
+        <div className="dependency-selected-heading"><span>Selected workflows</span><b>{selectedOptions.length}</b></div>
+        {selectedOptions.length ? selectedOptions.map(option => (
+          <div className="dependency-selected-item" key={option.workflowId}>
+            <span className="dependency-trigger-icon">{tone === 'failure' ? '↯' : '↳'}</span>
+            <div><strong>{option.label}</strong><small>{tone === 'failure' ? 'Runs when this workflow fails' : 'Runs when this workflow succeeds'}</small></div>
+            <button type="button" onClick={() => remove(option.workflowId)} aria-label={`Remove ${option.label}`}>×</button>
+          </div>
+        )) : <div className="dependency-selected-empty">No workflows selected.</div>}
       </div>
     </div>
   )
@@ -663,6 +672,14 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
   }
   function patchNotif(field, value) {
     setDetail(prev => ({ ...prev, notifications: { ...(prev.notifications || {}), [field]: value } }))
+  }
+
+  function notificationSummary() {
+    const notifications = detail?.notifications || {}
+    const enabled = []
+    if (notifications.onFailEmail) enabled.push('Failure email')
+    if (notifications.onSuccessEmail) enabled.push('Success email')
+    return enabled.length ? enabled.join(' + ') : 'No email notifications enabled'
   }
 
   function refreshAfterAction() {
@@ -751,19 +768,37 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
             <div className="form-field"><label>Timezone</label><input value={detail.scheduleTimezone || 'UTC'} onChange={e => patch('scheduleTimezone', e.target.value)} /></div>
           </div>
           <div className="form-grid two">
-            <MultiSelect label="On Success" options={detail.workflowOptions || []} value={detail.onSuccess || []} onChange={v => patch('onSuccess', v)} />
-            <MultiSelect label="On Fail" options={detail.workflowOptions || []} value={detail.onFail || []} onChange={v => patch('onFail', v)} />
+            <DependencySelect label="On Success" tone="success" options={detail.workflowOptions || []} value={detail.onSuccess || []} onChange={v => patch('onSuccess', v)} />
+            <DependencySelect label="On Fail" tone="failure" options={detail.workflowOptions || []} value={detail.onFail || []} onChange={v => patch('onFail', v)} />
           </div>
-          <details className="advanced-section">
-            <summary>Notifications</summary>
-            <div className="form-grid two">
-              <div className="toggle-row vertical"><label><input type="checkbox" checked={Boolean(detail.notifications?.onFailEmail)} onChange={e => patchNotif('onFailEmail', e.target.checked)} /> Email on failure</label><label><input type="checkbox" checked={Boolean(detail.notifications?.onSuccessEmail)} onChange={e => patchNotif('onSuccessEmail', e.target.checked)} /> Email on success</label></div>
+          <details className="advanced-section notification-section" open>
+            <summary>
+              <span>Notifications</span>
+              <span className={`notification-config-summary ${(detail.notifications?.onFailEmail || detail.notifications?.onSuccessEmail) ? 'configured' : ''}`}>
+                {(detail.notifications?.onFailEmail || detail.notifications?.onSuccessEmail) ? 'Configured' : 'Not configured'} · {notificationSummary()}
+              </span>
+            </summary>
+            <div className="notification-rule-grid">
+              <div className={`notification-rule failure ${detail.notifications?.onFailEmail ? 'enabled' : 'disabled'}`}>
+                <div className="notification-rule-heading">
+                  <div><strong>On failure</strong><small>Email notification after a failed run</small></div>
+                  <label><input type="checkbox" checked={Boolean(detail.notifications?.onFailEmail)} onChange={e => patchNotif('onFailEmail', e.target.checked)} /> {detail.notifications?.onFailEmail ? 'Enabled' : 'Disabled'}</label>
+                </div>
+                <div className="form-field"><label>Recipient group</label><select value={detail.notifications?.failGroup || ''} onChange={e => patchNotif('failGroup', e.target.value)}><option value="">No group selected</option>{(detail.emailGroups || []).map(g => <option key={g} value={g}>{g}</option>)}</select></div>
+              </div>
+              <div className={`notification-rule success ${detail.notifications?.onSuccessEmail ? 'enabled' : 'disabled'}`}>
+                <div className="notification-rule-heading">
+                  <div><strong>On success</strong><small>Email notification after a successful run</small></div>
+                  <label><input type="checkbox" checked={Boolean(detail.notifications?.onSuccessEmail)} onChange={e => patchNotif('onSuccessEmail', e.target.checked)} /> {detail.notifications?.onSuccessEmail ? 'Enabled' : 'Disabled'}</label>
+                </div>
+                <div className="form-field"><label>Recipient group</label><select value={detail.notifications?.successGroup || ''} onChange={e => patchNotif('successGroup', e.target.value)}><option value="">No group selected</option>{(detail.emailGroups || []).map(g => <option key={g} value={g}>{g}</option>)}</select></div>
+                {!detail.notifications?.onSuccessEmail && detail.notifications?.successGroup && <small className="notification-rule-note">{detail.notifications.successGroup} is assigned, but success notifications are currently disabled.</small>}
+              </div>
+            </div>
+            <div className="form-grid two notification-delivery-settings">
               <div className="form-field"><label>Email integration</label><input value={detail.notifications?.emailIntegration || ''} onChange={e => patchNotif('emailIntegration', e.target.value)} /></div>
-              <div className="form-field"><label>Fail group</label><input list="email-groups" value={detail.notifications?.failGroup || ''} onChange={e => patchNotif('failGroup', e.target.value)} /></div>
-              <div className="form-field"><label>Success group</label><input list="email-groups" value={detail.notifications?.successGroup || ''} onChange={e => patchNotif('successGroup', e.target.value)} /></div>
               <div className="form-field"><label>Environment</label><input value={detail.notifications?.environment || ''} onChange={e => patchNotif('environment', e.target.value)} /></div>
             </div>
-            <datalist id="email-groups">{(detail.emailGroups || []).map(g => <option key={g} value={g} />)}</datalist>
           </details>
           {confirmDelete && <div className="alert warning">Delete this workflow and related queue/history/task rows? This cannot be undone.</div>}
           <div className="modal-actions">

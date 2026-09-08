@@ -55,7 +55,8 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
   const name = workflow?.workflowName || workflowName || 'DBT workflow'
   const [dag, setDag] = useState(null)
   const [error, setError] = useState(null)
-  const [search, setSearch] = useState('')
+  const [selectedModelId, setSelectedModelId] = useState('')
+  const [includeRelated, setIncludeRelated] = useState(true)
   const [statusFilter, setStatusFilter] = useState('')
   const [direction, setDirection] = useState('LR')
   const [selectedNode, setSelectedNode] = useState(null)
@@ -71,14 +72,47 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
   }, [id, workflow?.lastRunId])
 
   const allNodes = dag?.nodes || []
+  const modelOptions = useMemo(() => [...allNodes]
+    .sort((left, right) => String(left.label || left.id).localeCompare(String(right.label || right.id))), [allNodes])
   const visibleNodes = useMemo(() => {
-    const query = search.trim().toLowerCase()
+    const relatedIds = new Set()
+    if (selectedModelId) {
+      relatedIds.add(String(selectedModelId))
+      if (includeRelated) {
+        const upstreamByNode = new Map()
+        const downstreamByNode = new Map()
+        for (const edge of dag?.edges || []) {
+          const source = String(edge.source)
+          const target = String(edge.target)
+          if (!upstreamByNode.has(target)) upstreamByNode.set(target, [])
+          if (!downstreamByNode.has(source)) downstreamByNode.set(source, [])
+          upstreamByNode.get(target).push(source)
+          downstreamByNode.get(source).push(target)
+        }
+        const collectDirection = (connections) => {
+          const queue = [String(selectedModelId)]
+          const visited = new Set(queue)
+          while (queue.length) {
+            const nodeId = queue.shift()
+            for (const relatedId of connections.get(nodeId) || []) {
+              if (visited.has(relatedId)) continue
+              visited.add(relatedId)
+              relatedIds.add(relatedId)
+              queue.push(relatedId)
+            }
+          }
+        }
+        collectDirection(upstreamByNode)
+        collectDirection(downstreamByNode)
+      }
+    }
     return allNodes.filter(node => {
-      const matchesSearch = !query || `${node.label} ${node.id}`.toLowerCase().includes(query)
+      const matchesSearch = !selectedModelId || relatedIds.has(String(node.id))
       return matchesSearch && (!statusFilter || statusKind(node.status) === statusFilter)
     })
-  }, [allNodes, search, statusFilter])
+  }, [allNodes, dag?.edges, selectedModelId, includeRelated, statusFilter])
   const graph = useMemo(() => layoutGraph(visibleNodes, dag?.edges || [], direction), [visibleNodes, dag?.edges, direction])
+  const graphViewKey = `${direction}|${selectedModelId}|${includeRelated}|${statusFilter}|${graph.nodes.map(node => node.id).join(',')}`
   const counts = useMemo(() => allNodes.reduce((result, node) => {
     const kind = statusKind(node.status)
     result[kind] = (result[kind] || 0) + 1
@@ -111,7 +145,14 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
           <div className="dag-page-progress"><ProgressBar progress={{ percent, total: allNodes.length, done: complete, failed }} status={dag.run?.STATUS} /></div>
         </div>
         <div className="dag-page-toolbar">
-          <input className="search-input" value={search} onChange={event => setSearch(event.target.value)} placeholder="Find a model..." />
+          <select className="dag-model-filter" value={selectedModelId} onChange={event => setSelectedModelId(event.target.value)} aria-label="Filter by model name">
+            <option value="">All model names</option>
+            {modelOptions.map(node => <option key={node.id} value={node.id}>{node.label || node.id}</option>)}
+          </select>
+          <label className={`dag-related-filter ${includeRelated ? 'active' : ''}`}>
+            <input type="checkbox" checked={includeRelated} onChange={event => setIncludeRelated(event.target.checked)} disabled={!selectedModelId} />
+            <span>Show all upstream + downstream</span>
+          </label>
           <select className="status-select" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
             <option value="">All statuses</option><option value="success">Success</option><option value="running">Running</option><option value="failed">Failed</option><option value="queued">Queued</option>
           </select>
@@ -119,7 +160,7 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
           <span className="dag-visible-count">Showing {visibleNodes.length} of {allNodes.length}</span>
         </div>
         <div className="dag-page-canvas">
-          {graph.nodes.length ? <ReactFlow nodes={graph.nodes} edges={graph.edges} fitView fitViewOptions={{ padding: 0.2 }} minZoom={0.08} maxZoom={2} nodesDraggable={false} nodesConnectable={false} onNodeClick={(_, node) => setSelectedNode(allNodes.find(item => String(item.id) === node.id))}>
+          {graph.nodes.length ? <ReactFlow key={graphViewKey} nodes={graph.nodes} edges={graph.edges} fitView fitViewOptions={{ padding: 0.2 }} minZoom={0.08} maxZoom={2} nodesDraggable={false} nodesConnectable={false} onNodeClick={(_, node) => setSelectedNode(allNodes.find(item => String(item.id) === node.id))}>
             <Background color="rgba(105, 139, 255, 0.18)" gap={22} size={1} />
             <MiniMap pannable zoomable nodeColor={node => node.className?.includes('failed') ? '#ff4b6e' : node.className?.includes('success') ? '#01b574' : node.className?.includes('running') ? '#0075ff' : '#647695'} maskColor="rgba(3, 9, 31, 0.72)" />
             <Controls showInteractive={false} />

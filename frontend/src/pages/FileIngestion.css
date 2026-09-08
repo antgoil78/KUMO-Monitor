@@ -492,6 +492,9 @@
 .lim-duplicate-file-row td { background: rgba(255,181,71,.1) !important; border-bottom-color: rgba(255,181,71,.24) !important; }
 .lim-duplicate-file-row:hover td { background: rgba(255,181,71,.16) !important; }
 .lim-duplicate-file-badge { display: inline-flex; margin-left: 8px; padding: 2px 6px; border: 1px solid rgba(255,181,71,.45); border-radius: 999px; color: #ffe0aa; background: rgba(255,181,71,.14); font-size: 8px; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; }
+.lim-quarantined-file-row td { opacity: .72; background: rgba(112,132,162,.08) !important; }
+.lim-quarantined-file-row .lim-file-hover-cell > strong { text-decoration: line-through; color: var(--muted); }
+.lim-quarantined-file-badge { display: inline-flex; margin-left: 8px; padding: 2px 6px; border: 1px solid rgba(112,132,162,.42); border-radius: 999px; color: #b5c3d6; background: rgba(112,132,162,.12); font-size: 8px; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; }
 .lim-file-hover-cell > strong { color: #b9dfff; font-size: 10px; cursor: help; }
 .lim-file-hover-card { position: fixed; z-index: 1000; display: none; min-width: 310px; padding: 11px; border: 1px solid rgba(1,232,255,.3); border-radius: 9px; background: #071127; box-shadow: 0 15px 38px rgba(0,0,0,.5); }
 .lim-file-hover-card.visible { display: grid; gap: 7px; }
@@ -504,6 +507,16 @@
 .lim-duplicate-action button { flex: 0 0 auto; border: 1px solid rgba(255,83,120,.45); border-radius: 8px; padding: 7px 11px; color: #ffc1cc; background: rgba(255,83,120,.12); font-size: 10px; font-weight: 800; cursor: pointer; }
 .lim-duplicate-action button:hover:not(:disabled) { border-color: #ff5378; background: rgba(255,83,120,.22); }
 .lim-duplicate-action button:disabled { opacity: .55; cursor: wait; }
+.lim-quarantine-confirm { display: grid; gap: 8px; padding: 12px; border-top: 1px solid rgba(255,83,120,.3); background: rgba(255,83,120,.075); }
+.lim-quarantine-confirm > strong { color: #ffc1cc; font-size: 11px; }
+.lim-quarantine-confirm p { margin: 0; color: #d8aeb8; font-size: 10px; line-height: 1.5; }
+.lim-quarantine-confirm code { color: #ffe0aa; }
+.lim-quarantine-confirm ul { display: grid; gap: 4px; max-height: 130px; margin: 0; padding-left: 18px; overflow-y: auto; color: #b8c8df; font-size: 9px; overflow-wrap: anywhere; }
+.lim-quarantine-confirm > div { display: flex; justify-content: flex-end; gap: 8px; }
+.lim-quarantine-confirm button { border-radius: 8px; padding: 7px 11px; font-size: 10px; font-weight: 800; cursor: pointer; }
+.lim-quarantine-confirm button.cancel { border: 1px solid var(--line-soft); color: var(--text); background: rgba(255,255,255,.05); }
+.lim-quarantine-confirm button.confirm { border: 1px solid rgba(255,83,120,.5); color: #ffc1cc; background: rgba(255,83,120,.15); }
+.lim-quarantine-confirm button:disabled { opacity: .55; cursor: wait; }
 .lim-remaining-results { border: 1px solid var(--line-soft); border-radius: 12px; background: rgba(255,255,255,.018); overflow: hidden; }
 .lim-remaining-results > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; color: var(--text); cursor: pointer; }
 .lim-remaining-results > summary div { display: grid; gap: 3px; }

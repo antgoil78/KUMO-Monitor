@@ -514,6 +514,41 @@ def _load_overview(history_days):
                 params,
             )
             all_latest_rows = normalize_rows(cur.fetchall())
+
+            cur.execute(
+                f"""
+                WITH LATEST_META AS (
+                    SELECT *
+                    FROM {RAW_LIM_META_TABLE}
+                    WHERE PKG_GROUP_NAME IN ({placeholders})
+                    QUALIFY RUN_DTTM = MAX(RUN_DTTM) OVER (PARTITION BY PKG_GROUP_NAME)
+                )
+                SELECT PKG_GROUP_NAME,
+                       IFF(GROUPING(UPPER(DLVY_SOURCE_ID)) = 1, NULL, UPPER(DLVY_SOURCE_ID)) AS SOURCE_ID,
+                       MAX(RUN_DTTM) AS VALIDATED_AT,
+                       COUNT_IF(RECEIVED_FL = FALSE
+                                OR IS_VALID_SEQUENCE = FALSE
+                                OR COALESCE(ROWCOUNT_STATUS, 'ROWCOUNT_OK') <> 'ROWCOUNT_OK') AS VALIDATION_ISSUES
+                FROM LATEST_META
+                GROUP BY GROUPING SETS ((PKG_GROUP_NAME), (PKG_GROUP_NAME, UPPER(DLVY_SOURCE_ID)))
+                """,
+                params,
+            )
+            validation_by_scope = {
+                (str(row.get("PKG_GROUP_NAME") or ""), str(row.get("SOURCE_ID") or "")): row
+                for row in normalize_rows(cur.fetchall())
+            }
+            for latest_row in all_latest_rows:
+                scope = (str(latest_row.get("PKG_GROUP_NAME") or ""), str(latest_row.get("SOURCE_ID") or ""))
+                validation = validation_by_scope.get(scope)
+                if not validation or _num(validation.get("VALIDATION_ISSUES")):
+                    continue
+                validated_at = validation.get("VALIDATED_AT")
+                control_date = latest_row.get("LATEST_CONTROL_DATE")
+                if validated_at and control_date and validated_at > control_date:
+                    latest_row["LATEST_ATTENTION_ROWS"] = 0
+                    latest_row["LATEST_UPDATED_ROWS"] = _num(latest_row.get("LATEST_LOG_ROWS"))
+                    latest_row["LATEST_STATUS_LIST"] = "RESOLVED / READY TO RETRY"
             latest_rows = [row for row in all_latest_rows if not row.get("SOURCE_ID")]
             source_latest_rows = [row for row in all_latest_rows if row.get("SOURCE_ID")]
             history_rows = []
@@ -559,9 +594,11 @@ def _load_raw_detail(group_name):
                EXPECTED_ROWS,
                DATA_ROWS,
                ACTUAL_ROWS,
-               LOADED_AT
+               LOADED_AT,
+               RUN_DTTM
         FROM {RAW_LIM_META_TABLE}
         WHERE PKG_GROUP_NAME = %(group_name)s
+        QUALIFY RUN_DTTM = MAX(RUN_DTTM) OVER (PARTITION BY PKG_GROUP_NAME)
         ORDER BY DLVY_END_DATE DESC, DLVY_SOURCE_ID, FILE_NAME
         """,
         params={"group_name": group_name},
@@ -652,7 +689,57 @@ def _load_ready_detail(group_name):
         use_warehouse=True,
         include_context=True,
     )
-    return normalize_rows(rows)
+    normalized = normalize_rows(rows)
+
+    # SET_READY history is immutable audit data. If a newer RAW metadata
+    # snapshot proves that a previously stopped package now validates, present
+    # the old result as resolved instead of continuing to call it the current
+    # first error.
+    validation_rows = normalize_rows(sf.query_service(
+        f"""
+        WITH LATEST_META AS (
+          SELECT *
+          FROM {RAW_LIM_META_TABLE}
+          WHERE PKG_GROUP_NAME = %(group_name)s
+          QUALIFY RUN_DTTM = MAX(RUN_DTTM) OVER (PARTITION BY PKG_GROUP_NAME)
+        )
+        SELECT DLVY_END_DATE, UPPER(DLVY_SOURCE_ID) AS DLVY_SOURCE_ID,
+               DLVY_PKG_ID, DLVY_PKG_YEAR, DLVY_PKG_YEAR_SEQ_NO,
+               MAX(RUN_DTTM) AS VALIDATED_AT,
+               COUNT_IF(RECEIVED_FL = FALSE
+                        OR IS_VALID_SEQUENCE = FALSE
+                        OR COALESCE(ROWCOUNT_STATUS, 'ROWCOUNT_OK') <> 'ROWCOUNT_OK') AS VALIDATION_ISSUES
+        FROM LATEST_META
+        GROUP BY DLVY_END_DATE, UPPER(DLVY_SOURCE_ID), DLVY_PKG_ID,
+                 DLVY_PKG_YEAR, DLVY_PKG_YEAR_SEQ_NO
+        """,
+        params={"group_name": group_name}, use_warehouse=True, include_context=True,
+    ))
+
+    def package_key(row):
+        return (
+            str(row.get("DLVY_END_DATE") or "")[:10],
+            str(row.get("DLVY_SOURCE_ID") or "").upper(),
+            str(row.get("DLVY_PKG_ID") or ""),
+            str(row.get("DLVY_PKG_YEAR") or ""),
+            str(row.get("DLVY_PKG_YEAR_SEQ_NO") or ""),
+        )
+
+    current_validation = {package_key(row): row for row in validation_rows}
+    for row in normalized:
+        if row.get("STATUS") not in ("STOPPED", "FAILED", "SKIPPED", "BLOCKED"):
+            continue
+        validation = current_validation.get(package_key(row))
+        if not validation or _num(validation.get("VALIDATION_ISSUES")):
+            continue
+        validated_at = validation.get("VALIDATED_AT")
+        control_date = row.get("CONTROL_DATE")
+        if validated_at and control_date and validated_at <= control_date:
+            continue
+        row["ORIGINAL_STATUS"] = row.get("STATUS")
+        row["STATUS"] = "READY_TO_RETRY" if row.get("ORIGINAL_STATUS") == "BLOCKED" else "RESOLVED"
+        row["RESOLVED_AT"] = validated_at
+    return normalized
 
 
 def _load_history_detail(group_name, history_days):
@@ -698,7 +785,7 @@ def _raw_metrics(rows):
 def _ready_metrics(rows):
     return {
         "rows": len(rows),
-        "updated": sum(1 for row in rows if row.get("STATUS") == "UPDATED"),
+        "updated": sum(1 for row in rows if row.get("STATUS") in ("UPDATED", "RESOLVED", "READY_TO_RETRY")),
         "attention": sum(
             1 for row in rows if row.get("STATUS") in ("STOPPED", "FAILED", "SKIPPED", "BLOCKED")
         ),
@@ -1105,15 +1192,16 @@ def investigate_rowcount(group_name):
         for stage_row in stage_rows[:200]:
             stage_name = str(stage_row.get("NAME") or "")
             physical_name = stage_name.rsplit("/", 1)[-1]
-            if physical_name.lower().startswith("deleted_"):
-                continue
-            canonical_match = canonical_filename_re.match(physical_name)
+            is_quarantined = physical_name.lower().startswith("deleted_")
+            effective_name = physical_name[8:] if is_quarantined else physical_name
+            canonical_match = canonical_filename_re.match(effective_name)
             canonical_name = canonical_match.group(0) if canonical_match else ""
-            raw_row = raw_by_file.get(physical_name, {})
+            raw_row = raw_by_file.get(effective_name, {})
             disk_rows.append({
                 "DW_FILE_NM": physical_name,
                 "DATA_FILE_NAME": canonical_name,
-                "FILE_TYPE": "CONTROL" if canonical_name[7:14] == "000_000" else "DATA",
+                "FILE_TYPE": "QUARANTINED" if is_quarantined else "CONTROL" if canonical_name[7:14] == "000_000" else "DATA",
+                "IS_QUARANTINED": is_quarantined,
                 "DATA_ROWS": raw_row.get("DATA_ROWS"),
                 "PHYSICAL_ROWS": raw_row.get("PHYSICAL_ROWS"),
                 "DW_FILE_CHECK_SUM": stage_row.get("MD5"),
@@ -1125,21 +1213,22 @@ def investigate_rowcount(group_name):
         disk_canonical_counts = {}
         for row in disk_rows:
             canonical_name = str(row.get("DATA_FILE_NAME") or "")
-            if canonical_name:
+            if canonical_name and not row.get("IS_QUARANTINED"):
                 disk_canonical_counts[canonical_name] = disk_canonical_counts.get(canonical_name, 0) + 1
         for row in disk_rows:
             duplicate_copies = disk_canonical_counts.get(str(row.get("DATA_FILE_NAME") or ""), 0)
-            row["IS_DUPLICATE"] = duplicate_copies > 1
-            row["DUPLICATE_COPIES"] = duplicate_copies if duplicate_copies > 1 else None
+            row["IS_DUPLICATE"] = duplicate_copies > 1 and not row.get("IS_QUARANTINED")
+            row["DUPLICATE_COPIES"] = duplicate_copies if row["IS_DUPLICATE"] else None
         duplicate_disk_files = sum(1 for row in disk_rows if row.get("IS_DUPLICATE"))
         duplicate_disk_sets = sum(1 for count in disk_canonical_counts.values() if count > 1)
+        quarantined_disk_files = sum(1 for row in disk_rows if row.get("IS_QUARANTINED"))
         checks.append({
             "key": "disk_files", "title": "Control and data files on disk",
             "status": "WARNING" if duplicate_disk_files or not disk_rows else "PASS",
             "summary": (
-                f"Found {duplicate_disk_sets} duplicate set(s) containing {duplicate_disk_files} physical files among {len(disk_rows)} objects in @{stage}."
+                f"Found {duplicate_disk_sets} duplicate set(s) containing {duplicate_disk_files} active files; {quarantined_disk_files} quarantined file(s) are preserved."
                 if duplicate_disk_files
-                else f"Found {len(disk_rows)} control/data objects for this package in @{stage}."
+                else f"Found {len(disk_rows) - quarantined_disk_files} active control/data object(s) and {quarantined_disk_files} quarantined file(s) in @{stage}."
                 if disk_rows else f"No package object was found in @{stage}."
             ),
             "rows": disk_rows,
@@ -1258,7 +1347,8 @@ def resolve_duplicate_files(group_name):
                     relative_source = source_url[len(stage_location):]
                     source_stage_url = f"@{stage}/{relative_source}"
                     physical_name = source_url.rsplit("/", 1)[-1]
-                    quarantined_name = f"deleted_{physical_name}"
+                    source_folder = relative_source.rpartition("/")[0]
+                    quarantined_name = f"{source_folder + '/' if source_folder else ''}deleted_{physical_name}"
                     escaped_source = source_stage_url.replace("'", "''")
                     escaped_target = quarantined_name.replace("'", "''")
                     escaped_quarantine_pattern = re.escape(quarantined_name).replace("'", "''")
@@ -1271,8 +1361,14 @@ def resolve_duplicate_files(group_name):
                     cur.execute(f"LIST @{stage} PATTERN='.*{escaped_quarantine_pattern}$'")
                     if not cur.fetchone():
                         raise RuntimeError(f"Could not verify quarantined file {quarantined_name}.")
-                    escaped_file = re.escape(source_url).replace("'", "''")
-                    cur.execute(f"REMOVE @{stage} PATTERN='^{escaped_file}$'")
+                    escaped_source_location = source_stage_url.replace("'", "''")
+                    cur.execute(f"REMOVE '{escaped_source_location}'")
+                    escaped_original_pattern = re.escape(relative_source).replace("'", "''")
+                    cur.execute(f"LIST @{stage} PATTERN='.*{escaped_original_pattern}$'")
+                    if cur.fetchone():
+                        raise RuntimeError(
+                            f"The renamed copy was preserved, but the original file {physical_name} could not be removed. RAW was not changed."
+                        )
                     stage_files_renamed += 1
 
                 placeholders = ", ".join(f"%(removed_file_{index})s" for index in range(len(removed_files)))
