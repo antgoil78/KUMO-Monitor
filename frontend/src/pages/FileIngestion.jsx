@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { fileIngestionApi } from '../fileIngestionApi.js'
 import PageHeader from '../components/PageHeader.jsx'
 import './FileIngestion.css'
@@ -607,37 +608,70 @@ function SuggestedResolution({ error, file, onClose }) {
   )
 }
 
-function DuplicateFileComparison({ check }) {
+function FileDetailsHover({ row }) {
+  const [position, setPosition] = useState(null)
+  function show(event) {
+    const rect = event.currentTarget.getBoundingClientRect()
+    setPosition({ left: Math.min(rect.left, window.innerWidth - 330), top: Math.min(rect.bottom + 5, window.innerHeight - 155) })
+  }
+  return <>
+    <strong onMouseEnter={show} onMouseLeave={() => setPosition(null)}>{formatValue(row.DW_FILE_NM)}</strong>
+    {position && createPortal(
+      <div className="lim-file-hover-card visible" style={position} onMouseEnter={() => setPosition(position)} onMouseLeave={() => setPosition(null)}>
+        <span><b>Checksum</b>{formatValue(row.DW_FILE_CHECK_SUM)}</span>
+        <span><b>Physical rows</b>{formatValue(row.PHYSICAL_ROWS)}</span>
+        <span><b>Data rows</b>{formatValue(row.DATA_ROWS)}</span>
+        <span><b>Content signature</b>{formatValue(row.CONTENT_SIGNATURE)}</span>
+        {row.STAGE_URL && <span><b>Stage path</b>{formatValue(row.STAGE_URL)}</span>}
+      </div>, document.body
+    )}
+  </>
+}
+
+function DuplicateFileComparison({ check, selectedFiles, onToggleFile }) {
   const headersByFile = new Map((check.headers || []).map(header => [String(header.DW_FILE_NM), header]))
   const rows = (check.rows || []).map(file => ({ ...file, ...(headersByFile.get(String(file.DW_FILE_NM)) || {}) }))
   const differingFields = new Set(LIM_HEADER_FIELDS.filter(field => new Set(rows.map(row => String(row[field] ?? ''))).size > 1))
   return (
     <div className="lim-table-scroll lim-file-comparison-wrap">
       <table className="lim-table compact lim-file-comparison">
-        <thead><tr><th>Filename</th><th>Loaded at</th>{LIM_HEADER_FIELDS.map(field => <th key={field}>{field}</th>)}</tr></thead>
-        <tbody>{rows.map((row, index) => <tr key={`${row.DW_FILE_NM}-${index}`}>
+        <thead><tr><th className="lim-remove-column">Remove</th><th>Physical filename</th><th>Canonical file</th><th>Data rows</th><th>Loaded at</th>{LIM_HEADER_FIELDS.map(field => <th key={field}>{field}</th>)}</tr></thead>
+        <tbody>{rows.map((row, index) => {
+          const selectionId = String(row.SELECTION_ID || row.DW_FILE_NM)
+          return <tr key={`${selectionId}-${index}`} className={row.IS_DUPLICATE ? 'lim-duplicate-file-row' : ''}>
+          <td className="lim-remove-column"><input type="checkbox" checked={selectedFiles.has(selectionId)} onChange={() => onToggleFile(selectionId)} aria-label={`Quarantine ${row.DW_FILE_NM}`} /></td>
           <td className="lim-file-hover-cell">
-            <strong>{formatValue(row.DW_FILE_NM)}</strong>
-            <div className="lim-file-hover-card">
-              <span><b>Checksum</b>{formatValue(row.DW_FILE_CHECK_SUM)}</span>
-              <span><b>Physical rows</b>{formatValue(row.PHYSICAL_ROWS)}</span>
-              <span><b>Data rows</b>{formatValue(row.DATA_ROWS)}</span>
-              <span><b>Content signature</b>{formatValue(row.CONTENT_SIGNATURE)}</span>
-            </div>
+            <FileDetailsHover row={row} />
+            {row.IS_DUPLICATE && <span className="lim-duplicate-file-badge">Duplicate ×{row.DUPLICATE_COPIES}</span>}
           </td>
+          <td>{formatValue(row.DATA_FILE_NAME)}</td>
+          <td><strong>{formatValue(row.DATA_ROWS, '0')}</strong></td>
           <td className="lim-nowrap">{formatDate(row.LOADED_AT)}</td>
           {LIM_HEADER_FIELDS.map(field => <td key={field} className={differingFields.has(field) ? 'lim-header-difference' : ''}>{formatValue(row[field])}</td>)}
-        </tr>)}</tbody>
+        </tr>})}</tbody>
       </table>
     </div>
   )
 }
 
-function InvestigationResults({ investigation }) {
+function InvestigationResults({ investigation, onResolveDuplicates, resolving, resolutionResult }) {
+  const [selectedFiles, setSelectedFiles] = useState(() => new Set())
+  const duplicateFileKey = (investigation?.data?.checks || [])
+    .filter(check => ['duplicate_files', 'duplicate_data_files', 'disk_files'].includes(check.key))
+    .flatMap(check => check.rows || []).map(row => row.SELECTION_ID || row.DW_FILE_NM).join('|')
+  useEffect(() => setSelectedFiles(new Set()), [duplicateFileKey])
   if (!investigation) return null
   if (investigation.loading) return <div className="lim-investigation"><div className="lim-detail-loading">Running checks sequentially…</div></div>
   if (investigation.error) return <div className="lim-investigation"><div className="alert error">{investigation.error}</div></div>
   const data = investigation.data
+  function toggleFile(fileName) {
+    setSelectedFiles(previous => {
+      const next = new Set(previous)
+      if (next.has(fileName)) next.delete(fileName)
+      else next.add(fileName)
+      return next
+    })
+  }
   return (
     <section className="lim-investigation">
       <div className="lim-investigation-heading">
@@ -647,10 +681,18 @@ function InvestigationResults({ investigation }) {
       {(data?.checks || []).map((check, index) => {
         const rows = check.rows || []
         const columns = rows.length ? Object.keys(rows[0]) : []
+        const removableCheck = ['duplicate_files', 'duplicate_data_files', 'disk_files'].includes(check.key)
+        const rowNames = new Set(rows.map(row => String(row.SELECTION_ID || row.DW_FILE_NM)))
+        const selectedForCheck = [...selectedFiles].filter(fileName => rowNames.has(fileName))
         return <details key={check.key} className={`lim-investigation-check ${String(check.status).toLowerCase()}`} open={index === 0 || check.status === 'WARNING'}>
           <summary><span className="lim-check-number">{index + 1}</span><div><strong>{check.title}</strong><small>{check.summary}</small></div><b>{check.status}</b></summary>
-          {check.key === 'duplicate_files' && rows.length > 0
-            ? <DuplicateFileComparison check={check} />
+          {removableCheck && (check.key === 'disk_files' ? rows.length > 0 : rows.length > 1) && <div className="lim-duplicate-action">
+            <div><strong>Quarantine files</strong><span>Select files to remove from RAW and rename on disk with a deleted_ prefix so they cannot load again.</span></div>
+            <button type="button" disabled={resolving || selectedForCheck.length === 0} onClick={() => onResolveDuplicates(selectedForCheck)}>{resolving ? 'Quarantining…' : `Quarantine selected (${selectedForCheck.length})`}</button>
+          </div>}
+          {removableCheck && resolutionResult && <div className={`alert ${resolutionResult.error ? 'error' : 'success'}`}>{resolutionResult.error || `Quarantined ${resolutionResult.stageFilesRenamed || 0} file(s) with a deleted_ prefix and removed ${resolutionResult.rawRowsDeleted || 0} corresponding RAW row(s).`}</div>}
+          {removableCheck && rows.length > 0
+            ? <DuplicateFileComparison check={check} selectedFiles={selectedFiles} onToggleFile={toggleFile} />
             : rows.length > 0 && <div className="lim-table-scroll"><table className="lim-table compact"><thead><tr>{columns.map(column => <th key={column}>{column.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{columns.map(column => <td key={column}>{formatValue(row[column])}</td>)}</tr>)}</tbody></table></div>}
         </details>
       })}
@@ -701,6 +743,8 @@ function HistoryGroups({ rows }) {
 function LatestRunDetails({ detail, onClose, standalone = false }) {
   const [resolutionError, setResolutionError] = useState(null)
   const [investigation, setInvestigation] = useState(null)
+  const [duplicateResolution, setDuplicateResolution] = useState(null)
+  const [resolvingDuplicates, setResolvingDuplicates] = useState(false)
   if (!detail) return null
 
   const rows = detail.data?.rows || []
@@ -720,6 +764,23 @@ function LatestRunDetails({ detail, onClose, standalone = false }) {
       setInvestigation({ loading: false, error: null, data })
     } catch (err) {
       setInvestigation({ loading: false, error: err.message || String(err), data: null })
+    }
+  }
+
+  async function resolveDuplicates(removeFiles) {
+    const file = detail.data?.attentionFile
+    const confirmed = window.confirm(`Quarantine ${removeFiles.length} selected file(s)? Their RAW rows will be removed and the staged files will be renamed with a deleted_ prefix.`)
+    if (!confirmed) return
+    setResolvingDuplicates(true)
+    setDuplicateResolution(null)
+    try {
+      const result = await fileIngestionApi.resolveDuplicates(detail.groupName, file?.FILE_NAME, firstError?.DLVY_SOURCE_ID || detail.sourceId, removeFiles)
+      setDuplicateResolution(result)
+      await runInvestigation(firstError)
+    } catch (err) {
+      setDuplicateResolution({ error: err.message || String(err) })
+    } finally {
+      setResolvingDuplicates(false)
     }
   }
 
@@ -744,7 +805,7 @@ function LatestRunDetails({ detail, onClose, standalone = false }) {
             {firstError ? (
               <>
                 <FirstErrorSummary error={firstError} file={detail.data?.attentionFile} onResolve={setResolutionError} onInvestigate={runInvestigation} investigating={investigation?.loading} />
-                <InvestigationResults investigation={investigation} />
+                <InvestigationResults investigation={investigation} onResolveDuplicates={resolveDuplicates} resolving={resolvingDuplicates} resolutionResult={duplicateResolution} />
                 <RemainingResults rows={remainingRows} />
               </>
             ) : rows.length ? (

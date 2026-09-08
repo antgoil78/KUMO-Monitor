@@ -1003,7 +1003,8 @@ def investigate_rowcount(group_name):
         }
         physical_files = normalize_rows(sf.query_service(
             f"""
-            SELECT DW_FILE_NM, DW_FILE_CHECK_SUM, MIN(DW_LOAD_DTTM) AS LOADED_AT,
+            SELECT %(file_name)s AS DATA_FILE_NAME,
+                   DW_FILE_NM, DW_FILE_CHECK_SUM, MIN(DW_LOAD_DTTM) AS LOADED_AT,
                    COUNT(*) AS PHYSICAL_ROWS,
                    COUNT_IF(SUBSTR(TRIM(DATA), 1, 2) = '10') AS DATA_ROWS,
                    HASH_AGG(DATA) AS CONTENT_SIGNATURE
@@ -1039,95 +1040,109 @@ def investigate_rowcount(group_name):
             "rows": physical_files, "headers": headers,
         }]
 
-        duplicate_rows = normalize_rows(sf.query_service(
+        related_physical_files = normalize_rows(sf.query_service(
             f"""
-            WITH DATA_ROWS AS (
-              SELECT {canonical_pattern} AS DATA_FILE_NAME,
-                     DW_FILE_NM, DW_FILE_ROW_NUMBER, DATA,
-                     SUBSTR(DATA, 59) AS DATA_WITHOUT_DLVY_FIELDS
-              FROM {raw_table}
-              WHERE {data_file_filter}
-                AND SUBSTR(TRIM(DATA), 1, 2) = '10'
-            ), DUPLICATES AS (
-              SELECT 'WITH_DLVY_FIELDS' AS COMPARISON, DATA_FILE_NAME, DW_FILE_NM,
-                     DATA AS COMPARED_DATA, COUNT(*) AS OCCURRENCES,
-                     MIN(DW_FILE_ROW_NUMBER) AS FIRST_ROW_NUMBER,
-                     MAX(DW_FILE_ROW_NUMBER) AS LAST_ROW_NUMBER
-              FROM DATA_ROWS
-              GROUP BY DATA_FILE_NAME, DW_FILE_NM, DATA
-              HAVING COUNT(*) > 1
-              UNION ALL
-              SELECT 'WITHOUT_DLVY_FIELDS' AS COMPARISON, DATA_FILE_NAME, DW_FILE_NM,
-                     DATA_WITHOUT_DLVY_FIELDS AS COMPARED_DATA, COUNT(*) AS OCCURRENCES,
-                     MIN(DW_FILE_ROW_NUMBER) AS FIRST_ROW_NUMBER,
-                     MAX(DW_FILE_ROW_NUMBER) AS LAST_ROW_NUMBER
-              FROM DATA_ROWS
-              GROUP BY DATA_FILE_NAME, DW_FILE_NM, DATA_WITHOUT_DLVY_FIELDS
-              HAVING COUNT(*) > 1
-            )
-            SELECT * FROM DUPLICATES
-            ORDER BY COMPARISON, OCCURRENCES DESC, DW_FILE_NM
-            LIMIT 200
+            SELECT {canonical_pattern} AS DATA_FILE_NAME,
+                   DW_FILE_NM, DW_FILE_CHECK_SUM,
+                   MIN(DW_LOAD_DTTM) AS LOADED_AT,
+                   COUNT(*) AS PHYSICAL_ROWS,
+                   COUNT_IF(SUBSTR(TRIM(DATA), 1, 2) = '10') AS DATA_ROWS,
+                   HASH_AGG(DATA) AS CONTENT_SIGNATURE
+            FROM {raw_table}
+            WHERE {data_file_filter}
+            GROUP BY {canonical_pattern}, DW_FILE_NM, DW_FILE_CHECK_SUM
+            ORDER BY DATA_FILE_NAME, LOADED_AT DESC, DW_FILE_NM DESC
             """,
             params=investigation_params, use_warehouse=True, include_context=True,
         ))
-        checks.append({
-            "key": "duplicate_rows", "title": "Duplicate rows within each file",
-            "status": "WARNING" if duplicate_rows else "PASS",
-            "summary": f"Found {len(duplicate_rows)} duplicate groups when comparing with and without DLVY fields." if duplicate_rows else "No duplicates were found within a file, with or without DLVY fields.",
-            "rows": duplicate_rows,
-        })
-
-        cross_file_rows = normalize_rows(sf.query_service(
-            f"""
-            WITH DATA_ROWS AS (
-              SELECT {canonical_pattern} AS DATA_FILE_NAME,
-                     DW_FILE_NM, DATA, SUBSTR(DATA, 59) AS DATA_WITHOUT_DLVY_FIELDS
-              FROM {raw_table}
-              WHERE {data_file_filter}
-                AND SUBSTR(TRIM(DATA), 1, 2) = '10'
-            ), DUPLICATES AS (
-              SELECT 'WITH_DLVY_FIELDS' AS COMPARISON, DATA_FILE_NAME,
-                     DATA AS COMPARED_DATA,
-                     COUNT(DISTINCT DW_FILE_NM) AS FILE_COUNT,
-                     COUNT(*) AS TOTAL_OCCURRENCES,
-                     LISTAGG(DISTINCT DW_FILE_NM, '\n') WITHIN GROUP (ORDER BY DW_FILE_NM) AS FOUND_IN_FILES
-              FROM DATA_ROWS
-              GROUP BY DATA_FILE_NAME, DATA
-              HAVING COUNT(DISTINCT DW_FILE_NM) > 1
-              UNION ALL
-              SELECT 'WITHOUT_DLVY_FIELDS' AS COMPARISON, DATA_FILE_NAME,
-                     DATA_WITHOUT_DLVY_FIELDS AS COMPARED_DATA,
-                     COUNT(DISTINCT DW_FILE_NM) AS FILE_COUNT,
-                     COUNT(*) AS TOTAL_OCCURRENCES,
-                     LISTAGG(DISTINCT DW_FILE_NM, '\n') WITHIN GROUP (ORDER BY DW_FILE_NM) AS FOUND_IN_FILES
-              FROM DATA_ROWS
-              GROUP BY DATA_FILE_NAME, DATA_WITHOUT_DLVY_FIELDS
-              HAVING COUNT(DISTINCT DW_FILE_NM) > 1
+        canonical_counts = {}
+        for row in related_physical_files:
+            canonical_name = str(row.get("DATA_FILE_NAME") or "")
+            canonical_counts[canonical_name] = canonical_counts.get(canonical_name, 0) + 1
+        duplicate_data_files = [
+            row for row in related_physical_files
+            if canonical_counts.get(str(row.get("DATA_FILE_NAME") or ""), 0) > 1
+        ]
+        data_headers = []
+        if duplicate_data_files:
+            parsed_header_sql = ",\n                   ".join(
+                f"TRIM(SUBSTR(DATA, {offset + 1}, {length})) AS {name}"
+                for name, offset, length in LIM_HEADER_FIELDS
             )
-            SELECT * FROM DUPLICATES
-            ORDER BY COMPARISON, FILE_COUNT DESC, TOTAL_OCCURRENCES DESC
-            LIMIT 200
-            """,
-            params=investigation_params, use_warehouse=True, include_context=True,
-        ))
+            duplicate_names = list({row.get("DATA_FILE_NAME") for row in duplicate_data_files})
+            name_placeholders = ", ".join(f"%(duplicate_name_{index})s" for index in range(len(duplicate_names)))
+            data_headers = normalize_rows(sf.query_service(
+                f"""
+                SELECT DW_FILE_NM, DW_FILE_ROW_NUMBER, {parsed_header_sql}
+                FROM {raw_table}
+                WHERE {canonical_pattern} IN ({name_placeholders})
+                  AND SUBSTR(TRIM(DATA), 1, 2) = '00'
+                ORDER BY DW_FILE_NM, DW_FILE_ROW_NUMBER
+                """,
+                params={f"duplicate_name_{index}": value for index, value in enumerate(duplicate_names)},
+                use_warehouse=True, include_context=True,
+            ))
         checks.append({
-            "key": "cross_file_duplicate_rows", "title": "Matching rows across duplicate files",
-            "status": "WARNING" if cross_file_rows else "PASS",
-            "summary": f"Found {len(cross_file_rows)} cross-file duplicate groups when comparing with and without DLVY fields." if cross_file_rows else "No rows match across files, with or without DLVY fields.",
-            "rows": cross_file_rows,
+            "key": "duplicate_data_files", "title": "Duplicate data files",
+            "status": "WARNING" if duplicate_data_files else "PASS",
+            "summary": f"Found {len(duplicate_data_files)} physical copies across related data files." if duplicate_data_files else "No related data file has multiple physical copies.",
+            "rows": duplicate_data_files, "headers": data_headers,
         })
 
-        escaped_pattern = re.escape(file_name).replace("'", "''")
+        package_pattern = f".*{re.escape(data_file_prefix)}.*{re.escape(package_suffix)}.*".replace("'", "''")
         stage_rows = normalize_rows(sf.query_service(
-            f"LIST @{stage} PATTERN='.*{escaped_pattern}.*'",
+            f"LIST @{stage} PATTERN='{package_pattern}'",
             use_warehouse=True, include_context=True,
         ))
+        raw_by_file = {
+            str(row.get("DW_FILE_NM")): row
+            for row in [*physical_files, *related_physical_files]
+        }
+        canonical_filename_re = re.compile(
+            r"^[A-Z0-9]{10}_[0-9]{3}_[0-9]{3}_0000_[0-9]{9}_[0-9]{8}", re.IGNORECASE
+        )
+        disk_rows = []
+        for stage_row in stage_rows[:200]:
+            stage_name = str(stage_row.get("NAME") or "")
+            physical_name = stage_name.rsplit("/", 1)[-1]
+            if physical_name.lower().startswith("deleted_"):
+                continue
+            canonical_match = canonical_filename_re.match(physical_name)
+            canonical_name = canonical_match.group(0) if canonical_match else ""
+            raw_row = raw_by_file.get(physical_name, {})
+            disk_rows.append({
+                "DW_FILE_NM": physical_name,
+                "DATA_FILE_NAME": canonical_name,
+                "FILE_TYPE": "CONTROL" if canonical_name[7:14] == "000_000" else "DATA",
+                "DATA_ROWS": raw_row.get("DATA_ROWS"),
+                "PHYSICAL_ROWS": raw_row.get("PHYSICAL_ROWS"),
+                "DW_FILE_CHECK_SUM": stage_row.get("MD5"),
+                "SIZE": stage_row.get("SIZE"),
+                "LOADED_AT": stage_row.get("LAST_MODIFIED"),
+                "STAGE_URL": stage_name,
+                "SELECTION_ID": stage_name,
+            })
+        disk_canonical_counts = {}
+        for row in disk_rows:
+            canonical_name = str(row.get("DATA_FILE_NAME") or "")
+            if canonical_name:
+                disk_canonical_counts[canonical_name] = disk_canonical_counts.get(canonical_name, 0) + 1
+        for row in disk_rows:
+            duplicate_copies = disk_canonical_counts.get(str(row.get("DATA_FILE_NAME") or ""), 0)
+            row["IS_DUPLICATE"] = duplicate_copies > 1
+            row["DUPLICATE_COPIES"] = duplicate_copies if duplicate_copies > 1 else None
+        duplicate_disk_files = sum(1 for row in disk_rows if row.get("IS_DUPLICATE"))
+        duplicate_disk_sets = sum(1 for count in disk_canonical_counts.values() if count > 1)
         checks.append({
-            "key": "disk_files", "title": "Files on disk",
-            "status": "PASS" if stage_rows else "WARNING",
-            "summary": f"Found {len(stage_rows)} matching objects in @{stage}." if stage_rows else f"No matching object was found in @{stage}.",
-            "rows": stage_rows[:200],
+            "key": "disk_files", "title": "Control and data files on disk",
+            "status": "WARNING" if duplicate_disk_files or not disk_rows else "PASS",
+            "summary": (
+                f"Found {duplicate_disk_sets} duplicate set(s) containing {duplicate_disk_files} physical files among {len(disk_rows)} objects in @{stage}."
+                if duplicate_disk_files
+                else f"Found {len(disk_rows)} control/data objects for this package in @{stage}."
+                if disk_rows else f"No package object was found in @{stage}."
+            ),
+            "rows": disk_rows,
         })
         return jsonify({
             "ok": True, "source": "snowflake", "fileName": file_name,
@@ -1138,6 +1153,145 @@ def investigate_rowcount(group_name):
         return _json_error(exc, 400)
     except Exception as exc:
         current_app.logger.exception("Failed ROWCOUNT_MISMATCH investigation for %s", group_name)
+        return _json_error(exc, 500)
+
+
+@file_ingestion_bp.post("/api/file-ingestion/<path:group_name>/resolve-duplicates")
+def resolve_duplicate_files(group_name):
+    """Remove explicitly selected physical copies from RAW and the stage."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        file_name = str(payload.get("fileName") or "").strip()
+        if not file_name or len(file_name) > 500:
+            return _json_error("A valid fileName is required.", 400)
+        if payload.get("confirmation") != "REMOVE_DUPLICATES":
+            return _json_error("Duplicate removal confirmation is required.", 400)
+        requested_files = payload.get("removeFiles")
+        if not isinstance(requested_files, list) or not requested_files:
+            return _json_error("Select at least one duplicate file to remove.", 400)
+        if any(not isinstance(value, str) or not value.strip() or len(value) > 2000 for value in requested_files):
+            return _json_error("Every selected file must have a valid filename.", 400)
+        requested_files = list(dict.fromkeys(value.strip() for value in requested_files))
+
+        source_id = _identifier(payload.get("sourceId"), "source ID") if payload.get("sourceId") else None
+        if config.USE_MOCK or not sf.is_configured():
+            return jsonify({"ok": True, "source": "mock", "retainedFiles": [file_name],
+                            "removedFiles": [], "rawRowsDeleted": 0, "stageFilesRenamed": 0})
+
+        meta = normalize_rows(sf.query_service(
+            f"""
+            SELECT RAW_TABLE
+            FROM {RAW_LIM_META_TABLE}
+            WHERE PKG_GROUP_NAME = %(group_name)s
+              AND FILE_NAME = %(file_name)s
+              {"AND UPPER(DLVY_SOURCE_ID) = %(source_id)s" if source_id else ""}
+            ORDER BY RUN_DTTM DESC
+            LIMIT 1
+            """,
+            params={"group_name": group_name, "file_name": file_name,
+                    **({"source_id": source_id} if source_id else {})},
+            use_warehouse=True, include_context=True,
+        ))
+        if not meta:
+            return _json_error("The file was not found in the latest LIM metadata.", 404)
+
+        raw_table = _fqn(meta[0].get("RAW_TABLE"), "RAW table")
+        stage = _fqn(LIM_STAGE, "LIM stage")
+        canonical_pattern = (
+            "REGEXP_SUBSTR(REGEXP_SUBSTR(DW_FILE_NM, '[^/]+$'), "
+            "'^[A-Z0-9]{10}_[0-9]{3}_[0-9]{3}_0000_[0-9]{9}_[0-9]{8}')"
+        )
+        data_file_prefix = file_name[:7]
+        package_suffix = file_name[14:] if len(file_name) > 14 else ""
+        physical_files = normalize_rows(sf.query_service(
+            f"""
+            SELECT {canonical_pattern} AS DATA_FILE_NAME, DW_FILE_NM,
+                   MIN(DW_LOAD_DTTM) AS LOADED_AT, HASH_AGG(DATA) AS CONTENT_SIGNATURE
+            FROM {raw_table}
+            WHERE {canonical_pattern} = %(file_name)s
+               OR ({canonical_pattern} LIKE %(data_file_pattern)s AND {canonical_pattern} <> %(file_name)s)
+            GROUP BY {canonical_pattern}, DW_FILE_NM
+            ORDER BY DATA_FILE_NAME, LOADED_AT DESC, DW_FILE_NM DESC
+            """,
+            params={"file_name": file_name, "data_file_pattern": f"{data_file_prefix}%{package_suffix}"},
+            use_warehouse=True, include_context=True,
+        ))
+        package_pattern = f".*{re.escape(data_file_prefix)}.*{re.escape(package_suffix)}.*".replace("'", "''")
+        stage_rows = normalize_rows(sf.query_service(
+            f"LIST @{stage} PATTERN='{package_pattern}'", use_warehouse=True, include_context=True,
+        ))
+        stage_by_url = {str(row.get("NAME")): row for row in stage_rows
+                        if not str(row.get("NAME") or "").rsplit("/", 1)[-1].lower().startswith("deleted_")}
+        stage_by_basename = {}
+        for stage_url, row in stage_by_url.items():
+            stage_by_basename.setdefault(stage_url.rsplit("/", 1)[-1], []).append(row)
+
+        selected_stage_rows = []
+        for selected in requested_files:
+            if selected in stage_by_url:
+                selected_stage_rows.append(stage_by_url[selected])
+                continue
+            basename_matches = stage_by_basename.get(selected, [])
+            if len(basename_matches) != 1:
+                return _json_error("A selected staged file is missing or ambiguous. Run the investigation again.", 409)
+            selected_stage_rows.append(basename_matches[0])
+        removed_files = [str(row.get("NAME")).rsplit("/", 1)[-1] for row in selected_stage_rows]
+        retained_files = [str(row.get("DW_FILE_NM")) for row in physical_files
+                          if str(row.get("DW_FILE_NM")) not in removed_files]
+        raw_rows_deleted = 0
+        stage_files_renamed = 0
+        role = _identifier(LIM_ROLE, "LIM role")
+        with sf.connection_scope(force_service=True) as conn:
+            cur = conn.cursor(DictCursor)
+            try:
+                cur.execute(f"USE ROLE {role}")
+                cur.execute(f"SELECT GET_STAGE_LOCATION(@{stage}) AS STAGE_LOCATION")
+                stage_location_row = cur.fetchone() or {}
+                stage_location = str(stage_location_row.get("STAGE_LOCATION") or "").rstrip("/") + "/"
+                # COPY FILES with a target filename creates the quarantined
+                # object first. Only after it is verified do we remove the
+                # original stage name and its already-loaded RAW rows.
+                for stage_row in selected_stage_rows:
+                    source_url = str(stage_row.get("NAME"))
+                    if not stage_location.strip("/") or not source_url.startswith(stage_location):
+                        raise RuntimeError(f"Could not resolve {source_url} relative to the LIM stage.")
+                    relative_source = source_url[len(stage_location):]
+                    source_stage_url = f"@{stage}/{relative_source}"
+                    physical_name = source_url.rsplit("/", 1)[-1]
+                    quarantined_name = f"deleted_{physical_name}"
+                    escaped_source = source_stage_url.replace("'", "''")
+                    escaped_target = quarantined_name.replace("'", "''")
+                    escaped_quarantine_pattern = re.escape(quarantined_name).replace("'", "''")
+                    cur.execute(f"LIST @{stage} PATTERN='.*{escaped_quarantine_pattern}$'")
+                    if cur.fetchone():
+                        return _json_error(f"The quarantine target {quarantined_name} already exists.", 409)
+                    cur.execute(
+                        f"COPY FILES INTO @{stage} FROM (SELECT '{escaped_source}', '{escaped_target}')"
+                    )
+                    cur.execute(f"LIST @{stage} PATTERN='.*{escaped_quarantine_pattern}$'")
+                    if not cur.fetchone():
+                        raise RuntimeError(f"Could not verify quarantined file {quarantined_name}.")
+                    escaped_file = re.escape(source_url).replace("'", "''")
+                    cur.execute(f"REMOVE @{stage} PATTERN='^{escaped_file}$'")
+                    stage_files_renamed += 1
+
+                placeholders = ", ".join(f"%(removed_file_{index})s" for index in range(len(removed_files)))
+                delete_params = {f"removed_file_{index}": value for index, value in enumerate(removed_files)}
+                cur.execute(
+                    f"DELETE FROM {raw_table} WHERE DW_FILE_NM IN ({placeholders})",
+                    delete_params,
+                )
+                raw_rows_deleted = max(0, int(cur.rowcount or 0))
+            finally:
+                cur.close()
+
+        return jsonify({"ok": True, "source": "snowflake", "retainedFiles": retained_files,
+                        "removedFiles": removed_files, "rawRowsDeleted": raw_rows_deleted,
+                        "stageFilesRenamed": stage_files_renamed})
+    except ValueError as exc:
+        return _json_error(exc, 400)
+    except Exception as exc:
+        current_app.logger.exception("Failed duplicate resolution for %s", group_name)
         return _json_error(exc, 500)
 
 

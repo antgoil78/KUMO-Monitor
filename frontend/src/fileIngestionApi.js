@@ -71,6 +71,13 @@ export const fileIngestionApi = {
     })
   },
 
+  resolveDuplicates: (groupName, fileName, sourceId, removeFiles) =>
+    requestJson(`/api/file-ingestion/${encodeURIComponent(groupName)}/resolve-duplicates`, {
+      method: 'POST',
+      body: JSON.stringify({ fileName, sourceId, removeFiles, confirmation: 'REMOVE_DUPLICATES' }),
+      timeoutMs: 5 * 60 * 1000
+    }),
+
   history: (groupName, historyDays = 30, sourceId) =>
     requestJson(
       `/api/file-ingestion/${encodeURIComponent(groupName)}/history?historyDays=${encodeURIComponent(historyDays)}${sourceId ? `&sourceId=${encodeURIComponent(sourceId)}` : ''}`,
