@@ -631,6 +631,21 @@ function DependencySelect({ label, tone, options, value, onChange }) {
     </div>
   )
 }
+
+function parseDbtCommand(command) {
+  const parts = String(command || '').trim().split(/\s+/).filter(Boolean)
+  if (parts[0]?.toLowerCase() === 'dbt') parts.shift()
+  const requestedAction = String(parts.shift() || 'build').toLowerCase()
+  const action = ['build', 'run', 'retry'].includes(requestedAction) ? requestedAction : 'build'
+  const fullRefresh = parts.includes('-f') || parts.includes('--full-refresh')
+  const modelPath = parts.filter(part => !['-s', '--select', '-f', '--full-refresh'].includes(part)).join(' ')
+  return { action, fullRefresh, modelPath }
+}
+
+function composeDbtCommand({ action, fullRefresh, modelPath }) {
+  return ['dbt', action || 'build', fullRefresh ? '-f' : '-s', String(modelPath || '').trim()].filter(Boolean).join(' ')
+}
+
 function EditModal({ workflowId, onClose, onSaved, notify }) {
   const [detail, setDetail] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -672,6 +687,13 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
   }
   function patchNotif(field, value) {
     setDetail(prev => ({ ...prev, notifications: { ...(prev.notifications || {}), [field]: value } }))
+  }
+
+  function patchDbtCommand(changes) {
+    setDetail(prev => ({
+      ...prev,
+      dbtCommand: composeDbtCommand({ ...parseDbtCommand(prev.dbtCommand), ...changes })
+    }))
   }
 
   function notificationSummary() {
@@ -754,7 +776,25 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
           <div className="form-field"><label>Description</label><textarea rows="2" value={detail.description || ''} onChange={e => patch('description', e.target.value)} /></div>
           {String(detail.workflowType).toUpperCase() === 'DBT' ? (
             <>
-              <div className="form-field"><label>DBT Command</label><textarea rows="3" value={detail.dbtCommand || ''} onChange={e => patch('dbtCommand', e.target.value)} /></div>
+              <div className="dbt-command-builder">
+                <div className="form-field">
+                  <label>DBT command</label>
+                  <select value={parseDbtCommand(detail.dbtCommand).action} onChange={e => patchDbtCommand({ action: e.target.value })}>
+                    <option value="build">Build</option>
+                    <option value="run">Run</option>
+                    <option value="retry">Retry</option>
+                  </select>
+                </div>
+                <label className={`dbt-full-refresh ${parseDbtCommand(detail.dbtCommand).fullRefresh ? 'active' : ''}`}>
+                  <input type="checkbox" checked={parseDbtCommand(detail.dbtCommand).fullRefresh} onChange={e => patchDbtCommand({ fullRefresh: e.target.checked })} />
+                  <span><strong>Full refresh</strong><small>{parseDbtCommand(detail.dbtCommand).fullRefresh ? 'Uses -f' : 'Uses -s'}</small></span>
+                </label>
+                <div className="form-field dbt-model-path">
+                  <label>Model path</label>
+                  <input value={parseDbtCommand(detail.dbtCommand).modelPath} placeholder="models/data/SDL/PYMT models/data/EDV/PYMT" onChange={e => patchDbtCommand({ modelPath: e.target.value })} />
+                </div>
+                <div className="dbt-command-preview"><span>Command preview</span><code>{detail.dbtCommand || composeDbtCommand(parseDbtCommand(''))}</code></div>
+              </div>
               <div className="form-grid two">
                 <div className="form-field"><label>DBT Project FQN</label><input value={detail.dbtProjectFqn || ''} onChange={e => patch('dbtProjectFqn', e.target.value)} /></div>
                 <div className="form-field"><label>DBT Target</label><input value={detail.dbtTarget || ''} onChange={e => patch('dbtTarget', e.target.value)} /></div>

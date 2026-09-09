@@ -995,9 +995,47 @@ tr.child-row td { background-image: linear-gradient(90deg, rgba(1,232,255,0.025)
 .notification-rule-heading label { display: flex; align-items: center; gap: 6px; color: #b8cdf1; font-size: 12px; font-weight: 700; }
 .notification-rule-note { display: block; color: var(--amber); }
 .notification-delivery-settings { margin-top: 12px; }
+.dbt-command-builder {
+  display: grid;
+  grid-template-columns: minmax(150px, .35fr) minmax(150px, .4fr) minmax(280px, 1fr);
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 13px;
+  background: rgba(5, 14, 36, .5);
+}
+.dbt-full-refresh {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  margin-top: 20px;
+  padding: 0 12px;
+  border: 1px solid rgba(105, 139, 255, .2);
+  border-radius: 10px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.dbt-full-refresh.active { border-color: rgba(1, 232, 255, .4); color: #dff7ff; background: rgba(0, 117, 255, .13); }
+.dbt-full-refresh input { accent-color: var(--cyan); }
+.dbt-full-refresh strong,
+.dbt-full-refresh small { display: block; }
+.dbt-full-refresh small { margin-top: 2px; color: var(--muted2); font-size: 9px; }
+.dbt-command-preview {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 2px;
+  color: var(--muted2);
+  font-size: 10px;
+}
+.dbt-command-preview code { color: #9bd8ff; overflow-wrap: anywhere; }
 @media (max-width: 720px) {
   .notification-rule-grid { grid-template-columns: 1fr; }
   .notification-section summary { align-items: flex-start; flex-direction: column; }
+  .dbt-command-builder { grid-template-columns: 1fr; }
+  .dbt-full-refresh { margin-top: 0; }
 }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; padding-top: 8px; }
 .button.primary { background: linear-gradient(135deg, rgba(0,117,255,0.85), rgba(1,232,255,0.45)); color: white; border-color: rgba(1,232,255,0.35); }
@@ -1047,6 +1085,15 @@ tr.child-row td { background-image: linear-gradient(90deg, rgba(1,232,255,0.025)
 .dag-graph-node.react-flow__node-default > .react-flow__node-default__label { display: contents; }
 .dag-graph-node span:not(.dag-graph-dot) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 800; }
 .dag-graph-node small { grid-column: 2; margin-top: 4px; color: var(--muted2); font-size: 8px; font-weight: 900; letter-spacing: 0.1em; }
+.dag-graph-node.view-model.react-flow__node-default {
+  border: 1px dashed rgba(105, 139, 255, .34);
+  background: rgba(9, 23, 55, .64);
+  box-shadow: 0 5px 14px rgba(0, 0, 0, .18);
+  opacity: .68;
+}
+.dag-graph-node.view-model span:not(.dag-graph-dot) { font-size: 8px; font-weight: 650; }
+.dag-graph-node.view-model small { font-size: 7px; opacity: .7; }
+.dag-graph-node.view-model .dag-graph-dot { width: 5px; height: 5px; box-shadow: none; }
 .dag-graph-dot { grid-row: 1 / span 2; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--muted2); box-shadow: 0 0 12px currentColor; }
 .dag-graph-dot.success { color: var(--green); background: var(--green); }
 .dag-graph-dot.failed { color: var(--red); background: var(--red); }

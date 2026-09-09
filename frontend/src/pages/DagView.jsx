@@ -7,15 +7,49 @@ import PageHeader from '../components/PageHeader.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import StatusBadge, { statusKind } from '../components/StatusBadge.jsx'
 
+function isViewModel(node) {
+  return String(node?.label || node?.id || '').trim().toUpperCase().endsWith('_V')
+}
+
+function collapseViewModelEdges(rawNodes, rawEdges) {
+  const byId = new Map(rawNodes.map(node => [String(node.id), node]))
+  const outgoing = new Map()
+  for (const edge of rawEdges) {
+    const source = String(edge.source)
+    if (!outgoing.has(source)) outgoing.set(source, [])
+    outgoing.get(source).push(String(edge.target))
+  }
+
+  const collapsed = new Map()
+  for (const sourceNode of rawNodes) {
+    if (isViewModel(sourceNode)) continue
+    const source = String(sourceNode.id)
+    const queue = [...(outgoing.get(source) || [])]
+    const visitedViews = new Set()
+    while (queue.length) {
+      const target = queue.shift()
+      const targetNode = byId.get(target)
+      if (!targetNode) continue
+      if (!isViewModel(targetNode)) {
+        if (source !== target) collapsed.set(`${source}\u0000${target}`, { source, target, collapsedViewModels: true })
+        continue
+      }
+      if (visitedViews.has(target)) continue
+      visitedViews.add(target)
+      queue.push(...(outgoing.get(target) || []))
+    }
+  }
+  return Array.from(collapsed.values())
+}
+
 function layoutGraph(rawNodes, rawEdges, direction) {
   const horizontal = direction === 'LR'
-  const nodeWidth = 190
-  const nodeHeight = 64
+  const defaultSize = { width: 190, height: 64 }
   const layout = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}))
   layout.setGraph({ rankdir: direction, ranksep: 100, nodesep: 38, marginx: 40, marginy: 40 })
   const ids = new Set(rawNodes.map(node => String(node.id)))
   const edges = rawEdges.filter(edge => ids.has(String(edge.source)) && ids.has(String(edge.target)))
-  rawNodes.forEach(node => layout.setNode(String(node.id), { width: nodeWidth, height: nodeHeight }))
+  rawNodes.forEach(node => layout.setNode(String(node.id), { ...defaultSize }))
   edges.forEach(edge => layout.setEdge(String(edge.source), String(edge.target)))
   dagre.layout(layout)
 
@@ -23,14 +57,15 @@ function layoutGraph(rawNodes, rawEdges, direction) {
     nodes: rawNodes.map(node => {
       const position = layout.node(String(node.id))
       const kind = statusKind(node.status)
+      const compact = isViewModel(node)
       return {
         id: String(node.id),
-        position: { x: position.x - nodeWidth / 2, y: position.y - nodeHeight / 2 },
-        data: { label: <><span className={`dag-graph-dot ${kind}`} /><span>{node.label}</span><small>{String(node.status || 'UNKNOWN')}</small></> },
-        className: `dag-graph-node ${kind}`,
+        position: { x: position.x - defaultSize.width / 2, y: position.y - defaultSize.height / 2 },
+        data: { label: <><span className={`dag-graph-dot ${kind}`} /><span title={node.label || node.id}>{node.label || node.id}</span><small>{String(node.status || 'UNKNOWN')}</small></> },
+        className: `dag-graph-node ${kind}${compact ? ' view-model' : ''}`,
         sourcePosition: horizontal ? 'right' : 'bottom',
         targetPosition: horizontal ? 'left' : 'top',
-        style: { width: nodeWidth, height: nodeHeight }
+        style: { width: defaultSize.width, height: defaultSize.height }
       }
     }),
     edges: edges.map((edge, index) => {
@@ -44,7 +79,7 @@ function layoutGraph(rawNodes, rawEdges, direction) {
         type: 'smoothstep',
         animated: kind === 'running',
         markerEnd: { type: MarkerType.ArrowClosed, color },
-        style: { stroke: color, strokeWidth: 1.6 }
+        style: { stroke: color, strokeWidth: edge.collapsedViewModels ? 1.9 : 1.6, strokeDasharray: edge.collapsedViewModels ? '6 4' : undefined }
       }
     })
   }
@@ -57,6 +92,7 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
   const [error, setError] = useState(null)
   const [selectedModelId, setSelectedModelId] = useState('')
   const [includeRelated, setIncludeRelated] = useState(true)
+  const [showViewModels, setShowViewModels] = useState(false)
   const [statusFilter, setStatusFilter] = useState('')
   const [direction, setDirection] = useState('LR')
   const [selectedNode, setSelectedNode] = useState(null)
@@ -73,6 +109,7 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
 
   const allNodes = dag?.nodes || []
   const modelOptions = useMemo(() => [...allNodes]
+    .filter(node => !isViewModel(node))
     .sort((left, right) => String(left.label || left.id).localeCompare(String(right.label || right.id))), [allNodes])
   const visibleNodes = useMemo(() => {
     const relatedIds = new Set()
@@ -108,11 +145,15 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
     }
     return allNodes.filter(node => {
       const matchesSearch = !selectedModelId || relatedIds.has(String(node.id))
-      return matchesSearch && (!statusFilter || statusKind(node.status) === statusFilter)
+      const matchesViewSetting = showViewModels || !isViewModel(node)
+      return matchesSearch && matchesViewSetting && (!statusFilter || statusKind(node.status) === statusFilter)
     })
-  }, [allNodes, dag?.edges, selectedModelId, includeRelated, statusFilter])
-  const graph = useMemo(() => layoutGraph(visibleNodes, dag?.edges || [], direction), [visibleNodes, dag?.edges, direction])
-  const graphViewKey = `${direction}|${selectedModelId}|${includeRelated}|${statusFilter}|${graph.nodes.map(node => node.id).join(',')}`
+  }, [allNodes, dag?.edges, selectedModelId, includeRelated, showViewModels, statusFilter])
+  const visibleEdges = useMemo(() => showViewModels
+    ? (dag?.edges || [])
+    : collapseViewModelEdges(allNodes, dag?.edges || []), [allNodes, dag?.edges, showViewModels])
+  const graph = useMemo(() => layoutGraph(visibleNodes, visibleEdges, direction), [visibleNodes, visibleEdges, direction])
+  const graphViewKey = `${direction}|${selectedModelId}|${includeRelated}|${showViewModels}|${statusFilter}|${graph.nodes.map(node => node.id).join(',')}`
   const counts = useMemo(() => allNodes.reduce((result, node) => {
     const kind = statusKind(node.status)
     result[kind] = (result[kind] || 0) + 1
@@ -152,6 +193,10 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
           <label className={`dag-related-filter ${includeRelated ? 'active' : ''}`}>
             <input type="checkbox" checked={includeRelated} onChange={event => setIncludeRelated(event.target.checked)} disabled={!selectedModelId} />
             <span>Show all upstream + downstream</span>
+          </label>
+          <label className={`dag-related-filter ${showViewModels ? 'active' : ''}`}>
+            <input type="checkbox" checked={showViewModels} onChange={event => setShowViewModels(event.target.checked)} />
+            <span>Show _V models</span>
           </label>
           <select className="status-select" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
             <option value="">All statuses</option><option value="success">Success</option><option value="running">Running</option><option value="failed">Failed</option><option value="queued">Queued</option>
