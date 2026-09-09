@@ -665,7 +665,7 @@ def _load_execution_source(table_name, run_id, limit=5000):
         columns = describe_table(table_name)
         if "RUN_ID" not in columns:
             return [], f"{table_name} does not contain RUN_ID"
-        order_columns = [col for col in ("LOG_DTTM", "STATUS_DTTM", "SRT", "CREATED_AT", "UPDATED_AT") if col in columns]
+        order_columns = [col for col in ("LOG_DTTM", "PROGRESS_DTTM", "STARTED_DTTM", "FINISHED_DTTM", "STATUS_DTTM", "SRT", "CREATED_AT", "UPDATED_AT") if col in columns]
         order_sql = f" ORDER BY {', '.join(order_columns)}" if order_columns else ""
         rows = _query(
             f"SELECT * FROM {table_name} WHERE RUN_ID = %(run_id)s{order_sql} LIMIT {int(limit)}",
@@ -701,8 +701,8 @@ def load_execution_log(run_id, workflow_id=None):
     sources = {}
     warnings = {}
     for key, table_name in (
-        ("executionResult", config.EXECUTION_RESULT_TABLE),
-        ("executionProgress", config.PROGRESS_TABLE),
+        ("modelProgress", config.MODEL_PROGRESS_TABLE),
+        ("testProgress", config.TEST_PROGRESS_TABLE),
         ("runLog", config.RUN_LOG_TABLE),
     ):
         source_rows, warning = _load_execution_source(table_name, run_id)
@@ -996,17 +996,20 @@ def _order_and_enrich(rows):
 
 
 def load_progress_for_runs(run_ids):
-    if not run_ids or not config.PROGRESS_TABLE:
+    if not run_ids or not config.MODEL_PROGRESS_TABLE:
         return {}
     quoted = ", ".join([f"'{sql_escape(x)}'" for x in run_ids])
     q = f"""
     SELECT
       RUN_ID,
       COUNT(*) AS TOTAL,
-      SUM(IFF(UPPER(STATUS) IN ('DONE','SUCCESS','SUCCEEDED','COMPLETED','OK'), 1, 0)) AS DONE,
-      SUM(IFF(UPPER(STATUS) IN ('RUNNING','IN_PROGRESS','EXECUTING'), 1, 0)) AS RUNNING,
-      SUM(IFF(UPPER(STATUS) IN ('FAILED','FAILURE','ERROR'), 1, 0)) AS FAILED
-    FROM {config.PROGRESS_TABLE}
+      SUM(IFF(UPPER(PROGRESS) = 'FINISHED', 1, 0)) AS DONE,
+      SUM(IFF(UPPER(PROGRESS) = 'STARTED', 1, 0)) AS RUNNING,
+      SUM(IFF(UPPER(PROGRESS) = 'QUEUED', 1, 0)) AS QUEUED,
+      SUM(IFF(UPPER(PROGRESS) = 'SKIPPED', 1, 0)) AS SKIPPED,
+      SUM(IFF(UPPER(STATUS) = 'ERROR', 1, 0)) AS FAILED,
+      SUM(IFF(UPPER(STATUS) = 'WARNING', 1, 0)) AS WARNING
+    FROM {config.MODEL_PROGRESS_TABLE}
     WHERE RUN_ID IN ({quoted})
     GROUP BY RUN_ID
     """
@@ -1018,8 +1021,15 @@ def load_progress_for_runs(run_ids):
             done = int(row.get("DONE") or 0)
             failed = int(row.get("FAILED") or 0)
             running = int(row.get("RUNNING") or 0)
-            percent = round((done / total) * 100) if total else None
-            out[str(row.get("RUN_ID"))] = {"total": total, "done": done, "running": running, "failed": failed, "percent": percent}
+            queued = int(row.get("QUEUED") or 0)
+            skipped = int(row.get("SKIPPED") or 0)
+            warning = int(row.get("WARNING") or 0)
+            percent = round(((done + skipped) / total) * 100) if total else None
+            out[str(row.get("RUN_ID"))] = {
+                "total": total, "done": done, "running": running,
+                "queued": queued, "skipped": skipped, "failed": failed,
+                "warning": warning, "percent": percent,
+            }
     except Exception:
         return {}
     return out
@@ -1697,20 +1707,36 @@ def load_dag_run(workflow_id, run_id=None):
     run = h[0]
     run_id = run.get("RUN_ID")
     progress_rows = []
+    test_rows = []
     errors = []
-    if config.PROGRESS_TABLE:
+    if config.MODEL_PROGRESS_TABLE:
         try:
             progress_rows = normalize_rows(_query(
                 f"""
-                SELECT MODEL_NAME, MODEL_NAME_PARENT, STATUS, SRT
-                FROM {config.PROGRESS_TABLE}
+                SELECT MODEL_NAME, MODEL_NAME_PARENT, TYPE, PROGRESS,
+                       PROGRESS_DTTM, STARTED_DTTM, FINISHED_DTTM, STATUS
+                FROM {config.MODEL_PROGRESS_TABLE}
                 WHERE RUN_ID = %(run_id)s
-                ORDER BY SRT
+                ORDER BY COALESCE(STARTED_DTTM, PROGRESS_DTTM), MODEL_NAME
                 """,
                 {"run_id": run_id},
             ))
         except Exception:
             progress_rows = []
+    if config.TEST_PROGRESS_TABLE:
+        try:
+            test_rows = normalize_rows(_query(
+                f"""
+                SELECT MODEL_NAME, MODEL_NAME_PARENT, TYPE, PROGRESS,
+                       PROGRESS_DTTM, STARTED_DTTM, FINISHED_DTTM, STATUS
+                FROM {config.TEST_PROGRESS_TABLE}
+                WHERE RUN_ID = %(run_id)s
+                ORDER BY COALESCE(STARTED_DTTM, PROGRESS_DTTM), MODEL_NAME
+                """,
+                {"run_id": run_id},
+            ))
+        except Exception:
+            test_rows = []
     if config.RUN_LOG_TABLE:
         try:
             errors = normalize_rows(_query(
@@ -1718,15 +1744,28 @@ def load_dag_run(workflow_id, run_id=None):
                 SELECT LOG_DTTM, ORIGIN, MESSAGE
                 FROM {config.RUN_LOG_TABLE}
                 WHERE RUN_ID = %(run_id)s
-                  AND MESSAGE LIKE %(error_pattern)s
+                  AND (
+                    UPPER(COALESCE(TYPE, '')) IN ('ERROR', 'FAILED', 'FAILURE', 'FATAL')
+                    OR UPPER(COALESCE(MESSAGE, '')) LIKE %(error_pattern)s
+                  )
                 ORDER BY LOG_DTTM
                 """,
-                {"run_id": run_id, "error_pattern": "ERROR:%"},
+                {"run_id": run_id, "error_pattern": "%ERROR%"},
             ))
         except Exception:
             errors = []
 
     error_models = {str(e.get("ORIGIN")) for e in errors if e.get("ORIGIN")}
+    tests_by_model = {}
+    for test in test_rows:
+        related = parse_variant_array(test.get("MODEL_NAME_PARENT"))
+        if not related:
+            related = str(test.get("MODEL_NAME_PARENT") or "").split(";")
+        for related_model in related:
+            key = str(related_model or "").strip()
+            if key:
+                tests_by_model.setdefault(key, []).append(test)
+
     nodes = []
     edges = []
     seen_edges = set()
@@ -1736,8 +1775,36 @@ def load_dag_run(workflow_id, run_id=None):
         parents = parse_variant_array(parent_value)
         if not parents:
             parents = str(parent_value or "").split(";")
-        status = str(row.get("STATUS") or "UNKNOWN")
-        nodes.append({"id": model, "label": _short_model_name(model), "status": "ERROR" if model in error_models else status})
+        status = str(row.get("STATUS") or "UNKNOWN").upper()
+        progress_state = str(row.get("PROGRESS") or "QUEUED").upper()
+        model_tests = tests_by_model.get(model, [])
+        failed_tests = sum(str(test.get("STATUS") or "").upper() in ("FAILED", "FAILURE", "ERROR") for test in model_tests)
+        warning_tests = sum(str(test.get("STATUS") or "").upper() == "WARNING" for test in model_tests)
+        if progress_state == "QUEUED":
+            display_status = "QUEUED"
+        elif progress_state == "STARTED":
+            display_status = "RUNNING"
+        elif progress_state == "SKIPPED":
+            display_status = "SKIPPED"
+        elif failed_tests or status == "ERROR":
+            display_status = "ERROR"
+        elif warning_tests or status == "WARNING":
+            display_status = "WARNING"
+        else:
+            display_status = status
+        nodes.append({
+            "id": model,
+            "label": _short_model_name(model),
+            "status": "ERROR" if model in error_models else display_status,
+            "modelStatus": status,
+            "type": row.get("TYPE"),
+            "progress": row.get("PROGRESS"),
+            "startedAt": row.get("STARTED_DTTM"),
+            "finishedAt": row.get("FINISHED_DTTM"),
+            "testsTotal": len(model_tests),
+            "testsFailed": failed_tests,
+            "testsWarning": warning_tests,
+        })
         for parent_value in parents:
             parent = str(parent_value or "").strip()
             if not parent or parent == model or parent.lower() in ("none", "null"):
@@ -1746,7 +1813,7 @@ def load_dag_run(workflow_id, run_id=None):
             if key not in seen_edges:
                 seen_edges.add(key)
                 edges.append({"source": parent, "target": model})
-    return {"workflowId": workflow_id, "run": run, "nodes": nodes, "edges": edges, "errors": errors}
+    return {"workflowId": workflow_id, "run": run, "nodes": nodes, "edges": edges, "tests": test_rows, "errors": errors}
 
 
 def _short_model_name(model):

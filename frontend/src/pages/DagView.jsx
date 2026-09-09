@@ -61,7 +61,7 @@ function layoutGraph(rawNodes, rawEdges, direction) {
       return {
         id: String(node.id),
         position: { x: position.x - defaultSize.width / 2, y: position.y - defaultSize.height / 2 },
-        data: { label: <><span className={`dag-graph-dot ${kind}`} /><span title={node.label || node.id}>{node.label || node.id}</span><small>{String(node.status || 'UNKNOWN')}</small></> },
+        data: { label: <><span className={`dag-graph-dot ${kind}`} /><span title={node.label || node.id}>{node.label || node.id}</span><small>{String(node.status || 'UNKNOWN')}</small>{node.testsTotal > 0 && <em className={`dag-test-count ${node.testsFailed ? 'failed' : 'passed'}`}>{node.testsFailed ? `${node.testsFailed}/${node.testsTotal} tests failed` : `${node.testsTotal} tests passed`}</em>}</> },
         className: `dag-graph-node ${kind}${compact ? ' view-model' : ''}`,
         sourcePosition: horizontal ? 'right' : 'bottom',
         targetPosition: horizontal ? 'left' : 'top',
@@ -161,7 +161,12 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
   }, {}), [allNodes])
   const complete = counts.success || 0
   const failed = counts.failed || 0
-  const percent = allNodes.length ? Math.round((complete / allNodes.length) * 100) : 0
+  const warning = counts.warning || 0
+  const skipped = counts.skipped || 0
+  const finished = complete + failed + warning + skipped
+  const testsTotal = allNodes.reduce((total, node) => total + Number(node.testsTotal || 0), 0)
+  const testsFailed = allNodes.reduce((total, node) => total + Number(node.testsFailed || 0), 0)
+  const percent = allNodes.length ? Math.round((finished / allNodes.length) * 100) : 0
 
   function placeholder(action) {
     setNotice(`${action} is a placeholder and is not connected yet.`)
@@ -181,9 +186,12 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
           <StatusBadge status={dag.run?.STATUS || '—'} />
           <span>Run <code>{dag.run?.RUN_ID || '—'}</code></span>
           <strong>{allNodes.length}</strong><span>models</span>
-          <strong className="success-text">{complete}</strong><span>completed</span>
-          {failed > 0 && <><strong className="failed-text">{failed}</strong><span>failed</span></>}
-          <div className="dag-page-progress"><ProgressBar progress={{ percent, total: allNodes.length, done: complete, failed }} status={dag.run?.STATUS} /></div>
+          <strong className="success-text">{finished}</strong><span>finished</span>
+          {warning > 0 && <><strong>{warning}</strong><span>warnings</span></>}
+          {failed > 0 && <><strong className="failed-text">{failed}</strong><span>errors</span></>}
+          {skipped > 0 && <><strong>{skipped}</strong><span>skipped</span></>}
+          {testsTotal > 0 && <><strong className={testsFailed ? 'failed-text' : 'success-text'}>{testsFailed ? `${testsFailed}/${testsTotal}` : testsTotal}</strong><span>{testsFailed ? 'tests failed' : 'tests passed'}</span></>}
+          <div className="dag-page-progress"><ProgressBar progress={{ percent, total: allNodes.length, done: finished, failed }} status={dag.run?.STATUS} /></div>
         </div>
         <div className="dag-page-toolbar">
           <select className="dag-model-filter" value={selectedModelId} onChange={event => setSelectedModelId(event.target.value)} aria-label="Filter by model name">
@@ -199,7 +207,7 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
             <span>Show _V models</span>
           </label>
           <select className="status-select" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
-            <option value="">All statuses</option><option value="success">Success</option><option value="running">Running</option><option value="failed">Failed</option><option value="queued">Queued</option>
+            <option value="">All statuses</option><option value="success">Success</option><option value="warning">Warning</option><option value="running">Started</option><option value="failed">Error</option><option value="queued">Queued</option><option value="skipped">Skipped</option>
           </select>
           <div className="view-switch"><button className={direction === 'LR' ? 'active' : ''} onClick={() => setDirection('LR')}>Left → right</button><button className={direction === 'TB' ? 'active' : ''} onClick={() => setDirection('TB')}>Top → bottom</button></div>
           <span className="dag-visible-count">Showing {visibleNodes.length} of {allNodes.length}</span>
@@ -216,6 +224,12 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
             <h3>{selectedNode.label}</h3>
             <code>{selectedNode.id}</code>
             <StatusBadge status={selectedNode.status} />
+            <div className="dag-model-metrics">
+              <span>Type <strong>{selectedNode.type || '—'}</strong></span>
+              <span>Progress <strong>{selectedNode.progress || 'QUEUED'}</strong></span>
+              <span>Model status <strong>{selectedNode.modelStatus || '—'}</strong></span>
+              <span>Tests <strong className={selectedNode.testsFailed ? 'failed-text' : ''}>{selectedNode.testsTotal ? `${selectedNode.testsTotal - selectedNode.testsFailed - (selectedNode.testsWarning || 0)} success · ${selectedNode.testsWarning || 0} warning · ${selectedNode.testsFailed} error` : 'None'}</strong></span>
+            </div>
             <div className="dag-model-actions">
               <button className="button primary" onClick={() => placeholder('Restart model')}>↻ Restart</button>
               <button className="button" onClick={() => placeholder('View log')}>▤ View log</button>

@@ -7,15 +7,15 @@ import { elapsedDuration, formatDateTime } from '../utils/time.js'
 import './ExecutionLog.css'
 
 const sourceDefinitions = [
-  { key: 'runLog', label: 'Run log' },
-  { key: 'executionProgress', label: 'Execution progress' },
-  { key: 'executionResult', label: 'Execution result' }
+  { key: 'modelProgress', label: 'Models' },
+  { key: 'testProgress', label: 'Tests' },
+  { key: 'runLog', label: 'Event log' }
 ]
 
 const preferredColumns = {
   runLog: ['LOG_DTTM', 'ORIGIN', 'TYPE', 'MESSAGE'],
-  executionProgress: ['SRT', 'MODEL_NAME', 'MODEL_NAME_PARENT', 'STATUS', 'STATUS_DTTM', 'LOG_DTTM'],
-  executionResult: ['MODEL_NAME', 'STATUS', 'START_TIME', 'LATEST_CHANGE', 'ELAPSED_S', 'ERROR_MESSAGE', 'LATEST_SQL', 'SQL']
+  modelProgress: ['MODEL_NAME', 'TYPE', 'STATUS', 'PROGRESS', 'STARTED_DTTM', 'FINISHED_DTTM', 'MODEL_NAME_PARENT'],
+  testProgress: ['MODEL_NAME', 'TYPE', 'STATUS', 'PROGRESS', 'STARTED_DTTM', 'FINISHED_DTTM', 'MODEL_NAME_PARENT']
 }
 
 function displayValue(column, value) {
@@ -148,7 +148,7 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [activeSource, setActiveSource] = useState('runLog')
+  const [activeSource, setActiveSource] = useState('modelProgress')
   const [search, setSearch] = useState('')
   const [nowMs, setNowMs] = useState(Date.now())
   const [valueDetail, setValueDetail] = useState(null)
@@ -176,6 +176,19 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
   const history = data?.history || {}
   const resolvedName = history.WORKFLOW_NAME || workflowName || history.WORKFLOW_ID || 'Workflow execution'
   const historyMessage = history.MESSAGE || history.ERROR_MESSAGE || ''
+  const modelProgress = data?.modelProgress || []
+  const testProgress = data?.testProgress || []
+  const progressCounts = rows => rows.reduce((counts, row) => {
+    const progress = String(row.PROGRESS || 'QUEUED').toUpperCase()
+    const status = String(row.STATUS || '').toUpperCase()
+    counts[progress.toLowerCase()] = (counts[progress.toLowerCase()] || 0) + 1
+    if (status === 'ERROR') counts.errors += 1
+    if (status === 'WARNING') counts.warnings += 1
+    if (status === 'SUCCESS') counts.success += 1
+    return counts
+  }, { queued: 0, started: 0, finished: 0, skipped: 0, success: 0, warnings: 0, errors: 0 })
+  const modelCounts = progressCounts(modelProgress)
+  const testCounts = progressCounts(testProgress)
   const visibleRows = useMemo(() => {
     const rows = data?.[activeSource] || []
     const query = search.trim().toLowerCase()
@@ -204,6 +217,8 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
           <div><span>Started</span><strong>{formatDateTime(history.START_TIME || history.REQUESTED_AT)}</strong></div>
           <div><span>Execution time</span><strong>{elapsedDuration(history.START_TIME || history.REQUESTED_AT, history.END_TIME, history.STATUS, nowMs)}</strong></div>
           <div><span>Trigger</span><strong>{history.TRIGGER_SOURCE || '—'}</strong></div>
+          <div><span>Models</span><strong>{modelProgress.length ? `${modelCounts.finished} finished · ${modelCounts.started} started · ${modelCounts.queued} queued · ${modelCounts.skipped} skipped` : 'No model progress yet'}</strong></div>
+          <div><span>Tests</span><strong>{testProgress.length ? `${testCounts.success} success · ${testCounts.warnings} warning · ${testCounts.errors} error · ${testCounts.queued} queued` : 'No tests recorded'}</strong></div>
         </div>
 
         <div className={`execution-history-message vision-card-flat ${historyMessage ? 'has-message' : ''}`}>

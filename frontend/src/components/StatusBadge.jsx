@@ -2,7 +2,9 @@ const groups = {
   success: ['DONE', 'SUCCESS', 'SUCCEEDED', 'COMPLETED', 'OK'],
   running: ['RUNNING', 'IN_PROGRESS', 'EXECUTING', 'STARTING'],
   queued: ['INITIATING', 'QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED'],
-  failed: ['FAILED', 'FAILURE', 'ERROR']
+  failed: ['FAILED', 'FAILURE', 'ERROR'],
+  warning: ['WARNING', 'WARN'],
+  skipped: ['SKIPPED']
 }
 
 const iconByKind = {
@@ -10,6 +12,8 @@ const iconByKind = {
   running: '▶',
   queued: '●',
   failed: '×',
+  warning: '!',
+  skipped: '↷',
   muted: '—'
 }
 
@@ -19,6 +23,8 @@ export function statusKind(status) {
   if (groups.running.includes(s)) return 'running'
   if (groups.queued.includes(s)) return 'queued'
   if (groups.failed.includes(s)) return 'failed'
+  if (groups.warning.includes(s)) return 'warning'
+  if (groups.skipped.includes(s)) return 'skipped'
   return 'muted'
 }
 

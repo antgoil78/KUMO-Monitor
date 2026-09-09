@@ -2099,8 +2099,8 @@ def execution_log(run_id):
             "source": "mock",
             "runId": run_id,
             "history": history_row,
-            "executionResult": [],
-            "executionProgress": [],
+            "modelProgress": [],
+            "testProgress": [],
             "runLog": [],
             "warnings": {},
         })

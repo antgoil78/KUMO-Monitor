@@ -655,6 +655,8 @@ tr:hover td { background: rgba(255,255,255,0.025); }
 .status-badge.running { color: #4c8cff; }
 .status-badge.queued { color: var(--amber); }
 .status-badge.failed { color: var(--red); }
+.status-badge.warning { color: var(--amber); }
+.status-badge.skipped { color: #8798b4; }
 .status-badge.muted { color: var(--muted2); }
 .muted-cell { color: #8ca0bf; }
 .muted-dash { color: #738094; }
@@ -1112,6 +1114,9 @@ tr.child-row td { background-image: linear-gradient(90deg, rgba(1,232,255,0.025)
 .dag-graph-node.react-flow__node-default > .react-flow__node-default__label { display: contents; }
 .dag-graph-node span:not(.dag-graph-dot) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 800; }
 .dag-graph-node small { grid-column: 2; margin-top: 4px; color: var(--muted2); font-size: 8px; font-weight: 900; letter-spacing: 0.1em; }
+.dag-test-count { grid-column: 2; margin-top: 2px; font-size: 7px; font-style: normal; font-weight: 800; }
+.dag-test-count.passed { color: var(--green); }
+.dag-test-count.failed { color: var(--red); }
 .dag-graph-node.view-model.react-flow__node-default {
   border: 1px dashed rgba(105, 139, 255, .34);
   background: rgba(9, 23, 55, .64);
@@ -1157,6 +1162,9 @@ tr.child-row td { background-image: linear-gradient(90deg, rgba(1,232,255,0.025)
 .dag-model-popover > code { display: block; max-height: 54px; margin-bottom: 12px; overflow: auto; color: var(--muted); font-size: 9px; white-space: normal; overflow-wrap: anywhere; }
 .dag-model-close { position: absolute; top: 10px; right: 11px; width: 28px; height: 28px; border: 0; border-radius: 8px; background: rgba(255,255,255,0.06); color: var(--muted); font-size: 18px; }
 .dag-model-actions { display: flex; gap: 8px; margin: 16px 0 10px; }
+.dag-model-metrics { display: grid; gap: 7px; margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.dag-model-metrics span { display: flex; justify-content: space-between; gap: 12px; color: var(--muted2); font-size: 10px; }
+.dag-model-metrics strong { color: var(--text); text-align: right; }
 .dag-model-actions .button { flex: 1; padding: 9px; font-size: 10px; }
 .dag-model-popover > small { color: var(--muted2); font-size: 9px; }
 .dag-error-table { max-height: 260px; margin-top: 14px; }
