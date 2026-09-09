@@ -638,12 +638,77 @@ function parseDbtCommand(command) {
   const requestedAction = String(parts.shift() || 'build').toLowerCase()
   const action = ['build', 'run', 'retry'].includes(requestedAction) ? requestedAction : 'build'
   const fullRefresh = parts.includes('-f') || parts.includes('--full-refresh')
-  const modelPath = parts.filter(part => !['-s', '--select', '-f', '--full-refresh'].includes(part)).join(' ')
-  return { action, fullRefresh, modelPath }
+  const selections = parts.filter(part => !['-s', '--select', '-f', '--full-refresh'].includes(part))
+  return { action, fullRefresh, selections }
 }
 
-function composeDbtCommand({ action, fullRefresh, modelPath }) {
-  return ['dbt', action || 'build', fullRefresh ? '-f' : '-s', String(modelPath || '').trim()].filter(Boolean).join(' ')
+function composeDbtCommand({ action, fullRefresh, selections }) {
+  const command = action || 'build'
+  if (command === 'retry') return 'dbt retry'
+  return ['dbt', command, '-s', ...(selections || []), fullRefresh ? '-f' : ''].filter(Boolean).join(' ')
+}
+
+function DbtCommandBuilder({ command, onChange }) {
+  const [selectionDraft, setSelectionDraft] = useState('')
+  const parsed = parseDbtCommand(command)
+
+  function update(changes) {
+    onChange(composeDbtCommand({ ...parsed, ...changes }))
+  }
+
+  function addSelection() {
+    const selection = selectionDraft.trim()
+    if (!selection || parsed.selections.includes(selection)) return
+    update({ selections: [...parsed.selections, selection] })
+    setSelectionDraft('')
+  }
+
+  function removeSelection(selection) {
+    update({ selections: parsed.selections.filter(item => item !== selection) })
+  }
+
+  return (
+    <div className="dbt-command-builder">
+      <div className="form-field">
+        <label>DBT command</label>
+        <select value={parsed.action} onChange={event => update({ action: event.target.value })}>
+          <option value="build">Build</option>
+          <option value="run">Run</option>
+          <option value="retry">Retry</option>
+        </select>
+      </div>
+      <label className={`dbt-full-refresh ${parsed.fullRefresh ? 'active' : ''} ${parsed.action === 'retry' ? 'disabled' : ''}`}>
+        <input type="checkbox" checked={parsed.fullRefresh} disabled={parsed.action === 'retry'} onChange={event => update({ fullRefresh: event.target.checked })} />
+        <span><strong>Full refresh</strong><small>{parsed.action === 'retry' ? 'Not used by retry' : parsed.fullRefresh ? 'Adds -f' : 'Incremental/default'}</small></span>
+      </label>
+      <div className="form-field dbt-selection-add">
+        <label>Selection</label>
+        <div className="dbt-selection-input">
+          <input
+            value={selectionDraft}
+            disabled={parsed.action === 'retry'}
+            placeholder="models/data/SDL/PYMT"
+            onChange={event => setSelectionDraft(event.target.value)}
+            onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addSelection() } }}
+          />
+          <button type="button" className="button" disabled={parsed.action === 'retry' || !selectionDraft.trim()} onClick={addSelection}>Add</button>
+        </div>
+      </div>
+      <div className="dbt-selection-list">
+        <div className="dependency-selected-heading"><span>Selected paths/models</span><b>{parsed.selections.length}</b></div>
+        {parsed.action === 'retry' ? (
+          <div className="dependency-selected-empty">Retry uses the previous invocation's failed nodes and does not use selections.</div>
+        ) : parsed.selections.length ? parsed.selections.map(selection => (
+          <div className="dbt-selection-item" key={selection}>
+            <span className="dependency-trigger-icon">⌘</span>
+            <code>{selection}</code>
+            <button type="button" onClick={() => removeSelection(selection)} aria-label={`Remove ${selection}`}>×</button>
+          </div>
+        )) : <div className="dependency-selected-empty">No paths or models selected. Add one above.</div>}
+      </div>
+      <div className="dbt-command-preview"><span>Command preview</span><code>{command || composeDbtCommand(parseDbtCommand(''))}</code></div>
+    </div>
+  )
 }
 
 function EditModal({ workflowId, onClose, onSaved, notify }) {
@@ -689,12 +754,6 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
     setDetail(prev => ({ ...prev, notifications: { ...(prev.notifications || {}), [field]: value } }))
   }
 
-  function patchDbtCommand(changes) {
-    setDetail(prev => ({
-      ...prev,
-      dbtCommand: composeDbtCommand({ ...parseDbtCommand(prev.dbtCommand), ...changes })
-    }))
-  }
 
   function notificationSummary() {
     const notifications = detail?.notifications || {}
@@ -776,25 +835,7 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
           <div className="form-field"><label>Description</label><textarea rows="2" value={detail.description || ''} onChange={e => patch('description', e.target.value)} /></div>
           {String(detail.workflowType).toUpperCase() === 'DBT' ? (
             <>
-              <div className="dbt-command-builder">
-                <div className="form-field">
-                  <label>DBT command</label>
-                  <select value={parseDbtCommand(detail.dbtCommand).action} onChange={e => patchDbtCommand({ action: e.target.value })}>
-                    <option value="build">Build</option>
-                    <option value="run">Run</option>
-                    <option value="retry">Retry</option>
-                  </select>
-                </div>
-                <label className={`dbt-full-refresh ${parseDbtCommand(detail.dbtCommand).fullRefresh ? 'active' : ''}`}>
-                  <input type="checkbox" checked={parseDbtCommand(detail.dbtCommand).fullRefresh} onChange={e => patchDbtCommand({ fullRefresh: e.target.checked })} />
-                  <span><strong>Full refresh</strong><small>{parseDbtCommand(detail.dbtCommand).fullRefresh ? 'Uses -f' : 'Uses -s'}</small></span>
-                </label>
-                <div className="form-field dbt-model-path">
-                  <label>Model path</label>
-                  <input value={parseDbtCommand(detail.dbtCommand).modelPath} placeholder="models/data/SDL/PYMT models/data/EDV/PYMT" onChange={e => patchDbtCommand({ modelPath: e.target.value })} />
-                </div>
-                <div className="dbt-command-preview"><span>Command preview</span><code>{detail.dbtCommand || composeDbtCommand(parseDbtCommand(''))}</code></div>
-              </div>
+              <DbtCommandBuilder command={detail.dbtCommand || ''} onChange={value => patch('dbtCommand', value)} />
               <div className="form-grid two">
                 <div className="form-field"><label>DBT Project FQN</label><input value={detail.dbtProjectFqn || ''} onChange={e => patch('dbtProjectFqn', e.target.value)} /></div>
                 <div className="form-field"><label>DBT Target</label><input value={detail.dbtTarget || ''} onChange={e => patch('dbtTarget', e.target.value)} /></div>
