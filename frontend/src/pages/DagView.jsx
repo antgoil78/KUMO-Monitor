@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Background, Controls, MarkerType, MiniMap, ReactFlow } from '@xyflow/react'
 import dagre from '@dagrejs/dagre'
 
@@ -90,6 +90,8 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
   const name = workflow?.workflowName || workflowName || 'DBT workflow'
   const [dag, setDag] = useState(null)
   const [error, setError] = useState(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const refreshingRef = useRef(false)
   const [selectedModelId, setSelectedModelId] = useState('')
   const [includeRelated, setIncludeRelated] = useState(true)
   const [showViewModels, setShowViewModels] = useState(false)
@@ -103,8 +105,33 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
     let cancelled = false
     setDag(null)
     setError(null)
-    api.workflowDag(id, workflow?.lastRunId).then(data => !cancelled && setDag(data)).catch(err => !cancelled && setError(err.message))
+    api.workflowDag(id, workflow?.lastRunId).then(data => {
+      if (!cancelled) setDag(data)
+    }).catch(err => !cancelled && setError(err.message))
     return () => { cancelled = true }
+  }, [id, workflow?.lastRunId])
+
+  async function refreshDag() {
+    if (!id || refreshingRef.current) return
+    refreshingRef.current = true
+    setRefreshing(true)
+    setError(null)
+    try {
+      const data = await api.workflowDag(id, workflow?.lastRunId)
+      setDag(data)
+      setSelectedNode(current => current ? (data.nodes || []).find(node => String(node.id) === String(current.id)) || null : null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      refreshingRef.current = false
+      setRefreshing(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!id) return undefined
+    const timer = window.setInterval(refreshDag, 5000)
+    return () => window.clearInterval(timer)
   }, [id, workflow?.lastRunId])
 
   const allNodes = dag?.nodes || []
@@ -177,7 +204,7 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
 
   return (
     <section className="page dag-page">
-      <PageHeader breadcrumb="Pages / Workflow Monitor / DAG" title="DAG Run" subtitle={`${name} · interactive DBT model dependencies`} actions={<button className="button" onClick={() => onNavigate('monitor')}>← Back to monitor</button>} />
+      <PageHeader breadcrumb="Pages / Workflow Monitor / DAG" title="DAG Run" subtitle={`${name} · interactive DBT model dependencies`} actions={<div className="dag-header-actions"><span className={`dag-auto-refresh ${refreshing ? 'refreshing' : ''}`}><i />{refreshing ? 'Updating…' : 'Auto refresh · 5s'}</span><button className="button" onClick={() => onNavigate('monitor')}>← Back to monitor</button></div>} />
       {error && <div className="alert error">{error}</div>}
       {notice && <div className="alert info">{notice}</div>}
       {!dag && !error && <div className="empty-state">Loading DAG...</div>}

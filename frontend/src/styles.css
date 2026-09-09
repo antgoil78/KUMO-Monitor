@@ -1139,6 +1139,10 @@ tr.child-row td { background-image: linear-gradient(90deg, rgba(1,232,255,0.025)
 .dag-graph .react-flow__controls-button:hover { background: rgba(0, 117, 255, 0.3); }
 .dag-graph .react-flow__minimap { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: rgba(5, 13, 35, 0.92); }
 .dag-page { padding: 0 4px 50px; }
+.dag-header-actions { display: flex; gap: 8px; }
+.dag-auto-refresh { display: inline-flex; align-items: center; gap: 7px; min-height: 38px; padding: 0 11px; border: 1px solid rgba(1, 232, 255, .2); border-radius: 10px; color: var(--muted); background: rgba(1, 232, 255, .05); font-size: 10px; font-weight: 750; white-space: nowrap; }
+.dag-auto-refresh i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 9px rgba(1, 181, 116, .8); }
+.dag-auto-refresh.refreshing i { background: var(--cyan); animation: kumoPulse 1s infinite ease-in-out; }
 .dag-page-hero { margin-bottom: 16px; }
 .dag-page-summary { display: flex; align-items: center; gap: 9px; min-height: 62px; padding: 12px 16px; border-radius: 15px; color: var(--muted); font-size: 11px; }
 .dag-page-summary > strong { color: white; font-size: 15px; }
