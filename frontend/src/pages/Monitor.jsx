@@ -636,7 +636,7 @@ function parseDbtCommand(command) {
   const parts = String(command || '').trim().split(/\s+/).filter(Boolean)
   if (parts[0]?.toLowerCase() === 'dbt') parts.shift()
   const requestedAction = String(parts.shift() || 'build').toLowerCase()
-  const action = ['build', 'run', 'retry'].includes(requestedAction) ? requestedAction : 'build'
+  const action = ['build', 'run', 'test'].includes(requestedAction) ? requestedAction : 'build'
   const fullRefresh = parts.includes('-f') || parts.includes('--full-refresh')
   const selections = parts.filter(part => !['-s', '--select', '-f', '--full-refresh'].includes(part))
   return { action, fullRefresh, selections }
@@ -644,8 +644,7 @@ function parseDbtCommand(command) {
 
 function composeDbtCommand({ action, fullRefresh, selections }) {
   const command = action || 'build'
-  if (command === 'retry') return 'dbt retry'
-  return ['dbt', command, '-s', ...(selections || []), fullRefresh ? '-f' : ''].filter(Boolean).join(' ')
+  return ['dbt', command, '-s', ...(selections || []), fullRefresh && command !== 'test' ? '-f' : ''].filter(Boolean).join(' ')
 }
 
 function DbtCommandBuilder({ command, onChange }) {
@@ -674,31 +673,28 @@ function DbtCommandBuilder({ command, onChange }) {
         <select value={parsed.action} onChange={event => update({ action: event.target.value })}>
           <option value="build">Build</option>
           <option value="run">Run</option>
-          <option value="retry">Retry</option>
+          <option value="test">Test</option>
         </select>
       </div>
-      <label className={`dbt-full-refresh ${parsed.fullRefresh ? 'active' : ''} ${parsed.action === 'retry' ? 'disabled' : ''}`}>
-        <input type="checkbox" checked={parsed.fullRefresh} disabled={parsed.action === 'retry'} onChange={event => update({ fullRefresh: event.target.checked })} />
-        <span><strong>Full refresh</strong><small>{parsed.action === 'retry' ? 'Not used by retry' : parsed.fullRefresh ? 'Adds -f' : 'Incremental/default'}</small></span>
+      <label className={`dbt-full-refresh ${parsed.fullRefresh ? 'active' : ''} ${parsed.action === 'test' ? 'disabled' : ''}`}>
+        <input type="checkbox" checked={parsed.fullRefresh} disabled={parsed.action === 'test'} onChange={event => update({ fullRefresh: event.target.checked })} />
+        <span><strong>Full refresh</strong><small>{parsed.action === 'test' ? 'Not used by test' : parsed.fullRefresh ? 'Adds -f' : 'Incremental/default'}</small></span>
       </label>
       <div className="form-field dbt-selection-add">
         <label>Selection</label>
         <div className="dbt-selection-input">
           <input
             value={selectionDraft}
-            disabled={parsed.action === 'retry'}
             placeholder="models/data/SDL/PYMT"
             onChange={event => setSelectionDraft(event.target.value)}
             onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addSelection() } }}
           />
-          <button type="button" className="button" disabled={parsed.action === 'retry' || !selectionDraft.trim()} onClick={addSelection}>Add</button>
+          <button type="button" className="button" disabled={!selectionDraft.trim()} onClick={addSelection}>Add</button>
         </div>
       </div>
       <div className="dbt-selection-list">
         <div className="dependency-selected-heading"><span>Selected paths/models</span><b>{parsed.selections.length}</b></div>
-        {parsed.action === 'retry' ? (
-          <div className="dependency-selected-empty">Retry uses the previous invocation's failed nodes and does not use selections.</div>
-        ) : parsed.selections.length ? parsed.selections.map(selection => (
+        {parsed.selections.length ? parsed.selections.map(selection => (
           <div className="dbt-selection-item" key={selection}>
             <span className="dependency-trigger-icon">⌘</span>
             <code>{selection}</code>
