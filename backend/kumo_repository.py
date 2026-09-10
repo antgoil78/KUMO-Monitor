@@ -1,4 +1,6 @@
 import json
+import re
+import shlex
 import time
 import uuid
 from datetime import datetime, timezone
@@ -1098,7 +1100,7 @@ def latest_run_id_for_workflow(workflow_id, active_only=False):
         return None
 
 
-def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requested_by=None, skip_children=False):
+def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requested_by=None, skip_children=False, dbt_command_override=None):
     """Direct Streamlit-compatible queue insert path.
 
     This is the fallback path. It persists QUEUED in history and queue. The UI
@@ -1112,6 +1114,7 @@ def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requeste
         "trigger_source": trigger_source,
         "requested_by": requested_by or "",
         "skip_children": bool(skip_children),
+        "dbt_command_override": str(dbt_command_override or "").strip() or None,
     }
 
     with sf.connection(use_warehouse=True, include_context=True, force_service=True) as conn:
@@ -1160,6 +1163,9 @@ def _request_run_via_queue_insert(workflow_id, trigger_source="MANUAL", requeste
             if "SKIP_CHILDREN" in q_types:
                 q_cols.append("SKIP_CHILDREN")
                 q_vals.append("%(skip_children)s")
+            if "DBT_COMMAND_OVERRIDE" in q_types:
+                q_cols.append("DBT_COMMAND_OVERRIDE")
+                q_vals.append("%(dbt_command_override)s")
 
             _fetch_with_cursor(cur, f"INSERT INTO {config.T_QUEUE} ({', '.join(q_cols)}) VALUES ({', '.join(q_vals)})", params)
         finally:
@@ -1196,14 +1202,14 @@ def _request_run_via_procedure(workflow_id, trigger_source="MANUAL", requested_b
     return None
 
 
-def request_run(workflow_id, trigger_source="MANUAL", requested_by=None, skip_children=False):
+def request_run(workflow_id, trigger_source="MANUAL", requested_by=None, skip_children=False, dbt_command_override=None):
     """Create/start a manual workflow run.
 
     procedure = call SP_WORKFLOW_REQUEST_RUN first, then fallback to queue insert.
     queue = direct insert into WORKFLOW_HISTORY and WORKFLOW_RUN_QUEUE.
     """
     mode = getattr(config, "KUMO_MANUAL_RUN_MODE", "queue")
-    if mode == "procedure" and not skip_children:
+    if mode == "procedure" and not skip_children and not dbt_command_override:
         try:
             run_id = _request_run_via_procedure(workflow_id, trigger_source, requested_by)
             if run_id:
@@ -1213,7 +1219,7 @@ def request_run(workflow_id, trigger_source="MANUAL", requested_by=None, skip_ch
             # procedure signature differs.
             pass
 
-    return _request_run_via_queue_insert(workflow_id, trigger_source, requested_by, skip_children)
+    return _request_run_via_queue_insert(workflow_id, trigger_source, requested_by, skip_children, dbt_command_override)
 
 
 def task_name_for_workflow(workflow_id):
@@ -1820,3 +1826,136 @@ def _short_model_name(model):
     parts = str(model or "").replace("EDV__", "").replace("SDL_", "").split("__")
     short = parts[-1] if parts else str(model or "")
     return short[:32]
+
+
+_DBT_PROJECT_FQN_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*){2}$')
+_ANSI_ESCAPE_RE = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
+
+
+def _dbt_preview_selection(command):
+    try:
+        tokens = shlex.split(str(command or ""))
+    except ValueError as exc:
+        raise ValueError(f"Invalid DBT command: {exc}") from exc
+    if tokens and tokens[0].lower() == "dbt":
+        tokens.pop(0)
+    if tokens and tokens[0].lower() in {"build", "run", "test"}:
+        tokens.pop(0)
+
+    selectors = []
+    selecting = False
+    options_with_value = {"--exclude", "-x", "--selector", "--state", "--defer-state"}
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in {"-s", "--select"}:
+            selecting = True
+            index += 1
+            continue
+        if token.startswith("-"):
+            selecting = False
+            index += 2 if token in options_with_value and index + 1 < len(tokens) else 1
+            continue
+        if selecting:
+            selectors.append(token)
+        index += 1
+    if not selectors:
+        raise ValueError("The workflow has no DBT selections to preview.")
+    return selectors
+
+
+def _parse_dbt_list_stdout(stdout):
+    resources = []
+    for raw_line in _ANSI_ESCAPE_RE.sub("", str(stdout or "")).splitlines():
+        start = raw_line.find("{")
+        if start < 0:
+            continue
+        try:
+            value = json.loads(raw_line[start:])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(value, dict) and value.get("unique_id") and value.get("resource_type"):
+            resources.append(value)
+    return resources
+
+
+def load_dag_preview(workflow_id, dbt_command_override=None):
+    """Resolve a DBT selection without creating workflow history/progress rows."""
+    rows = normalize_rows(_query(
+        f"""
+        SELECT WORKFLOW_ID, WORKFLOW_NAME, WORKFLOW_TYPE, DBT_COMMAND,
+               DBT_PROJECT_FQN, DBT_TARGET
+        FROM {config.T_WORKFLOWS}
+        WHERE WORKFLOW_ID = %(workflow_id)s
+        LIMIT 1
+        """,
+        {"workflow_id": workflow_id},
+    ))
+    if not rows:
+        raise ValueError("Workflow not found.")
+    workflow = rows[0]
+    if str(workflow.get("WORKFLOW_TYPE") or "").upper() != "DBT":
+        raise ValueError("DAG preview is only available for DBT workflows.")
+
+    project_fqn = str(workflow.get("DBT_PROJECT_FQN") or "").strip()
+    if not _DBT_PROJECT_FQN_RE.fullmatch(project_fqn):
+        raise ValueError("The workflow does not have a valid DBT project FQN.")
+    effective_command = str(dbt_command_override or "").strip() or workflow.get("DBT_COMMAND")
+    selectors = _dbt_preview_selection(effective_command)
+    target = str(workflow.get("DBT_TARGET") or "").strip()
+    args = ["list", "--select", *selectors, "--output", "json"]
+    if target:
+        args.extend(["--target", target])
+    args_text = shlex.join(args).replace("'", "''")
+    sql = f"EXECUTE DBT PROJECT {project_fqn} ARGS = '{args_text}'"
+
+    with sf.connection(use_warehouse=True, include_context=True, force_service=True) as conn:
+        cur = conn.cursor(DictCursor)
+        try:
+            cur.execute("ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = 180", timeout=180)
+            cur.execute(sql, timeout=180)
+            result_rows = normalize_rows(cur.fetchall())
+        finally:
+            cur.close()
+    result = result_rows[0] if result_rows else {}
+    if result.get("SUCCESS") is False or str(result.get("SUCCESS") or "").lower() == "false":
+        raise RuntimeError(str(result.get("EXCEPTION") or "DBT could not resolve the selection."))
+
+    resources = _parse_dbt_list_stdout(result.get("STDOUT"))
+    models = [item for item in resources if item.get("resource_type") == "model"]
+    tests = [item for item in resources if item.get("resource_type") == "test"]
+    model_ids = {str(item.get("unique_id")) for item in models}
+    tests_by_model = {}
+    for test in tests:
+        for dependency in (test.get("depends_on") or {}).get("nodes") or []:
+            tests_by_model[dependency] = tests_by_model.get(dependency, 0) + 1
+
+    nodes = []
+    edges = []
+    seen_edges = set()
+    for model in models:
+        model_id = str(model.get("unique_id"))
+        model_config = model.get("config") if isinstance(model.get("config"), dict) else {}
+        nodes.append({
+            "id": model_id,
+            "label": model.get("alias") or model.get("name") or model_id,
+            "path": model.get("original_file_path") or "",
+            "materialization": model_config.get("materialized") or "model",
+            "tests": tests_by_model.get(model_id, 0),
+        })
+        for parent in (model.get("depends_on") or {}).get("nodes") or []:
+            edge_key = (str(parent), model_id)
+            if parent in model_ids and edge_key not in seen_edges:
+                seen_edges.add(edge_key)
+                edges.append({"source": edge_key[0], "target": edge_key[1]})
+    return {
+        "workflowId": workflow_id,
+        "workflowName": workflow.get("WORKFLOW_NAME"),
+        "selection": selectors,
+        "projectFqn": project_fqn,
+        "target": target,
+        "nodes": nodes,
+        "edges": edges,
+        "modelCount": len(nodes),
+        "testCount": len(tests),
+    }

@@ -1587,6 +1587,7 @@ def _complete_workflow_run_request(workflow_id, workflow_name, trigger_source, r
                 trigger_source=trigger_source,
                 requested_by=requested_by,
                 skip_children=bool(payload.get("skipChildren", False)),
+                dbt_command_override=payload.get("dbtCommandOverride"),
             )
 
             app.logger.info(
@@ -2072,6 +2073,33 @@ def workflow_dag(workflow_id):
         return jsonify({"ok": True, **result})
     except Exception as exc:
         _record_interaction("VIEW_DAG_RUN", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, status="FAILED", success=False, error_message=str(exc))
+        return _json_error(exc, 500)
+
+
+@app.route("/api/workflows/<workflow_id>/dag-preview", methods=["POST"])
+def workflow_dag_preview(workflow_id):
+    payload = request.get_json(silent=True) or {}
+    if config.USE_MOCK or not sf.is_configured():
+        return jsonify({
+            "ok": True,
+            "source": "mock",
+            "workflowId": workflow_id,
+            "selection": ["models/example"],
+            "nodes": [
+                {"id": "model.mock.source", "label": "SOURCE", "path": "models/example/source.sql", "materialization": "view", "tests": 0},
+                {"id": "model.mock.target", "label": "TARGET", "path": "models/example/target.sql", "materialization": "table", "tests": 1},
+            ],
+            "edges": [{"source": "model.mock.source", "target": "model.mock.target"}],
+            "modelCount": 2,
+            "testCount": 1,
+        })
+    try:
+        # Preview executes dbt list only. It deliberately bypasses the dispatcher,
+        # workflow history, MODEL_PROGRESS, TEST_PROGRESS and RUN_LOG.
+        result = repo.load_dag_preview(workflow_id, payload.get("dbtCommand"))
+        return jsonify({"ok": True, "source": "snowflake", **result})
+    except Exception as exc:
+        app.logger.exception("Failed to preview DBT DAG")
         return _json_error(exc, 500)
 
 

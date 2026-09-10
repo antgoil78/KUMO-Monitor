@@ -1138,6 +1138,18 @@ tr.child-row td { background-image: linear-gradient(90deg, rgba(1,232,255,0.025)
 .dag-graph .react-flow__controls-button { border-bottom-color: var(--line-soft); background: rgba(9, 23, 55, 0.96); fill: var(--text); }
 .dag-graph .react-flow__controls-button:hover { background: rgba(0, 117, 255, 0.3); }
 .dag-graph .react-flow__minimap { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: rgba(5, 13, 35, 0.92); }
+.preview-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; color: var(--muted); font-size: 11px; }
+.preview-selection > span { font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.preview-selection code { padding: 5px 8px; border: 1px solid var(--line-soft); border-radius: 7px; background: rgba(0, 117, 255, .08); color: var(--text); }
+.dag-graph-node.preview { border-color: rgba(0, 117, 255, .42) !important; }
+.run-dag-preview { margin: 14px 0 0; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+.run-dag-preview > summary { display: flex; align-items: center; gap: 10px; padding: 13px 2px; color: var(--text); cursor: pointer; list-style-position: inside; }
+.run-dag-preview > summary span { font-size: 12px; font-weight: 850; }
+.run-dag-preview > summary small { color: var(--muted); font-size: 10px; font-weight: 500; }
+.run-dag-preview-body { position: relative; padding: 2px 0 14px; }
+.run-dag-preview-graph { height: 390px; }
+.preview-load-button { margin: 8px 0; }
+.preview-refresh-button { position: absolute; z-index: 4; top: 8px; right: 4px; }
 .dag-page { padding: 0 4px 50px; }
 .dag-header-actions { display: flex; gap: 8px; }
 .dag-auto-refresh { display: inline-flex; align-items: center; gap: 7px; min-height: 38px; padding: 0 11px; border: 1px solid rgba(1, 232, 255, .2); border-radius: 10px; color: var(--muted); background: rgba(1, 232, 255, .05); font-size: 10px; font-weight: 750; white-space: nowrap; }
@@ -1748,7 +1760,7 @@ pre, code, kbd, samp, .run-id-note code, .schedule-cell code {
 .monitor-page .system-engine-card {
   background: rgba(3, 9, 31, 0.56);
   border: 1px solid rgba(1,232,255,0.13);
-  box-shadow: inset 0 1px rgba(255,255,255,0.05);
+  box-shadow: none;
 }
 
 .monitor-page .system-counts {
@@ -1762,7 +1774,35 @@ pre, code, kbd, samp, .run-id-note code, .schedule-cell code {
   border-radius: 13px;
   background: rgba(255,255,255,0.045);
   border: 1px solid rgba(255,255,255,0.07);
-  box-shadow: inset 0 1px rgba(255,255,255,0.035);
+  box-shadow: none;
+}
+
+.history-page .table-card,
+.monitor-page .table-card {
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+.monitor-page .monitor-table,
+.monitor-page .monitor-table tr,
+.monitor-page .monitor-table th,
+.monitor-page .monitor-table td {
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+/* Workflow Monitor intentionally follows History's flat visual language. */
+.monitor-page,
+.monitor-page * {
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+.monitor-page .view-switch button.active,
+.monitor-page .progress-fill,
+.monitor-page .engine-dot,
+.monitor-page .system-pulse {
+  box-shadow: none;
 }
 
 .monitor-page .monitor-system-strip .summary-updated {
@@ -1792,7 +1832,7 @@ pre, code, kbd, samp, .run-id-note code, .schedule-cell code {
 }
 
 .monitor-page .monitor-table th:nth-child(1) { width: 27%; }
-.monitor-page .monitor-table th:nth-child(2) { width: 112px; }
+.monitor-page .monitor-table th:nth-child(2) { width: 82px; }
 .monitor-page .monitor-table th:nth-child(3) { width: 12%; }
 .monitor-page .monitor-table th:nth-child(4) { width: 13%; }
 .monitor-page .monitor-table th:nth-child(5) { width: 10%; }
@@ -1807,13 +1847,17 @@ pre, code, kbd, samp, .run-id-note code, .schedule-cell code {
 }
 
 .monitor-page .workflow-table th {
-  height: 38px;
-  color: #7284a5;
+  height: auto;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  color: var(--muted);
   text-transform: none;
 }
 
 .monitor-page .workflow-table td {
-  height: 38px;
+  height: 26px;
+  padding-top: 7px;
+  padding-bottom: 7px;
   color: #9fb0cc;
 }
 
@@ -1881,36 +1925,50 @@ pre, code, kbd, samp, .run-id-note code, .schedule-cell code {
 }
 
 .monitor-page .row-actions {
-  text-align: left;
+  text-align: center;
   padding-left: 8px;
   padding-right: 8px;
   white-space: nowrap;
 }
+.monitor-page .row-run-button {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  margin-right: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #69f0ae;
+  cursor: pointer;
+  box-shadow: none;
+}
+.monitor-page .row-run-button:hover:not(:disabled) { background: rgba(1, 181, 116, .1); color: #8dffc8; }
+.monitor-page .row-run-button:disabled { opacity: .3; cursor: not-allowed; }
+.monitor-run-icon { display: block; font-size: 11px; line-height: 1; transform: translateX(1px); }
+.run-confirm-button { background: linear-gradient(135deg, #009c64, #01b574) !important; }
 
 .monitor-page .row-manage-button {
-  width: 92px;
-  min-width: 0;
-  height: 30px;
-  padding: 0 10px;
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0;
   justify-content: center;
-  gap: 7px;
-  border-radius: 12px;
+  border: 0;
+  border-radius: 6px;
   font-size: 11px;
-  letter-spacing: 0.01em;
-  background: linear-gradient(135deg, rgba(0,117,255,0.45), rgba(1,232,255,0.12));
-  border-color: rgba(1,232,255,0.28);
-  box-shadow: 0 10px 22px rgba(0,117,255,0.13), inset 0 1px rgba(255,255,255,0.07);
+  background: transparent;
+  color: #bed0ee;
+  box-shadow: none;
 }
 
 .monitor-page .row-manage-button:hover {
-  transform: translateY(-1px);
-  border-color: rgba(1,232,255,0.62);
+  transform: none;
+  background: rgba(105, 139, 255, .1);
+  color: #e5efff;
 }
 
-.monitor-page .manage-dot {
-  width: 6px;
-  height: 6px;
-}
+.monitor-action-icon { display: block; margin-top: -5px; font-size: 13px; font-weight: 900; letter-spacing: 1px; }
 
 .monitor-page .status-cell {
   white-space: nowrap;
@@ -1939,8 +1997,7 @@ pre, code, kbd, samp, .run-id-note code, .schedule-cell code {
 @media (max-width: 1220px) {
   .monitor-page .workflow-table { min-width: 980px; }
   .monitor-page .monitor-table th:nth-child(1) { width: 25%; }
-  .monitor-page .monitor-table th:nth-child(2) { width: 106px; }
-  .monitor-page .row-manage-button { width: 86px; }
+  .monitor-page .monitor-table th:nth-child(2) { width: 82px; }
 }
 
 @media (max-width: 980px) {

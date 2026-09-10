@@ -61,7 +61,10 @@ function layoutGraph(rawNodes, rawEdges, direction) {
       return {
         id: String(node.id),
         position: { x: position.x - defaultSize.width / 2, y: position.y - defaultSize.height / 2 },
-        data: { label: <><span className={`dag-graph-dot ${kind}`} /><span title={node.label || node.id}>{node.label || node.id}</span><small>{String(node.status || 'UNKNOWN')}</small>{node.testsTotal > 0 && <em className={`dag-test-count ${node.testsFailed ? 'failed' : 'passed'}`}>{node.testsFailed ? `${node.testsFailed}/${node.testsTotal} tests failed` : `${node.testsTotal} tests passed`}</em>}</> },
+        data: {
+          label: <><span className={`dag-graph-dot ${kind}`} /><span title={node.label || node.id}>{node.label || node.id}</span><small>{String(node.status || 'UNKNOWN')}</small>{node.testsTotal > 0 && <em className={`dag-test-count ${node.testsFailed ? 'failed' : 'passed'}`}>{node.testsFailed ? `${node.testsFailed}/${node.testsTotal} tests failed` : `${node.testsTotal} tests passed`}</em>}</>,
+          refreshKey: [node.status, node.progress, node.modelStatus, node.testsTotal, node.testsFailed, node.testsWarning].join(':')
+        },
         className: `dag-graph-node ${kind}${compact ? ' view-model' : ''}`,
         sourcePosition: horizontal ? 'right' : 'bottom',
         targetPosition: horizontal ? 'left' : 'top',
@@ -117,7 +120,9 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
     setRefreshing(true)
     setError(null)
     try {
-      const data = await api.workflowDag(id, workflow?.lastRunId)
+      // Poll without the navigation-time run id so a newly started run is
+      // picked up while this page remains open.
+      const data = await api.workflowDag(id)
       setDag(data)
       setSelectedNode(current => current ? (data.nodes || []).find(node => String(node.id) === String(current.id)) || null : null)
     } catch (err) {
@@ -180,7 +185,7 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
     ? (dag?.edges || [])
     : collapseViewModelEdges(allNodes, dag?.edges || []), [allNodes, dag?.edges, showViewModels])
   const graph = useMemo(() => layoutGraph(visibleNodes, visibleEdges, direction), [visibleNodes, visibleEdges, direction])
-  const graphViewKey = `${direction}|${selectedModelId}|${includeRelated}|${showViewModels}|${statusFilter}|${graph.nodes.map(node => node.id).join(',')}`
+  const graphViewKey = `${direction}|${selectedModelId}|${includeRelated}|${showViewModels}|${statusFilter}|${graph.nodes.map(node => `${node.id}:${node.data.refreshKey}`).join(',')}`
   const counts = useMemo(() => allNodes.reduce((result, node) => {
     const kind = statusKind(node.status)
     result[kind] = (result[kind] || 0) + 1

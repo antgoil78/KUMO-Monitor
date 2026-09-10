@@ -527,7 +527,7 @@ function RowActions({ workflow, isOpen, onOpen, onClose, onAction, disabledRun }
     </div>
   )
 }
-function WorkflowRow({ workflow, nowMs, onManage, pendingRun }) {
+function WorkflowRow({ workflow, nowMs, onManage, onRun, pendingRun }) {
   const disabled = !workflow.workflowEnabled
   const depth = Number(workflow.indent || 0)
   const type = String(workflow.workflowType || 'DBT').toUpperCase()
@@ -552,13 +552,21 @@ function WorkflowRow({ workflow, nowMs, onManage, pendingRun }) {
       </td>
       <td className="row-actions">
         <button
+          className="row-run-button"
+          aria-label={`Run ${workflow.workflowName}`}
+          title={busy ? 'Workflow is already active' : `Run ${workflow.workflowName}`}
+          disabled={disabled || busy}
+          onClick={() => onRun(view)}
+        >
+          <span className="monitor-run-icon" aria-hidden="true">▶</span>
+        </button>
+        <button
           className="row-manage-button"
           aria-label={`Actions for ${workflow.workflowName}`}
           title={`Actions for ${workflow.workflowName}`}
           onClick={() => onManage(view)}
         >
-          <span className="manage-dot" />
-          <span>Action</span>
+          <span className="monitor-action-icon" aria-hidden="true">•••</span>
         </button>
       </td>
       <td className="status-cell">
@@ -962,27 +970,229 @@ function DagModal({ workflow, onClose }) {
     </Modal>
   )
 }
-function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
+function PreviewDagModal({ workflow, onClose }) {
+  const [preview, setPreview] = useState(null)
+  const [error, setError] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    api.previewWorkflowDag(workflow.workflowId)
+      .then(data => !cancelled && setPreview(data))
+      .catch(err => !cancelled && setError(err.message))
+    return () => { cancelled = true }
+  }, [workflow.workflowId])
+  const graph = useMemo(() => {
+    const nodes = preview?.nodes || []
+    const nodeWidth = 205
+    const nodeHeight = 68
+    const layout = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}))
+    layout.setGraph({ rankdir: 'LR', ranksep: 95, nodesep: 38, marginx: 30, marginy: 30 })
+    const nodeIds = new Set(nodes.map(node => String(node.id)))
+    const edges = (preview?.edges || []).filter(edge => nodeIds.has(String(edge.source)) && nodeIds.has(String(edge.target)))
+    nodes.forEach(node => layout.setNode(String(node.id), { width: nodeWidth, height: nodeHeight }))
+    edges.forEach(edge => layout.setEdge(String(edge.source), String(edge.target)))
+    dagre.layout(layout)
+    return {
+      nodes: nodes.map(node => {
+        const position = layout.node(String(node.id))
+        return {
+          id: String(node.id),
+          position: { x: position.x - nodeWidth / 2, y: position.y - nodeHeight / 2 },
+          data: { label: <><span className="dag-graph-dot running" /><span title={node.path}>{node.label}</span><small>{node.materialization}{node.tests ? ` · ${node.tests} test${node.tests === 1 ? '' : 's'}` : ''}</small></> },
+          className: 'dag-graph-node preview',
+          sourcePosition: 'right',
+          targetPosition: 'left',
+          style: { width: nodeWidth, height: nodeHeight }
+        }
+      }),
+      edges: edges.map((edge, index) => ({
+        id: `preview-edge-${edge.source}-${edge.target}-${index}`,
+        source: String(edge.source),
+        target: String(edge.target),
+        type: 'smoothstep',
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#4779c9' },
+        style: { stroke: '#4779c9', strokeWidth: 1.6 }
+      }))
+    }
+  }, [preview])
+  return (
+    <Modal title="Preview DAG" subtitle={workflow.workflowName} onClose={onClose} wide>
+      {error && <div className="alert error">{error}</div>}
+      {!preview && !error && <div className="empty-state">Resolving the DBT selection from the project. This can take about a minute...</div>}
+      {preview && <>
+        <div className="dag-summary">
+          <span><strong>{preview.modelCount}</strong> models</span>
+          <span><strong>{preview.testCount}</strong> tests</span>
+          {preview.target && <span>Target <code>{preview.target}</code></span>}
+        </div>
+        <div className="preview-selection"><span>Selection</span>{(preview.selection || []).map(item => <code key={item}>{item}</code>)}</div>
+        {(preview.nodes || []).length ? (
+          <div className="dag-graph" aria-label="DBT selection dependency preview">
+            <ReactFlow nodes={graph.nodes} edges={graph.edges} fitView fitViewOptions={{ padding: 0.18 }} minZoom={0.12} maxZoom={1.8} nodesDraggable={false} nodesConnectable={false}>
+              <Background color="rgba(105, 139, 255, 0.18)" gap={22} size={1} />
+              <MiniMap pannable zoomable nodeColor="#0075ff" maskColor="rgba(3, 9, 31, 0.72)" />
+              <Controls showInteractive={false} />
+            </ReactFlow>
+          </div>
+        ) : <div className="soft-empty">The saved selection did not resolve any models.</div>}
+      </>}
+    </Modal>
+  )
+}
+function EmbeddedDagPreview({ preview }) {
+  const graph = useMemo(() => {
+    const nodes = preview?.nodes || []
+    const nodeWidth = 205
+    const nodeHeight = 68
+    const layout = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}))
+    layout.setGraph({ rankdir: 'LR', ranksep: 95, nodesep: 38, marginx: 30, marginy: 30 })
+    const nodeIds = new Set(nodes.map(node => String(node.id)))
+    const edges = (preview?.edges || []).filter(edge => nodeIds.has(String(edge.source)) && nodeIds.has(String(edge.target)))
+    nodes.forEach(node => layout.setNode(String(node.id), { width: nodeWidth, height: nodeHeight }))
+    edges.forEach(edge => layout.setEdge(String(edge.source), String(edge.target)))
+    dagre.layout(layout)
+    return {
+      nodes: nodes.map(node => {
+        const position = layout.node(String(node.id))
+        return {
+          id: String(node.id),
+          position: { x: position.x - nodeWidth / 2, y: position.y - nodeHeight / 2 },
+          data: { label: <><span className="dag-graph-dot running" /><span title={node.path}>{node.label}</span><small>{node.materialization}{node.tests ? ` · ${node.tests} test${node.tests === 1 ? '' : 's'}` : ''}</small></> },
+          className: 'dag-graph-node preview',
+          sourcePosition: 'right',
+          targetPosition: 'left',
+          style: { width: nodeWidth, height: nodeHeight }
+        }
+      }),
+      edges: edges.map((edge, index) => ({
+        id: `run-preview-edge-${edge.source}-${edge.target}-${index}`,
+        source: String(edge.source),
+        target: String(edge.target),
+        type: 'smoothstep',
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#4779c9' },
+        style: { stroke: '#4779c9', strokeWidth: 1.6 }
+      }))
+    }
+  }, [preview])
+  if (!(preview?.nodes || []).length) return <div className="soft-empty">The current selection did not resolve any models.</div>
+  return <>
+    <div className="dag-summary"><span><strong>{preview.modelCount}</strong> models</span><span><strong>{preview.testCount}</strong> tests</span>{preview.target && <span>Target <code>{preview.target}</code></span>}</div>
+    <div className="preview-selection"><span>Selection</span>{(preview.selection || []).map(item => <code key={item}>{item}</code>)}</div>
+    <div className="dag-graph run-dag-preview-graph" aria-label="Current run DBT dependency preview">
+      <ReactFlow nodes={graph.nodes} edges={graph.edges} fitView fitViewOptions={{ padding: 0.18 }} minZoom={0.12} maxZoom={1.8} nodesDraggable={false} nodesConnectable={false}>
+        <Background color="rgba(105, 139, 255, 0.18)" gap={22} size={1} />
+        <MiniMap pannable zoomable nodeColor="#0075ff" maskColor="rgba(3, 9, 31, 0.72)" />
+        <Controls showInteractive={false} />
+      </ReactFlow>
+    </div>
+  </>
+}
+function RunWorkflowModal({ workflow, pendingRun, onClose, onRun }) {
+  const [detail, setDetail] = useState(null)
+  const [error, setError] = useState(null)
+  const [submitting, setSubmitting] = useState(false)
   const [runOnlyThisWorkflow, setRunOnlyThisWorkflow] = useState(false)
-  const view = pendingRun ? {
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [preview, setPreview] = useState(null)
+  const [previewError, setPreviewError] = useState(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    api.workflowDetail(workflow.workflowId)
+      .then(data => !cancelled && setDetail(data))
+      .catch(err => !cancelled && setError(err.message))
+    return () => { cancelled = true }
+  }, [workflow.workflowId])
+  const isDbt = String(detail?.workflowType || workflow.workflowType || '').toUpperCase() === 'DBT'
+  const pendingMatchesCompletedRun = pendingRun?.runId &&
+    String(pendingRun.runId) === String(workflow.lastRunId || '') &&
+    terminalRunStatuses.has(normalizeStatus(workflow.lastStatus, '-'))
+  const busy = isWorkflowBusy(pendingMatchesCompletedRun ? workflow.lastStatus : (pendingRun?.status || workflow.lastStatus)) || Boolean(workflow.runLocked)
+
+  async function loadPreview() {
+    if (!isDbt || previewLoading) return
+    setPreviewLoading(true)
+    setPreviewError(null)
+    try {
+      setPreview(await api.previewWorkflowDag(workflow.workflowId, detail.dbtCommand || ''))
+    } catch (err) {
+      setPreviewError(err.message)
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  async function submit() {
+    setSubmitting(true)
+    setError(null)
+    try {
+      await onRun(workflow, {
+        skipChildren: runOnlyThisWorkflow,
+        dbtCommandOverride: isDbt ? detail.dbtCommand : ''
+      })
+    } catch (err) {
+      setError(err.message)
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal title="Run workflow" subtitle={workflow.workflowName} onClose={onClose} wide>
+      {error && <div className="alert error">{error}</div>}
+      {!detail && !error && <div className="empty-state">Loading run configuration...</div>}
+      {detail && <>
+        <div className="alert info compact">These settings apply only to this run. The saved workflow and scheduled task will not be changed.</div>
+        {isDbt ? (
+          <DbtCommandBuilder command={detail.dbtCommand || ''} onChange={dbtCommand => {
+            setDetail(current => ({ ...current, dbtCommand }))
+            setPreview(null)
+            setPreviewError(null)
+          }} />
+        ) : (
+          <div className="form-field"><label>SQL command</label><textarea rows="7" value={detail.sqlCommand || ''} readOnly /><small>One-time SQL overrides are not enabled yet.</small></div>
+        )}
+        <label className="workflow-run-only-option">
+          <input type="checkbox" checked={runOnlyThisWorkflow} onChange={event => setRunOnlyThisWorkflow(event.target.checked)} />
+          <span><strong>Run only this workflow</strong><small>Skip both ON_SUCCESS and ON_FAIL child workflows for this manual run.</small></span>
+        </label>
+        {isDbt && <details className="run-dag-preview" open={previewOpen} onToggle={event => {
+          const open = event.currentTarget.open
+          setPreviewOpen(open)
+          if (open && !preview && !previewLoading) loadPreview()
+        }}>
+          <summary><span>Preview DAG</span><small>Resolve the current one-time DBT selection</small></summary>
+          <div className="run-dag-preview-body">
+            {previewLoading && <div className="empty-state">Resolving the current selection. This can take about a minute...</div>}
+            {previewError && <div className="alert error">{previewError}</div>}
+            {!preview && !previewLoading && !previewError && <button type="button" className="button preview-load-button" onClick={loadPreview}>◇ Load DAG preview</button>}
+            {preview && !previewLoading && <><button type="button" className="small-button preview-refresh-button" onClick={loadPreview}>↻ Refresh preview</button><EmbeddedDagPreview preview={preview} /></>}
+          </div>
+        </details>}
+        <div className="modal-actions">
+          <button className="button primary run-confirm-button" disabled={submitting || busy || (isDbt && !parseDbtCommand(detail.dbtCommand).selections.length)} onClick={submit}>{submitting ? 'Starting…' : '▶ Run workflow'}</button>
+          <button className="button muted" disabled={submitting} onClick={onClose}>Cancel</button>
+        </div>
+      </>}
+    </Modal>
+  )
+}
+function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
+  const pendingMatchesCompletedRun = pendingRun?.runId &&
+    String(pendingRun.runId) === String(workflow.lastRunId || '') &&
+    terminalRunStatuses.has(normalizeStatus(workflow.lastStatus, '-'))
+  const relevantPendingRun = pendingMatchesCompletedRun ? null : pendingRun
+  const view = relevantPendingRun ? {
     ...workflow,
-    lastStatus: pendingRun.status || 'INITIATING',
-    lastRunId: pendingRun.runId || workflow.lastRunId,
-    runLocked: !terminalRunStatuses.has(normalizeStatus(pendingRun.status, '-')),
-    runLock: pendingRun
+    lastStatus: relevantPendingRun.status || 'INITIATING',
+    lastRunId: relevantPendingRun.runId || workflow.lastRunId,
+    runLocked: !terminalRunStatuses.has(normalizeStatus(relevantPendingRun.status, '-')),
+    runLock: relevantPendingRun
   } : workflow
   const wfEnabled = Boolean(view.workflowEnabled)
   const taskEnabled = Boolean(view.taskEnabled)
   const isDbt = String(view.workflowType || '').toUpperCase() === 'DBT'
   const runLock = view.runLock || null
-  const busy = isWorkflowBusy(view.lastStatus) || Boolean(view.runLocked)
-  const hasParent = Number(view.indent || 0) > 0
-  const dependencyCondition = view.dependencyTrigger === 'ON_FAIL' ? 'fails' : 'succeeds'
-  const parentContext = view.parentWorkflowName
-    ? `Usually triggered when ${view.parentWorkflowName} ${dependencyCondition}. This starts it independently.`
-    : 'This workflow has an upstream dependency. This starts it independently.'
   async function choose(action) {
-    await onAction(action, view, { skipChildren: action === 'run' && runOnlyThisWorkflow })
+    await onAction(action, view)
   }
 
   return (
@@ -995,16 +1205,14 @@ function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
         {view.lastRunId && <code>{view.lastRunId}</code>}
       </div>
       {runLock && <div className="alert info compact">This workflow is locked for a pending run. Run ID: <code>{runLock.runId || 'pending'}</code></div>}
-      <label className="workflow-run-only-option">
-        <input type="checkbox" checked={runOnlyThisWorkflow} onChange={event => setRunOnlyThisWorkflow(event.target.checked)} disabled={!wfEnabled || busy} />
-        <span><strong>Run only this workflow</strong><small>Skip both ON_SUCCESS and ON_FAIL child workflows for this manual run.</small></span>
-      </label>
       <div className="action-grid">
-        <button className="action-tile primary" disabled={!wfEnabled || busy} onClick={() => choose('run')}>
-          <span className="action-icon">▶</span>
-          <strong>{busy ? 'Workflow active' : hasParent ? 'Run independently' : 'Run workflow'}</strong>
-          <small>{runLock ? lockStatusText(runLock) : (busy ? 'Run is disabled while initiating, queued or running.' : (hasParent ? parentContext : 'Create a manual run request.'))}</small>
-        </button>
+        {isDbt && (
+          <button className="action-tile" onClick={() => choose('preview-dag')}>
+            <span className="action-icon">◇</span>
+            <strong>Preview DAG</strong>
+            <small>Resolve the saved selection without starting or logging a run.</small>
+          </button>
+        )}
         {isDbt && (
           <button className="action-tile" onClick={() => choose('dag')}>
             <span className="action-icon">⌘</span>
@@ -1376,6 +1584,7 @@ export default function Monitor({ onNavigate }) {
       setModal(null)
       return onNavigate('dag', { workflow })
     }
+    if (action === 'preview-dag') return setModal({ type: 'preview-dag', workflow })
     if (action === 'log') {
       setModal(null)
       return onNavigate('executionLog', {
@@ -1389,13 +1598,14 @@ export default function Monitor({ onNavigate }) {
     setModal(null)
     try {
       if (action === 'run') {
-        const result = await api.runWorkflow(workflow.workflowId, workflow.workflowName, Boolean(options.skipChildren))
+        const result = await api.runWorkflow(workflow.workflowId, workflow.workflowName, Boolean(options.skipChildren), options.dbtCommandOverride || '')
         applyLiveRunUpdate({
           ...result,
           workflowId: workflow.workflowId,
           workflowName: workflow.workflowName,
         })
         notify(`Initiated ${workflow.workflowName}${options.skipChildren ? ' without child workflows' : ''}. Waiting for dispatcher pickup...`)
+        setModal(null)
       }
       if (action === 'toggle-workflow') {
         await api.setWorkflowEnabled(workflow.workflowId, !workflow.workflowEnabled)
@@ -1418,6 +1628,7 @@ export default function Monitor({ onNavigate }) {
         })
       }
       notify(`Action failed for ${workflow.workflowName}: ${err.message}`)
+      if (action === 'run') throw err
     }
   }
   return (
@@ -1469,7 +1680,7 @@ export default function Monitor({ onNavigate }) {
         </div>
         <span className="summary-updated">Updated {formatDateTime(payload?.generatedAt)}</span>
       </div>
-      <div className={`table-card monitor-table-card vision-card-flat ${viewMode === 'timeline' ? 'timeline-card' : ''}`}>
+      <div className={`table-card ${viewMode === 'timeline' ? 'monitor-table-card timeline-card' : ''}`}>
         {loading ? <div className="empty-state">Loading monitor data...</div> : null}
         {!loading && filtered.length === 0 ? <div className="empty-state">No workflows match the current filters.</div> : null}
         {filtered.length > 0 && viewMode === 'timeline' && (
@@ -1488,14 +1699,16 @@ export default function Monitor({ onNavigate }) {
           />
         )}
         {filtered.length > 0 && viewMode === 'table' && (
-          <table className="workflow-table monitor-table">
+          <table className="workflow-table compact monitor-table">
             <thead><tr><th>Workflow</th><th><span className="visually-hidden">Actions</span></th><th>Status</th><th>Last Run</th><th>Duration</th><th>Schedule</th><th>Next Run</th></tr></thead>
-            <tbody>{filtered.map(w => <WorkflowRow key={w.workflowId} workflow={w} nowMs={nowMs} onManage={(workflow) => setModal({ type: 'actions', workflow })} pendingRun={pendingRuns[w.workflowId]} />)}</tbody>
+            <tbody>{filtered.map(w => <WorkflowRow key={w.workflowId} workflow={w} nowMs={nowMs} onManage={(workflow) => setModal({ type: 'actions', workflow })} onRun={(workflow) => setModal({ type: 'run', workflow })} pendingRun={pendingRuns[w.workflowId]} />)}</tbody>
           </table>
         )}
       </div>
       {modal?.type === 'actions' && <ActionsModal workflow={modal.workflow} pendingRun={pendingRuns[modal.workflow.workflowId]} onClose={() => setModal(null)} onAction={handleAction} />}
       {modal?.type === 'dag' && <DagModal workflow={modal.workflow} onClose={() => setModal(null)} />}
+      {modal?.type === 'preview-dag' && <PreviewDagModal workflow={modal.workflow} onClose={() => setModal(null)} />}
+      {modal?.type === 'run' && <RunWorkflowModal workflow={modal.workflow} pendingRun={pendingRuns[modal.workflow.workflowId]} onClose={() => setModal(null)} onRun={(workflow, options) => handleAction('run', workflow, options)} />}
       {modal?.type === 'edit' && <EditModal workflowId={modal.workflow.workflowId} onClose={() => setModal(null)} onSaved={() => load(true)} notify={notify} />}
     </section>
   )

@@ -69,12 +69,10 @@ export const api = {
   refreshMonitor: () => requestJson('/api/monitor/refresh', { method: 'POST' }),
   workflowRunLocks: () => requestJson('/api/workflow-run-locks', { timeoutMs: 12000 }),
   realtimeState: () => requestJson('/api/realtime/state', { timeoutMs: 5000 }),
-  runWorkflow: async (workflowId, workflowName = '', skipChildren = false) => {
-    const encodedId = encodeURIComponent(workflowId)
-    const params = new URLSearchParams({ triggerSource: 'MANUAL', workflowName, _: String(Date.now()) })
-    if (skipChildren) params.set('skipChildren', 'true')
-    return requestJson(`/api/workflows/${encodedId}/run-fallback?${params.toString()}`)
-  },
+  runWorkflow: (workflowId, workflowName = '', skipChildren = false, dbtCommandOverride = '') => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/run`, {
+    method: 'POST',
+    body: JSON.stringify({ triggerSource: 'MANUAL', workflowName, skipChildren, dbtCommandOverride })
+  }),
   workflowDetail: (workflowId, options = {}) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`, options),
   updateWorkflow: (workflowId, payload) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`, {
     method: 'PATCH',
@@ -91,9 +89,16 @@ export const api = {
     body: JSON.stringify({ enabled })
   }),
   workflowHistory: (workflowId, limit = 100) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/history?limit=${limit}`),
-  workflowDag: (workflowId, runId = '') => requestJson(
-    `/api/workflows/${encodeURIComponent(workflowId)}/dag${runId ? `?runId=${encodeURIComponent(runId)}` : ''}`
-  ),
+  workflowDag: (workflowId, runId = '') => {
+    const params = new URLSearchParams({ _: String(Date.now()) })
+    if (runId) params.set('runId', runId)
+    return requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/dag?${params.toString()}`, { cache: 'no-store' })
+  },
+  previewWorkflowDag: (workflowId, dbtCommand = '') => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/dag-preview`, {
+    method: 'POST',
+    body: JSON.stringify({ dbtCommand }),
+    timeoutMs: 210000
+  }),
   history: (limit = 200) => requestJson(`/api/history?limit=${limit}`),
   executionLog: (runId, workflowId = '') => requestJson(`/api/executions/${encodeURIComponent(runId)}/log${workflowId ? `?workflowId=${encodeURIComponent(workflowId)}` : ''}`),
   notifications: () => requestJson('/api/notification-admin'),
