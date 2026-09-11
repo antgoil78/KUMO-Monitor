@@ -10,10 +10,6 @@ function percent(value, total) {
   return Math.round((value / total) * 100)
 }
 
-function firstWord(value) {
-  return String(value || '').trim().split(/\s+/)[0] || 'there'
-}
-
 let dashboardCache = null
 const refreshOptions = [5, 10, 30, 60, 120]
 
@@ -94,6 +90,40 @@ function WorkflowActivity({ workflow }) {
   )
 }
 
+function LimAttentionCard({ data, loading, error, onOpen }) {
+  const summary = data?.summary || {}
+  const attention = data?.attention || []
+  const hasAttention = Boolean(data?.hasAttention)
+  return (
+    <div className={`vision-card lim-attention-card ${hasAttention ? 'has-attention' : 'clear'}`}>
+      <div className="card-title-row">
+        <div>
+          <span className="eyebrow">LIM ingestion control</span>
+          <h3>{loading ? 'Checking ingestion readiness…' : hasAttention ? 'Ingestion needs attention' : 'Ingestion is ready'}</h3>
+          <span>Uses the same readiness and row-count rules as LIM Ingestion.</span>
+        </div>
+        <strong className="lim-attention-count">{loading ? '—' : Number(summary.attentionGroups || 0) + Number(summary.missingGroups || 0)}</strong>
+      </div>
+      {error ? <div className="alert error">LIM control unavailable: {error}</div> : <>
+        <div className="lim-attention-stats">
+          <div><strong>{summary.totalGroups || 0}</strong><span>Monitored groups</span></div>
+          <div><strong>{summary.attentionGroups || 0}</strong><span>Attention</span></div>
+          <div><strong>{summary.missingGroups || 0}</strong><span>Missing files</span></div>
+          <div><strong>{summary.readyGroups || 0}</strong><span>Ready</span></div>
+        </div>
+        <div className="lim-attention-list">
+          {!loading && attention.length === 0 && <div className="lim-attention-clear"><i /> No ingestion attention detected.</div>}
+          {attention.slice(0, 4).map(item => <div className="lim-attention-row" key={`${item.groupName}-${item.subjectArea}`}>
+            <i />
+            <div><strong>{item.groupName || 'Unknown group'}</strong><span>{item.subjectArea || 'Unknown area'} · {item.statusLabel || item.statusKind}</span></div>
+          </div>)}
+        </div>
+      </>}
+      <button type="button" className="small-button lim-attention-open" onClick={onOpen}>Open LIM Ingestion</button>
+    </div>
+  )
+}
+
 function TinyBarChart({ workflows }) {
   const groups = useMemo(() => {
     const map = new Map()
@@ -168,7 +198,7 @@ function PollingInfo({ clients, pollingActive, onClose }) {
   )
 }
 
-export default function Dashboard() {
+export default function Dashboard({ onNavigate }) {
   const [payload, setPayload] = useState(dashboardCache?.payload || null)
   const [health, setHealth] = useState(dashboardCache?.health || null)
   const [ping, setPing] = useState(dashboardCache?.ping || null)
@@ -179,6 +209,9 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(!dashboardCache)
   const [refreshing, setRefreshing] = useState(Boolean(dashboardCache))
   const [showPollingInfo, setShowPollingInfo] = useState(false)
+  const [limAttention, setLimAttention] = useState(null)
+  const [limAttentionError, setLimAttentionError] = useState(null)
+  const [limAttentionLoading, setLimAttentionLoading] = useState(true)
   const [refreshIntervalSec, setRefreshIntervalSec] = useState(
     Number(window.sessionStorage.getItem('kumoDashboardClientRefreshSeconds') || 10)
   )
@@ -296,15 +329,29 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    let cancelled = false
-    let id = null
-    api.session().catch(() => null).then(() => {
-      if (cancelled) return
-      load({ silent: Boolean(dashboardCache) })
-      id = setInterval(() => load({ silent: true }), Math.max(5, refreshIntervalSec || 10) * 1000)
-    })
-    return () => { cancelled = true; if (id) clearInterval(id) }
+    load({ silent: Boolean(dashboardCache) })
+    const id = setInterval(() => load({ silent: true }), Math.max(5, refreshIntervalSec || 10) * 1000)
+    return () => clearInterval(id)
   }, [refreshIntervalSec])
+
+  useEffect(() => {
+    let cancelled = false
+    const loadLimAttention = () => api.dashboardLimAttention().then(result => {
+      if (!cancelled) {
+        setLimAttention(result)
+        setLimAttentionError(null)
+        setLimAttentionLoading(false)
+      }
+    }).catch(err => {
+      if (!cancelled) {
+        setLimAttentionError(err.message || String(err))
+        setLimAttentionLoading(false)
+      }
+    })
+    loadLimAttention()
+    const id = window.setInterval(loadLimAttention, 30000)
+    return () => { cancelled = true; window.clearInterval(id) }
+  }, [])
 
   function updateRefreshInterval(value) {
     const seconds = Number(value)
@@ -326,11 +373,6 @@ export default function Dashboard() {
 
   const mockMode = Boolean(health?.mock)
   const snowflakeOk = Boolean(ping?.ok)
-  const warehouse = ping?.snowflake?.WAREHOUSE_NAME || ping?.snowflake?.warehouse_name || 'Not selected'
-  const role = session?.roleName || ping?.snowflake?.ROLE_NAME || ping?.snowflake?.role_name || 'Unknown role'
-  const displayName = session?.displayName || session?.userName || 'KUMO user'
-  const welcomeName = session?.firstName || firstWord(displayName)
-  const callerRightsActive = Boolean(session?.callerRightsActive)
   const connectedClients = Number(realtime?.clientCount || 0)
   const pollingActive = Boolean(realtime?.pollingActive)
   const activityLease = realtime?.activityLease || {}
@@ -340,10 +382,6 @@ export default function Dashboard() {
   return (
     <section className="page dashboard-page">
       <PageHeader breadcrumb="Pages / Dashboard" title="Dashboard" subtitle="Operational overview of KUMO workflows and platform health." actions={<div className="dashboard-top-actions">
-          <div className="topbar-user" title={`${displayName} · ${role}`}>
-            <span>{displayName.slice(0, 1).toUpperCase()}</span>
-            <div><strong>{displayName}</strong><small>{role}</small></div>
-          </div>
           <div className="topbar-status">
             <span className={`topbar-dot ${snowflakeOk ? 'success' : mockMode ? 'queued' : 'failed'}`} />
             <span title={ping?.error || ''}>{mockMode ? 'Mock mode' : snowflakeOk ? 'Snowflake connected' : 'Snowflake check failed'}</span>
@@ -400,34 +438,7 @@ export default function Dashboard() {
       </div>
 
       <div className="dashboard-layout session-layout">
-        <div className="vision-card welcome-card">
-          <div className="welcome-content">
-            <span className="eyebrow">KUMO Monitor</span>
-            <h2>Welcome back, {welcomeName}</h2>
-            <p>
-              Your workflow estate is being monitored in Snowpark Container Services.
-              Your current Snowflake identity and role are shown below.
-            </p>
-            <div className="welcome-user-panel">
-              <div className="welcome-avatar">{displayName.slice(0, 1).toUpperCase()}</div>
-              <div>
-                <strong>{displayName}</strong>
-                <span>{session?.userName || 'UNKNOWN'} · {role}</span>
-              </div>
-            </div>
-            <div className="welcome-actions">
-              <span className={`glass-pill ${engineOk ? 'success' : 'failed'}`}>Engine {engine.status || 'UNKNOWN'}</span>
-              <span className="glass-pill">{summary.total || 0} workflows</span>
-              <span className="glass-pill">{role}</span>
-              <span className={`glass-pill ${callerRightsActive ? 'success' : 'failed'}`}>{callerRightsActive ? 'Real user context' : 'Service context'}</span>
-            </div>
-          </div>
-          <div className="orb-stage" aria-hidden="true">
-            <div className="orb orb-main" />
-            <div className="orb-ring ring-one" />
-            <div className="orb-ring ring-two" />
-          </div>
-        </div>
+        <LimAttentionCard data={limAttention} loading={limAttentionLoading} error={limAttentionError} onOpen={() => onNavigate?.('fileIngestion')} />
 
         <ActiveUsersCard users={activeUsers} currentUserName={session?.userName} />
 
@@ -454,9 +465,7 @@ export default function Dashboard() {
           <div className="health-list">
             <HealthCheck label="Backend API" detail={health?.app || 'KUMO Monitor'} ok={Boolean(health?.ok)} />
             <HealthCheck label="Snowflake session" detail={ping?.mode || health?.snowflakeConnectionMode || 'unknown'} ok={snowflakeOk || mockMode} tone={mockMode ? 'queued' : undefined} />
-            <HealthCheck label="Warehouse" detail={warehouse} ok={snowflakeOk && warehouse !== 'Not selected'} />
             <HealthCheck label="Workflow engine" detail={engine.status || 'UNKNOWN'} ok={engineOk} tone={engineKind} />
-            <HealthCheck label="Connected clients" detail={`${connectedClients} browser connection${connectedClients === 1 ? '' : 's'}`} ok={connectedClients > 0} />
             <HealthCheck label="Backend polling" detail={`${pollingActive ? 'Active' : 'Stopped'} · activity lease ${Math.ceil(Number(activityLease.remainingSeconds || 0))}s`} ok={pollingActive} />
           </div>
         </div>

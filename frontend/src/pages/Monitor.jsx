@@ -1250,6 +1250,7 @@ function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
   )
 }
 export default function Monitor({ onNavigate }) {
+  const astelPreview = new URLSearchParams(window.location.search).get('preview') === 'astel'
   const [payload, setPayload] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -1262,7 +1263,7 @@ export default function Monitor({ onNavigate }) {
   const pendingRunsRef = useRef({})
   const [globalLocks, setGlobalLocks] = useState([])
   const [modal, setModal] = useState(null)
-  const [viewMode, setViewMode] = useState('table')
+  const [viewMode, setViewMode] = useState(astelPreview ? 'timeline' : 'table')
   const [timelineRows, setTimelineRows] = useState([])
   const [timelineLoading, setTimelineLoading] = useState(false)
   const [timelineLoaded, setTimelineLoaded] = useState(false)

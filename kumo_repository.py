@@ -467,7 +467,9 @@ def upsert_task(workflow_id, schedule_cron, schedule_timezone, schedule_enabled,
             cols.append("ON_SUCCESS"); vals.append("PARSE_JSON(%(on_success)s)")
         if "ON_FAIL" in t_types:
             cols.append("ON_FAIL"); vals.append("PARSE_JSON(%(on_fail)s)")
-        sf.execute(f"INSERT INTO {config.T_TASKS} ({', '.join(cols)}) VALUES ({', '.join(vals)})", params)
+        # Snowflake does not allow PARSE_JSON(...) as an expression in a VALUES
+        # row. SELECT accepts the function and still binds every value safely.
+        sf.execute(f"INSERT INTO {config.T_TASKS} ({', '.join(cols)}) SELECT {', '.join(vals)}", params)
 
     create_or_replace_sf_task(workflow_id)
 

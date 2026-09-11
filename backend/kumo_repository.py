@@ -167,6 +167,58 @@ def cleanup_workflow_run_locks():
     _last_run_lock_cleanup_monotonic = now
 
     terminal = ", ".join([f"'{s}'" for s in sorted(TERMINAL_RUN_STATUSES)])
+    active = ", ".join([f"'{s}'" for s in sorted(ACTIVE_RUN_STATUSES)])
+
+    # A syntax error can prevent the body of a temporary execution task from
+    # reaching SP_SQL_COMPLETE/SP_DBT_COMPLETE. Reconcile those failures from
+    # Snowflake's authoritative task history. Do not infer failure from elapsed
+    # time or a missing ENGINE_QUERY_ID; successful legacy runs omit that id too.
+    try:
+        failed_tasks = normalize_rows(_query(
+            f"""
+            SELECT
+              tmp.RUN_ID,
+              tmp.WORKFLOW_ID,
+              th.QUERY_ID,
+              th.ERROR_MESSAGE
+            FROM TABLE({config.DB}.INFORMATION_SCHEMA.TASK_HISTORY(
+              SCHEDULED_TIME_RANGE_START => DATEADD('hour', -24, CURRENT_TIMESTAMP()),
+              RESULT_LIMIT => 1000
+            )) th
+            JOIN {config.DB}.{config.SCHEMA}.WORKFLOW_TMP_TASKS tmp
+              ON UPPER(th.NAME) = UPPER(tmp.TASK_NAME)
+            JOIN {config.T_HISTORY} h
+              ON h.RUN_ID = tmp.RUN_ID
+            WHERE th.STATE = 'FAILED'
+              AND UPPER(COALESCE(h.STATUS, '')) IN ({active})
+            QUALIFY ROW_NUMBER() OVER (
+              PARTITION BY tmp.RUN_ID ORDER BY th.SCHEDULED_TIME DESC
+            ) = 1
+            """
+        ))
+        utc_now = "CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ"
+        for failed in failed_tasks:
+            error_message = str(failed.get("ERROR_MESSAGE") or "Snowflake execution task failed")
+            _execute(
+                f"""
+                UPDATE {config.T_HISTORY}
+                SET STATUS = 'FAILED',
+                    END_TIME = COALESCE(END_TIME, {utc_now}),
+                    ERROR_MESSAGE = %(error_message)s,
+                    UPDATED_AT = {utc_now}
+                WHERE RUN_ID = %(run_id)s
+                  AND UPPER(COALESCE(STATUS, '')) IN ({active})
+                """,
+                {"run_id": failed.get("RUN_ID"), "error_message": error_message},
+            )
+            _execute(
+                f"UPDATE {config.T_QUEUE} SET STATUS = 'FAILED' WHERE RUN_ID = %(run_id)s",
+                {"run_id": failed.get("RUN_ID")},
+            )
+    except Exception:
+        # Lock cleanup is best effort and must never take down monitor reads.
+        pass
+
     try:
         _execute(
             f"""
@@ -1339,7 +1391,9 @@ def upsert_task(workflow_id, schedule_cron, schedule_timezone, schedule_enabled,
             cols.append("ON_SUCCESS"); vals.append("PARSE_JSON(%(on_success)s)")
         if "ON_FAIL" in t_types:
             cols.append("ON_FAIL"); vals.append("PARSE_JSON(%(on_fail)s)")
-        _execute(f"INSERT INTO {config.T_TASKS} ({', '.join(cols)}) VALUES ({', '.join(vals)})", params)
+        # Snowflake does not allow PARSE_JSON(...) as an expression in a VALUES
+        # row. SELECT accepts the function and still binds every value safely.
+        _execute(f"INSERT INTO {config.T_TASKS} ({', '.join(cols)}) SELECT {', '.join(vals)}", params)
 
     create_or_replace_sf_task(workflow_id)
 

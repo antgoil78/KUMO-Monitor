@@ -50,6 +50,7 @@ export const api = {
   activity: () => requestJson('/api/activity', { timeoutMs: 5000 }),
   adminActivityLog: (limit = 500) => requestJson(`/api/admin/activity-log?limit=${limit}`, { timeoutMs: 5000 }),
   dashboard: () => requestJson('/api/dashboard', { timeoutMs: 8000 }),
+  dashboardLimAttention: () => requestJson('/api/dashboard/lim-attention', { timeoutMs: 5 * 60 * 1000 }),
   updateBackendRefresh: (seconds) => requestJson('/api/settings/refresh', {
     method: 'PATCH',
     body: JSON.stringify({ seconds })

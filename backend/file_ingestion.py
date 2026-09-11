@@ -8,6 +8,8 @@ when a user opens a detail dialog.
 import json
 import os
 import re
+import threading
+import time
 from datetime import date
 
 from flask import Blueprint, current_app, jsonify, request
@@ -46,6 +48,10 @@ LIM_HEADER_FIELDS = (
     ("DLVY_COPY_NAME", 47, 10),
     ("DLVY_DELTA_EVENT_TYPE", 57, 1),
 )
+
+_dashboard_attention_lock = threading.Lock()
+_dashboard_attention_cache = {"payload": None, "cached_at": 0.0}
+_DASHBOARD_ATTENTION_CACHE_SECONDS = 30
 
 
 def _json_error(error, status=500):
@@ -386,6 +392,41 @@ def _build_summary(overview):
         "missingFiles": missing_files,
         "readinessPct": readiness_pct,
     }
+
+
+def _dashboard_attention_snapshot():
+    """Return the dashboard LIM check using the overview's canonical status logic."""
+    now = time.monotonic()
+    with _dashboard_attention_lock:
+        cached = _dashboard_attention_cache.get("payload")
+        age = now - float(_dashboard_attention_cache.get("cached_at") or 0)
+        if cached is not None and age < _DASHBOARD_ATTENTION_CACHE_SECONDS:
+            return {**cached, "cached": True}
+
+        data = _load_overview(DEFAULT_HISTORY_DAYS)
+        summary = data.get("summary") or _build_summary([])
+        attention = []
+        for row in data.get("overview") or []:
+            if row.get("STATUS_KIND") not in ("ATTENTION", "ROWCOUNT_ISSUE", "MISSING_FILES"):
+                continue
+            attention.append({
+                "groupName": row.get("PKG_GROUP_NAME"),
+                "subjectArea": row.get("SUBJECT_AREA"),
+                "statusKind": row.get("STATUS_KIND"),
+                "statusLabel": row.get("STATUS_LABEL"),
+                "latestStatuses": row.get("LATEST_STATUS_LIST"),
+            })
+        payload = {
+            "ok": True,
+            "source": "file-ingestion-overview",
+            "status": summary.get("engineStatus") or "READY",
+            "hasAttention": bool(summary.get("attentionGroups") or summary.get("missingGroups")),
+            "summary": summary,
+            "attention": attention[:8],
+        }
+        _dashboard_attention_cache["payload"] = payload
+        _dashboard_attention_cache["cached_at"] = now
+        return {**payload, "cached": False}
 
 
 def _load_raw_table_readiness(cur, catalog):
@@ -853,6 +894,25 @@ def _load_lim_subject_areas(cur, database):
         """
     )
     return [str(row.get("SUBJECT_AREA")) for row in normalize_rows(cur.fetchall()) if row.get("SUBJECT_AREA")]
+
+
+@file_ingestion_bp.get("/api/dashboard/lim-attention")
+def dashboard_lim_attention():
+    if config.USE_MOCK or not sf.is_configured():
+        return jsonify({
+            "ok": True,
+            "source": "mock",
+            "status": "READY",
+            "hasAttention": False,
+            "summary": _build_summary([]),
+            "attention": [],
+            "cached": False,
+        })
+    try:
+        return jsonify(_dashboard_attention_snapshot())
+    except Exception as exc:
+        current_app.logger.exception("Failed to load dashboard LIM attention check")
+        return _json_error(exc, 500)
 
 
 @file_ingestion_bp.get("/api/file-ingestion")

@@ -1,0 +1,197 @@
+/* Isolated KUMO concept adapted from the Astel calendar demo. */
+.astel-preview {
+  --bg: #f7f6f9;
+  --bg-2: #f7f6f9;
+  --panel: #fff;
+  --panel-strong: #fff;
+  --panel-soft: #f5f6fa;
+  --glass: #fff;
+  --line: #e1e4eb;
+  --line-soft: #e8eaf0;
+  --text: #5a6475;
+  --text-strong: #2c2320;
+  --muted: #747e8e;
+  --muted2: #a0a7b3;
+  --blue: #f6683f;
+  --cyan: #ff9678;
+  --purple: #de8f7b;
+  --green: #20b486;
+  --red: #ef4d5b;
+  --amber: #f59f0b;
+  --shadow: 0 2px 8px rgba(35, 31, 32, .08);
+  gap: 0;
+  padding: 0;
+  background: #f7f6f9;
+}
+body:has(.astel-preview) { background: #f7f6f9; color: #5a6475; }
+body:has(.astel-preview)::before { display: none; }
+
+.astel-preview .sidebar {
+  width: 276px;
+  min-width: 276px;
+  height: 100vh;
+  top: 0;
+  padding: 16px 14px;
+  border: 1px solid #e1e4eb;
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
+}
+.astel-preview .brand { padding: 0 3px 18px; margin-bottom: 12px; border: 0; }
+.astel-preview .brand-mark { width: 40px; height: 40px; border-radius: 50%; background: #f6683f; box-shadow: none; }
+.astel-preview .brand-kumo { color: #37251f; font-size: 18px; letter-spacing: .04em; }
+.astel-preview .brand-subtitle { color: #9d8178; letter-spacing: .1em; }
+.astel-preview .nav-label { margin: 14px 12px 8px; color: #8a93a2; }
+.astel-preview .nav-list { gap: 3px; }
+.astel-preview .nav-item {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 9px;
+  color: #505b6d;
+  font-size: 14px;
+}
+.astel-preview .nav-item:hover { transform: none; background: #fff4f0; color: #f6683f; }
+.astel-preview .nav-item.active { border: 0; background: linear-gradient(100deg, #f6683f, #ff8f70); color: #fff; box-shadow: none; }
+.astel-preview .nav-icon,
+.astel-preview .nav-item.active .nav-icon { width: 26px; height: 26px; border-radius: 6px; background: transparent; color: currentColor; }
+.astel-preview .sidebar-help { display: none; }
+
+.astel-preview .main-content { padding: 0; background: #f7f6f9; }
+.astel-topbar {
+  position: sticky;
+  z-index: 30;
+  top: 0;
+  min-height: 65px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 18px;
+  border-bottom: 1px solid #e1e4eb;
+  background: rgba(255,255,255,.96);
+}
+.astel-collapse,
+.astel-top-actions button {
+  height: 36px;
+  min-width: 36px;
+  border: 1px solid #e1e4eb;
+  border-radius: 9px;
+  background: #f5f6f8;
+  color: #3f4856;
+}
+.astel-search { position: relative; width: min(735px, 65%); }
+.astel-search span { position: absolute; left: 14px; top: 8px; color: #303845; font-size: 20px; }
+.astel-search input {
+  width: 100%;
+  height: 42px;
+  padding: 0 18px 0 48px;
+  border: 1px solid #d7dbe4;
+  border-radius: 7px;
+  background: #f7f8fb;
+  color: #343b47;
+  outline: none;
+}
+.astel-top-actions { margin-left: auto; display: flex; gap: 10px; }
+.astel-top-actions .astel-exit { width: auto; padding: 0 14px; background: #f6683f; border-color: #f6683f; color: #fff; font-size: 12px; font-weight: 700; }
+
+.astel-preview .page { max-width: 1600px; margin: 0 auto; padding: 30px 28px 60px; }
+.astel-preview .app-page-header { margin-bottom: 22px; }
+.astel-preview .breadcrumb { color: #9a829a; }
+.astel-preview .app-page-header-title { color: #312724; font-size: 30px !important; letter-spacing: -.035em !important; }
+.astel-preview .app-page-header-subtitle { color: #7d7780; }
+.astel-preview .vision-card,
+.astel-preview .table-card {
+  border: 1px solid #dfe2e8;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(35,31,32,.07);
+}
+.astel-preview .vision-card::before { display: none; }
+.astel-preview .metric-grid,
+.astel-preview .dashboard-layout,
+.astel-preview .dashboard-bottom-grid { gap: 18px; }
+.astel-preview .metric-card { min-height: 124px; padding: 22px; }
+.astel-preview .metric-label,
+.astel-preview .metric-footer { color: #858d9a; }
+.astel-preview .metric-value-row strong,
+.astel-preview .card-title-row h3,
+.astel-preview .welcome-content h2,
+.astel-preview .health-row strong,
+.astel-preview .activity-row strong,
+.astel-preview .risk-row strong { color: #312724; }
+.astel-preview .metric-icon { border-radius: 9px; background: #fff0eb !important; color: #f6683f; box-shadow: none; }
+.astel-preview .welcome-content p { color: #746f73; }
+.astel-preview .welcome-user-panel,
+.astel-preview .glass-pill,
+.astel-preview .soft-empty,
+.astel-preview .active-user-row,
+.astel-preview .chart-stats > div { border-color: #e6e3e5; background: #faf8f9; color: #716c70; }
+.astel-preview .welcome-avatar,
+.astel-preview .active-user-avatar { background: #f6683f; box-shadow: none; }
+.astel-preview .orb-main { background: radial-gradient(circle at 35% 35%, #fff, #ffc1af 18%, #f6683f 44%, rgba(246,104,63,.1) 68%, transparent 70%); box-shadow: none; }
+.astel-preview .orb-ring { border-color: rgba(246,104,63,.3); }
+.astel-preview .radial-meter { background: conic-gradient(#f6683f var(--meter), #f3ecea 0); box-shadow: none; }
+.astel-preview .radial-core { background: #fff; border-color: #eadfdb; }
+.astel-preview .radial-core strong { color: #312724; }
+.astel-preview .tiny-bar-track { background: #f2ecea; }
+.astel-preview .tiny-bar-fill { background: linear-gradient(#ff9578, #f6683f); box-shadow: none; }
+.astel-preview .health-row,
+.astel-preview .activity-row,
+.astel-preview .risk-row { border-color: #ece8e7; }
+.astel-preview .topbar-user,
+.astel-preview .topbar-status,
+.astel-preview .topbar-refresh-control { border-color: #e1e4eb; background: #fff; color: #687284; box-shadow: none; }
+.astel-preview .topbar-user > span { background: #fff0eb; color: #f6683f; }
+.astel-preview .topbar-user strong { color: #312724; }
+.astel-preview .topbar-refresh-control select { border-color: #e1e4eb; background: #f7f8fb; color: #4d5666; }
+
+.astel-preview .button,
+.astel-preview .small-button { border: 1px solid #f6683f; border-radius: 7px; background: #f6683f; color: #fff; box-shadow: none; }
+.astel-preview .monitor-toolbar,
+.astel-preview .monitor-page .monitor-system-strip {
+  border: 1px solid #dfe2e8;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(35,31,32,.06);
+  backdrop-filter: none;
+}
+.astel-preview .monitor-toolbar .search-input,
+.astel-preview .monitor-toolbar .status-select,
+.astel-preview .timeline-range-control select { border-color: #dfe2e8; border-radius: 7px; background: #f7f8fb; color: #4d5666; box-shadow: none; }
+.astel-preview .view-switch,
+.astel-preview .timeline-range-control { border-color: #e1e4eb; border-radius: 7px; background: #f7f8fb; }
+.astel-preview .view-switch button { border-radius: 5px; color: #687284; }
+.astel-preview .view-switch button.active { background: #f6683f; color: #fff; }
+.astel-preview .monitor-page .system-engine-card,
+.astel-preview .monitor-page .monitor-system-strip .summary-item,
+.astel-preview .monitor-page .monitor-system-strip .summary-total { border-color: #e6e3e5; border-radius: 6px; background: #faf8f9; color: #687284; }
+.astel-preview .monitor-page .system-engine-card strong,
+.astel-preview .monitor-page .monitor-system-strip strong { color: #312724; }
+.astel-preview .monitor-page .monitor-table-card { border-radius: 7px; background: #fff; border-color: #dfe2e8; }
+.astel-preview .timeline-head,
+.astel-preview .timeline-workflow-heading,
+.astel-preview .timeline-workflow-label { background: #faf8f9; }
+.astel-preview .timeline-workflow-label strong { color: #312724; }
+.astel-preview .timeline-head,
+.astel-preview .timeline-data-row,
+.astel-preview .timeline-workflow-label,
+.astel-preview .timeline-workflow-heading { border-color: #e6e3e5; }
+.astel-preview .timeline-track > i { background: #e8e3e1; }
+.astel-preview .timeline-axis span:last-child { color: #f6683f; }
+.astel-preview .timeline-legend { border-color: #e6e3e5; background: #faf8f9; }
+.astel-preview .timeline-run { box-shadow: none; }
+.astel-preview .workflow-table th { background: #faf8f9; color: #687284; border-bottom: 1px solid #e6e3e5; }
+.astel-preview .workflow-table td { color: #687284; border-color: #eee9e7; }
+.astel-preview .workflow-title,
+.astel-preview .workflow-title.root,
+.astel-preview .workflow-title.child { color: #312724; }
+
+@media (max-width: 900px) {
+  .astel-preview .sidebar { width: 82px; min-width: 82px; padding-inline: 10px; }
+  .astel-preview .brand > div:last-child,
+  .astel-preview .nav-label,
+  .astel-preview .nav-item > span:last-child { display: none; }
+  .astel-preview .nav-item { justify-content: center; }
+  .astel-preview .page { padding-inline: 18px; }
+  .astel-search { display: none; }
+}

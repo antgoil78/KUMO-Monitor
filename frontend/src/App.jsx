@@ -28,44 +28,43 @@ const pages = {
 }
 
 export default function App() {
-  const [page, setPage] = useState('dashboard')
+  const query = new URLSearchParams(window.location.search)
+  const astelPreview = query.get('preview') === 'astel'
+  // The Corona-inspired design is now the application default. Keep the old
+  // Astel query switch temporarily as an internal comparison/rollback aid.
+  const coronaPreview = !astelPreview
+  const stylePreview = astelPreview || coronaPreview
+  const requestedPage = query.get('page')
+  const [page, setPage] = useState(pages[requestedPage] ? requestedPage : 'dashboard')
   const [pageContext, setPageContext] = useState({})
+  const [topbarSession, setTopbarSession] = useState(null)
   const Page = pages[page] || Dashboard
 
   // Keep one presence connection open for the lifetime of the application,
   // including pages that do not otherwise consume realtime status events.
   useEffect(() => {
     let cancelled = false
-    let source = null
-    api.session().catch(() => null).then(() => {
-      if (cancelled) return
-      source = createKumoEventSource((event) => {
-        window.dispatchEvent(new CustomEvent('kumo:realtime', { detail: event }))
-      }, () => {}, { page })
+    const source = createKumoEventSource((event) => {
+      window.dispatchEvent(new CustomEvent('kumo:realtime', { detail: event }))
+    }, () => {}, { page })
+    api.session().catch(() => null).then(sessionData => {
+      if (!cancelled && sessionData) setTopbarSession(sessionData)
     })
     return () => { cancelled = true; source?.close() }
   }, [page])
 
   useEffect(() => {
     const renew = () => api.activity().catch(() => {})
-    let id = null
-    let ready = false
-    let cancelled = false
-    api.session().catch(() => null).then(() => {
-      if (cancelled) return
-      ready = true
-      renew()
-      id = window.setInterval(renew, 30000)
-    })
+    renew()
+    const id = window.setInterval(renew, 30000)
     const onVisible = () => {
-      if (ready && document.visibilityState === 'visible') renew()
+      if (document.visibilityState === 'visible') renew()
     }
-    const onFocus = () => { if (ready) renew() }
+    const onFocus = renew
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onFocus)
     return () => {
-      cancelled = true
-      if (id) window.clearInterval(id)
+      window.clearInterval(id)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onFocus)
     }
@@ -74,12 +73,44 @@ export default function App() {
   function navigate(nextPage, context = {}) {
     setPageContext(context)
     setPage(nextPage)
+    if (stylePreview) {
+      const url = new URL(window.location.href)
+      url.searchParams.set('page', nextPage)
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+    }
+  }
+
+  function closeStylePreview() {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('preview')
+    url.searchParams.delete('page')
+    window.location.assign(`${url.pathname}${url.search}${url.hash}`)
   }
 
   return (
-    <div className="app-shell">
-      <Sidebar activePage={page} onNavigate={navigate} />
+    <div className={`app-shell ${astelPreview ? 'astel-preview' : ''} ${coronaPreview ? 'corona-preview' : ''}`}>
+      <Sidebar activePage={page} onNavigate={navigate} session={topbarSession} />
       <main className="main-content">
+        {astelPreview && (
+          <div className="astel-topbar">
+            <button type="button" className="astel-collapse" aria-label="Collapse sidebar">«</button>
+            <label className="astel-search"><span>⌕</span><input placeholder="Search workflows, runs and settings" /></label>
+            <div className="astel-top-actions">
+              <button type="button" aria-label="Theme">☼</button>
+              <button type="button" aria-label="Notifications">♢</button>
+              <button type="button" className="astel-exit" onClick={closeStylePreview}>Exit preview</button>
+            </div>
+          </div>
+        )}
+        {coronaPreview && (
+          <div className="corona-topbar">
+            <button type="button" className="corona-menu" aria-label="Toggle navigation">☰</button>
+            <div className="corona-top-actions">
+              <span className="corona-live"><i /> Live</span>
+              <button type="button" aria-label="Notifications">♢<i /></button>
+            </div>
+          </div>
+        )}
         <Page {...pageContext} onNavigate={navigate} />
       </main>
     </div>
