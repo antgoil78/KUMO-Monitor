@@ -534,12 +534,28 @@ def _load_overview(history_days):
 
             cur.execute(
                 f"""
-                WITH LATEST_PACKAGE_RUNS AS (
+                WITH CURRENT_PACKAGE_RUNS AS (
+                    SELECT *
+                    FROM {SET_READY_LATEST_TABLE}
+                    WHERE PKG_GROUP_NAME IN ({placeholders})
+                ),
+                LATEST_ARCHIVED_RUNS AS (
                     SELECT *
                     FROM {SET_READY_HISTORY_TABLE}
                     WHERE PKG_GROUP_NAME IN ({placeholders})
                     QUALIFY CONTROL_DATE = MAX(CONTROL_DATE) OVER (
                         PARTITION BY PKG_GROUP_NAME
+                    )
+                ),
+                LATEST_PACKAGE_RUNS AS (
+                    SELECT * FROM CURRENT_PACKAGE_RUNS
+                    UNION ALL
+                    SELECT archived.*
+                    FROM LATEST_ARCHIVED_RUNS archived
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM CURRENT_PACKAGE_RUNS current_run
+                        WHERE current_run.PKG_GROUP_NAME = archived.PKG_GROUP_NAME
                     )
                 )
                 SELECT PKG_GROUP_NAME,
@@ -699,13 +715,24 @@ def _load_raw_detail(group_name):
 def _load_ready_detail(group_name):
     rows = sf.query_service(
         f"""
-        WITH LATEST_PACKAGE_RUN AS (
+        WITH CURRENT_PACKAGE_RUN AS (
+            SELECT *
+            FROM {SET_READY_LATEST_TABLE}
+            WHERE PKG_GROUP_NAME = %(group_name)s
+        ),
+        LATEST_ARCHIVED_RUN AS (
             SELECT *
             FROM {SET_READY_HISTORY_TABLE}
             WHERE PKG_GROUP_NAME = %(group_name)s
             QUALIFY CONTROL_DATE = MAX(CONTROL_DATE) OVER (
                 PARTITION BY PKG_GROUP_NAME
             )
+        ),
+        LATEST_PACKAGE_RUN AS (
+            SELECT * FROM CURRENT_PACKAGE_RUN
+            UNION ALL
+            SELECT * FROM LATEST_ARCHIVED_RUN
+            WHERE NOT EXISTS (SELECT 1 FROM CURRENT_PACKAGE_RUN)
         )
         SELECT log.PKG_GROUP_NAME,
                log.DLVY_END_DATE,
@@ -732,10 +759,10 @@ def _load_ready_detail(group_name):
     )
     normalized = normalize_rows(rows)
 
-    # SET_READY history is immutable audit data. If a newer RAW metadata
-    # snapshot proves that a previously stopped package now validates, present
-    # the old result as resolved instead of continuing to call it the current
-    # first error.
+    # SET_READY current/history data is immutable from this endpoint. If a newer
+    # RAW metadata snapshot proves that a previously stopped package now
+    # validates, present the old result as resolved instead of continuing to
+    # call it the current first error.
     validation_rows = normalize_rows(sf.query_service(
         f"""
         WITH LATEST_META AS (
