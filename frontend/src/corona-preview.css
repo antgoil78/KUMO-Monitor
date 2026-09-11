@@ -13,10 +13,10 @@
   --corona-amber: #ffab00;
   background: var(--corona-bg);
   color: var(--corona-text);
-  font-family: Rubik, sans-serif;
+  font-family: var(--font-body);
 }
 
-body:has(.corona-preview) { background: #000; color: #fff; font-family: Rubik, sans-serif; }
+body:has(.corona-preview) { background: #000; color: #fff; font-family: var(--font-body); }
 body:has(.corona-preview)::before { display: none; }
 
 /* The legacy theme applied glass blur from several page-local selectors.
@@ -66,7 +66,8 @@ body:has(.corona-preview) .lim-modal-backdrop { background: #000 !important; }
   border-radius: 3px;
   color: #b7b9c4;
   background: transparent;
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 600;
 }
 .corona-preview .nav-item:hover { transform: none; background: #22252d; color: #fff; }
 .corona-preview .nav-item.active { background: #0f1015; color: #fff; box-shadow: none; border: 0; }
@@ -77,7 +78,7 @@ body:has(.corona-preview) .lim-modal-backdrop { background: #000 !important; }
 .corona-preview .nav-group-toggle .nav-chevron { margin-left: auto; color: #6c7293; font-size: 20px; line-height: 1; transition: transform 160ms ease; }
 .corona-preview .nav-group.open .nav-chevron { transform: rotate(90deg); }
 .corona-preview .nav-submenu { display: grid; gap: 2px; margin: 3px 0 6px 29px; padding: 3px 0 3px 14px; border-left: 1px solid #343740; }
-.corona-preview .nav-item-child { min-height: 37px; padding: 7px 10px; border-radius: 3px; font-size: 12px; }
+.corona-preview .nav-item-child { min-height: 38px; padding: 7px 10px; border-radius: 3px; font-size: 13px; }
 .corona-preview .nav-item-child.active { background: rgba(235,22,22,.09); color: #fc424a; }
 .corona-preview .nav-submenu-line { width: 5px; height: 5px; border-radius: 50%; background: #6c7293; }
 .corona-preview .nav-item-child.active .nav-submenu-line { background: #eb1616; }
@@ -348,7 +349,7 @@ body:has(.corona-preview) .modal-header {
 
 body:has(.corona-preview) .modal-header h2 {
   color: #fff !important;
-  font-family: Rubik, sans-serif !important;
+  font-family: var(--font-body) !important;
   font-size: 20px !important;
   font-weight: 500 !important;
   letter-spacing: -.02em !important;
@@ -448,7 +449,7 @@ body:has(.corona-preview) :is(.vision-popover, .modal-header) { backdrop-filter:
   background: #191c24 !important;
   color: #fc424a !important;
   box-shadow: none !important;
-  font-family: Rubik, sans-serif;
+  font-family: var(--font-body);
   font-weight: 500;
 }
 .corona-preview .action-tile:hover:not(:disabled) .action-icon {
