@@ -13,10 +13,25 @@ function normalizeRule(rule, index) {
   return { ...rule, dependeeType: String(rule.dependeeType || 'WORKFLOW').toUpperCase(), _key: `${rule.workflowId}-${rule.dependeeId}-${index}`, _originalDependeeId: rule.dependeeId, _new: false }
 }
 
+function rulesSnapshot(rules) {
+  return JSON.stringify(rules.map(row => ({
+    workflowId: row.workflowId, dependeeType: row.dependeeType, dependeeId: row.dependeeId,
+    success: Boolean(row.success), warning: Boolean(row.warning), error: Boolean(row.error),
+    newer: Boolean(row.newer), activeFl: Boolean(row.activeFl)
+  })).sort((a, b) => b.dependeeType.localeCompare(a.dependeeType) || a.dependeeId.localeCompare(b.dependeeId)))
+}
+
+function displayDate(value) {
+  if (!value) return 'Not loaded'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+}
+
 export default function Dependencies() {
   const [workflows, setWorkflows] = useState([])
   const [models, setModels] = useState([])
   const [rows, setRows] = useState([])
+  const [savedRows, setSavedRows] = useState([])
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('')
   const [workflowSearch, setWorkflowSearch] = useState('')
   const [workflowPickerOpen, setWorkflowPickerOpen] = useState(false)
@@ -25,6 +40,8 @@ export default function Dependencies() {
   const [deleteCandidate, setDeleteCandidate] = useState(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [verifying, setVerifying] = useState(false)
+  const [verification, setVerification] = useState(null)
 
   const labels = useMemo(() => new Map(workflows.map(workflow => [workflowLabel(workflow), workflow])), [workflows])
   const filteredWorkflows = useMemo(() => {
@@ -32,6 +49,7 @@ export default function Dependencies() {
     if (!query || labels.has(workflowSearch)) return workflows
     return workflows.filter(workflow => `${workflowLabel(workflow)} ${workflow.workflowId}`.toLowerCase().includes(query))
   }, [labels, workflowSearch, workflows])
+  const hasUnsavedRules = rulesSnapshot(rows) !== rulesSnapshot(savedRows)
 
   useEffect(() => {
     let cancelled = false
@@ -55,11 +73,14 @@ export default function Dependencies() {
     setLoading(true)
     setError('')
     setNotice('')
+    setVerification(null)
     try {
       const data = await api.dependencies(workflow.workflowId)
       setWorkflows(data.workflows || workflows)
       setModels(data.models || models)
-      setRows((data.rules || []).map(normalizeRule))
+      const loadedRules = (data.rules || []).map(normalizeRule)
+      setRows(loadedRules)
+      setSavedRows(loadedRules)
     } catch (err) {
       setError(err.message || String(err))
     } finally {
@@ -73,6 +94,7 @@ export default function Dependencies() {
   }
 
   function patchRow(key, field, value) {
+    setVerification(null)
     setRows(current => current.map(row => {
       if (row._key !== key) return row
       if (field === 'dependeeType') {
@@ -89,6 +111,7 @@ export default function Dependencies() {
       success: false, warning: false, error: false, newer: false, activeFl: false,
       _key: `new-${Date.now()}`, _originalDependeeId: '', _new: true
     }])
+    setVerification(null)
     setNotice('New rule added. Choose its values and click Add rule.')
   }
 
@@ -112,7 +135,9 @@ export default function Dependencies() {
         setRows(current => current.map(item => item._key === row._key ? { ...item, _new: false, _originalDependeeId: row.dependeeId } : item))
       }
       const data = await api.dependencies(selectedWorkflowId)
-      setRows((data.rules || []).map(normalizeRule))
+      const loadedRules = (data.rules || []).map(normalizeRule)
+      setRows(loadedRules)
+      setSavedRows(loadedRules)
       setNotice('Dependency rules saved successfully.')
     } catch (err) {
       setError(err.message || String(err))
@@ -134,6 +159,8 @@ export default function Dependencies() {
     try {
       await api.deleteDependencyRule({ workflowId: selectedWorkflowId, dependeeId: row._originalDependeeId })
       setRows(current => current.filter(item => item._key !== row._key))
+      setSavedRows(current => current.filter(item => item._originalDependeeId !== row._originalDependeeId))
+      setVerification(null)
       setNotice('Dependency rule deleted.')
       setDeleteCandidate(null)
     } catch (err) {
@@ -150,12 +177,29 @@ export default function Dependencies() {
     setNotice('')
     try {
       const data = await api.dependencies(selectedWorkflowId)
-      setRows((data.rules || []).map(normalizeRule))
+      const loadedRules = (data.rules || []).map(normalizeRule)
+      setRows(loadedRules)
+      setSavedRows(loadedRules)
+      setVerification(null)
       setNotice('Saved dependency rules reloaded.')
     } catch (err) {
       setError(err.message || String(err))
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function verifyRules() {
+    if (!selectedWorkflowId || hasUnsavedRules) return
+    setVerifying(true)
+    setError('')
+    setNotice('')
+    try {
+      setVerification(await api.verifyDependencyRules(selectedWorkflowId))
+    } catch (err) {
+      setError(err.message || String(err))
+    } finally {
+      setVerifying(false)
     }
   }
 
@@ -218,11 +262,36 @@ export default function Dependencies() {
             </table>
           </div>
           <div className="dependency-save-bar">
-            <button className="button dependency-cancel-button" type="button" disabled={saving} onClick={cancelChanges}>Cancel</button>
-            <button className="button dependency-save-button" type="button" disabled={saving} onClick={saveAll}>{saving ? 'Saving…' : 'Save'}</button>
+            <button className="button dependency-verify-button" type="button" onClick={verifyRules} disabled={!selectedWorkflowId || hasUnsavedRules || saving || verifying} title={hasUnsavedRules ? 'Save or cancel changes before verifying' : 'Evaluate the saved ruleset'}>{verifying ? 'Verifying…' : 'Verify result'}</button>
+            <div className="dependency-save-actions">
+              <button className="button dependency-cancel-button" type="button" disabled={saving} onClick={cancelChanges}>Cancel</button>
+              <button className="button dependency-save-button" type="button" disabled={saving} onClick={saveAll}>{saving ? 'Saving…' : 'Save'}</button>
+            </div>
           </div>
         </>)}
       </div>
+
+      {verification && <div className={`vision-card dependency-verification ${verification.resultRuleset ? 'passed' : 'failed'}`}>
+        <div className="dependency-verification-summary">
+          <span className="dependency-verification-icon" aria-hidden="true">{verification.resultRuleset ? '✓' : '!'}</span>
+          <div><span>Verification result</span><h2>{verification.resultRuleset ? 'Ruleset passed' : 'Ruleset failed'}</h2><p>{verification.rows?.length || 0} active dependenc{verification.rows?.length === 1 ? 'y' : 'ies'} evaluated.</p></div>
+        </div>
+        {verification.rows?.length ? <div className="dependency-verification-grid">{verification.rows.map((result, index) => (
+          <article className={`${result.resultStatus && result.resultMustBeNewer ? 'passed' : 'failed'}`} key={`${result.dependeeType}-${result.dependeeName}-${index}`}>
+            <div className="dependency-verification-heading"><span>{result.dependeeType}</span><strong>{result.dependeeName}</strong><b>{result.resultStatus && result.resultMustBeNewer ? 'Pass' : 'Fail'}</b></div>
+            <dl>
+              <div><dt>Current status</dt><dd>{result.dependencyStatus || 'No status'}</dd></div>
+              <div><dt>Accepted</dt><dd>{String(result.acceptedStatus || '').split('|').filter(Boolean).join(', ') || 'None'}</dd></div>
+              <div><dt>Status match</dt><dd className={result.resultStatus ? 'pass' : 'fail'}>{result.resultStatus ? 'Yes' : 'No'}</dd></div>
+              <div><dt>Must be newer</dt><dd>{result.mustBeNewer ? 'Yes' : 'No'}</dd></div>
+              <div><dt>Freshness check</dt><dd className={result.resultMustBeNewer ? 'pass' : 'fail'}>{result.resultMustBeNewer ? 'Pass' : 'Fail'}</dd></div>
+              <div><dt>Dependee loaded</dt><dd>{displayDate(result.dependencyLoadedDttm)}</dd></div>
+              <div><dt>Workflow loaded</dt><dd>{displayDate(result.loadedDttm)}</dd></div>
+              <div><dt>Run ID</dt><dd title={result.runId || ''}>{result.runId || '—'}</dd></div>
+            </dl>
+          </article>
+        ))}</div> : <div className="empty-state">The procedure returned no active dependency rows.</div>}
+      </div>}
 
       {deleteCandidate && <div className="dependency-confirm-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !saving) setDeleteCandidate(null) }}>
         <div className="dependency-confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="dependency-delete-title" aria-describedby="dependency-delete-description">

@@ -81,6 +81,15 @@ export const api = {
     method: 'DELETE',
     body: JSON.stringify(payload)
   }),
+  verifyDependencyRules: (workflowId) => requestJson('/api/dependencies/verify', {
+    method: 'POST',
+    body: JSON.stringify({ workflowId }),
+    timeoutMs: 120000
+  }),
+  applicationParameters: () => requestJson('/api/application-parameters', { timeoutMs: 120000 }),
+  createApplicationParameter: (payload) => requestJson('/api/application-parameters/items', { method: 'POST', body: JSON.stringify(payload), timeoutMs: 120000 }),
+  updateApplicationParameter: (payload) => requestJson('/api/application-parameters/items', { method: 'PATCH', body: JSON.stringify(payload), timeoutMs: 120000 }),
+  deleteApplicationParameter: (payload) => requestJson('/api/application-parameters/items', { method: 'DELETE', body: JSON.stringify(payload), timeoutMs: 120000 }),
   workflowRunLocks: () => requestJson('/api/workflow-run-locks', { timeoutMs: 12000 }),
   realtimeState: () => requestJson('/api/realtime/state', { timeoutMs: 5000 }),
   runWorkflow: (workflowId, workflowName = '', skipChildren = false, dbtCommandOverride = '') => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/run`, {

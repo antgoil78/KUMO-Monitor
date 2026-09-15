@@ -13,6 +13,7 @@ import ExecutionLog from './pages/ExecutionLog.jsx'
 import Admin from './pages/Admin.jsx'
 import Settings from './pages/Settings.jsx'
 import Dependencies from './pages/Dependencies.jsx'
+import EnvironmentSettings from './pages/EnvironmentSettings.jsx'
 
 const pages = {
   dashboard: Dashboard,
@@ -26,7 +27,8 @@ const pages = {
   executionLog: ExecutionLog,
   admin: Admin,
   settings: Settings,
-  dependencies: Dependencies
+  dependencies: Dependencies,
+  environmentSettings: EnvironmentSettings
 }
 
 export default function App() {
@@ -106,7 +108,7 @@ export default function App() {
         )}
         {coronaPreview && (
           <div className="corona-topbar">
-            <button type="button" className="corona-menu" aria-label="Toggle navigation">☰</button>
+            <button type="button" className="corona-menu" aria-label="Open environment and system settings" title="Environment and system settings" onClick={() => navigate('environmentSettings')}>☰</button>
             <div className="corona-top-actions">
               <span className="corona-live"><i /> Live</span>
               <button type="button" aria-label="Notifications">♢<i /></button>

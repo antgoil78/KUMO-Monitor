@@ -1531,6 +1531,53 @@ def delete_dependency_rule():
         return _json_error(exc, 500)
 
 
+@app.route("/api/dependencies/verify", methods=["POST"])
+def verify_dependency_rules():
+    payload = request.get_json(silent=True) or {}
+    if config.USE_MOCK or not sf.is_configured():
+        return jsonify({"ok": True, "workflowId": payload.get("workflowId"), "rows": []})
+    try:
+        rows = repo.verify_dependency_rules(payload.get("workflowId"))
+        return jsonify({
+            "ok": True,
+            "workflowId": payload.get("workflowId"),
+            "resultRuleset": bool(rows) and all(row["resultRuleset"] for row in rows),
+            "rows": rows,
+        })
+    except ValueError as exc:
+        return _json_error(exc, 400)
+    except Exception as exc:
+        return _json_error(exc, 500)
+
+
+@app.route("/api/application-parameters")
+def application_parameters():
+    if config.USE_MOCK or not sf.is_configured():
+        return jsonify({"ok": True, "instanceName": "DEFAULT", "parameters": []})
+    try:
+        instance_name = request.args.get("instanceName") or "DEFAULT"
+        return jsonify({"ok": True, "instanceName": instance_name, "parameters": repo.load_application_parameters(instance_name)})
+    except Exception as exc:
+        return _json_error(exc, 500)
+
+
+@app.route("/api/application-parameters/items", methods=["POST", "PATCH", "DELETE"])
+def application_parameter_items():
+    payload = request.get_json(silent=True) or {}
+    if config.USE_MOCK or not sf.is_configured():
+        return jsonify({"ok": True})
+    try:
+        if request.method == "DELETE":
+            repo.delete_application_parameter(payload.get("instanceName"), payload.get("parameterGroup"), payload.get("parameterKey"))
+        else:
+            repo.save_application_parameter(payload, create=request.method == "POST")
+        return jsonify({"ok": True})
+    except ValueError as exc:
+        return _json_error(exc, 400)
+    except Exception as exc:
+        return _json_error(exc, 500)
+
+
 @app.route("/api/events")
 def events():
     # The browser opens this stream after /api/session has registered its stable

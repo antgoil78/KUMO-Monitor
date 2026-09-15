@@ -846,7 +846,7 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
               </div>
             </>
           ) : (
-            <div className="form-field"><label>SQL Command</label><textarea rows="5" value={detail.sqlCommand || ''} onChange={e => patch('sqlCommand', e.target.value)} /></div>
+            <div className="form-field"><label>SQL Command</label><textarea rows="5" value={detail.sqlCommand || ''} onChange={e => patch('sqlCommand', e.target.value)} /><small className="form-help">Use <code>#[run_id]#</code> where the current workflow run ID should be inserted.</small></div>
           )}
           <div className="form-grid two">
             <div className="form-field"><label>Cron</label><input value={detail.scheduleCron || ''} onChange={e => patch('scheduleCron', e.target.value)} /></div>

@@ -156,6 +156,148 @@ def delete_dependency_rule(workflow_id, dependee_id):
     )
 
 
+def verify_dependency_rules(workflow_id):
+    workflow_id = str(workflow_id or "").strip()
+    if not workflow_id:
+        raise ValueError("workflowId is required")
+    procedure = str(config.RULE_VERIFY_PROCEDURE or "").strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]*\.[A-Za-z_][A-Za-z0-9_$]*\.[A-Za-z_][A-Za-z0-9_$]*", procedure):
+        raise RuntimeError("KUMO_RULE_VERIFY_PROCEDURE must be a three-part Snowflake procedure name")
+    database, schema, _ = procedure.split(".")
+    with sf.connection(use_warehouse=True, include_context=True, force_service=True) as conn:
+        cur = conn.cursor(DictCursor)
+        try:
+            cur.execute(f"USE DATABASE {database}")
+            cur.execute(f"USE SCHEMA {schema}")
+            rows = normalize_rows(_fetch_with_cursor(
+                cur,
+                f"CALL {procedure}(NULL, %(workflow_id)s)",
+                {"workflow_id": workflow_id},
+            ))
+        finally:
+            cur.close()
+    return [{
+        "resultRuleset": bool(row.get("RESULT_RULESET")),
+        "dependeeType": row.get("DEPENDEE_TYPE"),
+        "dependeeName": row.get("DEPENDEE_NAME"),
+        "acceptedStatus": row.get("ACCEPTED_STATUS"),
+        "dependencyStatus": row.get("DEP_STATUS"),
+        "resultStatus": bool(row.get("RESULT_STATUS")),
+        "mustBeNewer": bool(row.get("MUST_BE_NEWER")),
+        "loadedDttm": row.get("LOADED_DTTM"),
+        "dependencyLoadedDttm": row.get("DEP_LOADED_DTTM"),
+        "resultMustBeNewer": bool(row.get("RESULT_MUST_BE_NEWER")),
+        "runId": row.get("RUN_ID"),
+    } for row in rows]
+
+
+PARAMETER_GROUPS = {"ENVIRONMENT", "SYSTEM"}
+PARAMETER_VALUE_TYPES = {"STRING", "INTEGER", "BOOLEAN", "JSON"}
+
+
+def load_application_parameters(instance_name="DEFAULT"):
+    rows = normalize_rows(_query(
+        f"""
+        SELECT INSTANCE_NAME, PARAMETER_GROUP, PARAMETER_KEY, PARAMETER_VALUE,
+               VALUE_TYPE, DESCRIPTION, IS_SECRET, ACTIVE_FL,
+               CREATED_DTTM, CREATED_BY, UPDATED_DTTM, UPDATED_BY
+          FROM {config.T_APPLICATION_PARAMETERS}
+         WHERE INSTANCE_NAME = %(instance_name)s
+         ORDER BY PARAMETER_GROUP, PARAMETER_KEY
+        """,
+        {"instance_name": str(instance_name or "DEFAULT").strip().upper()},
+    ))
+    return [{
+        "instanceName": row.get("INSTANCE_NAME"),
+        "parameterGroup": row.get("PARAMETER_GROUP"),
+        "parameterKey": row.get("PARAMETER_KEY"),
+        "parameterValue": row.get("PARAMETER_VALUE"),
+        "valueType": row.get("VALUE_TYPE"),
+        "description": row.get("DESCRIPTION") or "",
+        "isSecret": bool(row.get("IS_SECRET")),
+        "activeFl": bool(row.get("ACTIVE_FL")),
+        "createdDttm": row.get("CREATED_DTTM"),
+        "createdBy": row.get("CREATED_BY"),
+        "updatedDttm": row.get("UPDATED_DTTM"),
+        "updatedBy": row.get("UPDATED_BY"),
+    } for row in rows]
+
+
+def _validated_parameter(payload):
+    instance_name = str(payload.get("instanceName") or "DEFAULT").strip().upper()
+    parameter_group = str(payload.get("parameterGroup") or "").strip().upper()
+    parameter_key = str(payload.get("parameterKey") or "").strip().upper()
+    value_type = str(payload.get("valueType") or "STRING").strip().upper()
+    value = "" if payload.get("parameterValue") is None else str(payload.get("parameterValue"))
+    if parameter_group not in PARAMETER_GROUPS:
+        raise ValueError("parameterGroup must be ENVIRONMENT or SYSTEM")
+    if value_type not in PARAMETER_VALUE_TYPES:
+        raise ValueError("valueType must be STRING, INTEGER, BOOLEAN or JSON")
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]*", parameter_key):
+        raise ValueError("Parameter keys must start with a letter and contain only letters, numbers and underscores")
+    if value_type == "INTEGER":
+        int(value)
+    elif value_type == "BOOLEAN" and value.strip().lower() not in ("true", "false"):
+        raise ValueError("Boolean parameter values must be true or false")
+    elif value_type == "JSON":
+        json.loads(value)
+    return {
+        "instance_name": instance_name,
+        "parameter_group": parameter_group,
+        "parameter_key": parameter_key,
+        "parameter_value": value,
+        "value_type": value_type,
+        "description": str(payload.get("description") or "").strip(),
+        "is_secret": bool(payload.get("isSecret")),
+        "active_fl": bool(payload.get("activeFl")),
+        "original_group": str(payload.get("originalGroup") or parameter_group).strip().upper(),
+        "original_key": str(payload.get("originalKey") or parameter_key).strip().upper(),
+    }
+
+
+def save_application_parameter(payload, create=False):
+    params = _validated_parameter(payload)
+    if create:
+        _execute(f"""
+            INSERT INTO {config.T_APPLICATION_PARAMETERS}
+              (INSTANCE_NAME, PARAMETER_GROUP, PARAMETER_KEY, PARAMETER_VALUE,
+               VALUE_TYPE, DESCRIPTION, IS_SECRET, ACTIVE_FL)
+            VALUES
+              (%(instance_name)s, %(parameter_group)s, %(parameter_key)s, %(parameter_value)s,
+               %(value_type)s, %(description)s, %(is_secret)s, %(active_fl)s)
+        """, params)
+    else:
+        _execute(f"""
+            UPDATE {config.T_APPLICATION_PARAMETERS}
+               SET PARAMETER_GROUP = %(parameter_group)s,
+                   PARAMETER_KEY = %(parameter_key)s,
+                   PARAMETER_VALUE = %(parameter_value)s,
+                   VALUE_TYPE = %(value_type)s,
+                   DESCRIPTION = %(description)s,
+                   IS_SECRET = %(is_secret)s,
+                   ACTIVE_FL = %(active_fl)s,
+                   UPDATED_DTTM = SYSDATE(),
+                   UPDATED_BY = CURRENT_USER()
+             WHERE INSTANCE_NAME = %(instance_name)s
+               AND PARAMETER_GROUP = %(original_group)s
+               AND PARAMETER_KEY = %(original_key)s
+        """, params)
+    return params
+
+
+def delete_application_parameter(instance_name, parameter_group, parameter_key):
+    _execute(f"""
+        DELETE FROM {config.T_APPLICATION_PARAMETERS}
+         WHERE INSTANCE_NAME = %(instance_name)s
+           AND PARAMETER_GROUP = %(parameter_group)s
+           AND PARAMETER_KEY = %(parameter_key)s
+    """, {
+        "instance_name": str(instance_name or "DEFAULT").strip().upper(),
+        "parameter_group": str(parameter_group or "").strip().upper(),
+        "parameter_key": str(parameter_key or "").strip().upper(),
+    })
+
+
 def _fetch_with_cursor(cur, sql, params=None):
     cur.execute(sql, params or {})
     try:

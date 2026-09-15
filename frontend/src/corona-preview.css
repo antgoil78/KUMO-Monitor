@@ -449,6 +449,11 @@ body:has(.corona-preview) :is(.vision-popover, .modal-header) { backdrop-filter:
   background: #eb1616 !important;
   color: #fff !important;
 }
+.corona-preview .button.dependency-verify-button {
+  border-color: var(--corona-blue) !important;
+  background: rgba(0,144,231,.14) !important;
+  color: #b8e3ff !important;
+}
 
 /* Notifications: replace the remaining legacy cyan/blue component accents. */
 .corona-preview .notification-tabs {
