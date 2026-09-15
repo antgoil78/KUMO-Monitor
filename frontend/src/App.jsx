@@ -12,6 +12,7 @@ import DagView from './pages/DagView.jsx'
 import ExecutionLog from './pages/ExecutionLog.jsx'
 import Admin from './pages/Admin.jsx'
 import Settings from './pages/Settings.jsx'
+import Dependencies from './pages/Dependencies.jsx'
 
 const pages = {
   dashboard: Dashboard,
@@ -24,7 +25,8 @@ const pages = {
   dag: DagView,
   executionLog: ExecutionLog,
   admin: Admin,
-  settings: Settings
+  settings: Settings,
+  dependencies: Dependencies
 }
 
 export default function App() {

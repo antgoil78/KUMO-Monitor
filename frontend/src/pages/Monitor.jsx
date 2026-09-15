@@ -864,13 +864,6 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
               </span>
             </summary>
             <div className="notification-rule-grid">
-              <div className={`notification-rule failure ${detail.notifications?.onFailEmail ? 'enabled' : 'disabled'}`}>
-                <div className="notification-rule-heading">
-                  <div><strong>On failure</strong><small>Email notification after a failed run</small></div>
-                  <label><input type="checkbox" checked={Boolean(detail.notifications?.onFailEmail)} onChange={e => patchNotif('onFailEmail', e.target.checked)} /> {detail.notifications?.onFailEmail ? 'Enabled' : 'Disabled'}</label>
-                </div>
-                <div className="form-field"><label>Recipient group</label><select value={detail.notifications?.failGroup || ''} onChange={e => patchNotif('failGroup', e.target.value)}><option value="">No group selected</option>{(detail.emailGroups || []).map(g => <option key={g} value={g}>{g}</option>)}</select></div>
-              </div>
               <div className={`notification-rule success ${detail.notifications?.onSuccessEmail ? 'enabled' : 'disabled'}`}>
                 <div className="notification-rule-heading">
                   <div><strong>On success</strong><small>Email notification after a successful run</small></div>
@@ -878,6 +871,13 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
                 </div>
                 <div className="form-field"><label>Recipient group</label><select value={detail.notifications?.successGroup || ''} onChange={e => patchNotif('successGroup', e.target.value)}><option value="">No group selected</option>{(detail.emailGroups || []).map(g => <option key={g} value={g}>{g}</option>)}</select></div>
                 {!detail.notifications?.onSuccessEmail && detail.notifications?.successGroup && <small className="notification-rule-note">{detail.notifications.successGroup} is assigned, but success notifications are currently disabled.</small>}
+              </div>
+              <div className={`notification-rule failure ${detail.notifications?.onFailEmail ? 'enabled' : 'disabled'}`}>
+                <div className="notification-rule-heading">
+                  <div><strong>On failure</strong><small>Email notification after a failed run</small></div>
+                  <label><input type="checkbox" checked={Boolean(detail.notifications?.onFailEmail)} onChange={e => patchNotif('onFailEmail', e.target.checked)} /> {detail.notifications?.onFailEmail ? 'Enabled' : 'Disabled'}</label>
+                </div>
+                <div className="form-field"><label>Recipient group</label><select value={detail.notifications?.failGroup || ''} onChange={e => patchNotif('failGroup', e.target.value)}><option value="">No group selected</option>{(detail.emailGroups || []).map(g => <option key={g} value={g}>{g}</option>)}</select></div>
               </div>
             </div>
             <div className="form-grid two notification-delivery-settings">

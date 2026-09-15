@@ -1487,6 +1487,50 @@ def refresh_monitor():
     return jsonify({**payload, "refreshQueued": True})
 
 
+@app.route("/api/dependencies")
+def dependencies():
+    workflow_id = str(request.args.get("workflowId") or "").strip()
+    if config.USE_MOCK or not sf.is_configured():
+        workflows = [{
+            "workflowId": row["workflowId"],
+            "workflowName": row["workflowName"],
+            "workflowGroup": row.get("workflowGroup", ""),
+        } for row in MOCK_MONITOR["workflows"]]
+        return jsonify({"ok": True, "workflows": workflows, "models": [], "rules": []})
+    try:
+        return jsonify({"ok": True, **repo.load_dependency_editor(workflow_id or None)})
+    except Exception as exc:
+        return _json_error(exc, 500)
+
+
+@app.route("/api/dependencies/rules", methods=["POST", "PATCH"])
+def dependency_rules():
+    payload = request.get_json(silent=True) or {}
+    if config.USE_MOCK or not sf.is_configured():
+        return jsonify({"ok": True, "rule": payload})
+    try:
+        rule = repo.save_dependency_rule(payload, create=request.method == "POST")
+        return jsonify({"ok": True, "rule": rule})
+    except ValueError as exc:
+        return _json_error(exc, 400)
+    except Exception as exc:
+        return _json_error(exc, 500)
+
+
+@app.route("/api/dependencies/rules", methods=["DELETE"])
+def delete_dependency_rule():
+    payload = request.get_json(silent=True) or {}
+    if config.USE_MOCK or not sf.is_configured():
+        return jsonify({"ok": True})
+    try:
+        repo.delete_dependency_rule(payload.get("workflowId"), payload.get("dependeeId"))
+        return jsonify({"ok": True})
+    except ValueError as exc:
+        return _json_error(exc, 400)
+    except Exception as exc:
+        return _json_error(exc, 500)
+
+
 @app.route("/api/events")
 def events():
     # The browser opens this stream after /api/session has registered its stable

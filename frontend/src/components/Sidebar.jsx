@@ -1,9 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const navItems = [
   { key: 'dashboard', label: 'Dashboard', icon: '⌂' },
-  { key: 'monitor', label: 'Workflow Monitor', icon: '◫' },
-  { key: 'history', label: 'History', icon: '↺' },
+  { key: 'workflow', label: 'Workflow', icon: '◫', children: [
+    { key: 'monitor', label: 'Monitor', icon: '◫' },
+    { key: 'history', label: 'History', icon: '↺' },
+    { key: 'dependencies', label: 'Dependencies', icon: '⌘' }
+  ] },
   { key: 'lim', label: 'LIM', icon: '⇩', children: [
     { key: 'fileIngestion', label: 'Ingestion', icon: '⇩' },
     { key: 'limReload', label: 'Load / Reload', icon: '↻' }
@@ -14,8 +17,14 @@ const navItems = [
 ]
 
 export default function Sidebar({ activePage, onNavigate, session }) {
-  const ingestionActive = activePage === 'fileIngestion' || activePage === 'limReload'
-  const [ingestionOpen, setIngestionOpen] = useState(ingestionActive)
+  const [openGroups, setOpenGroups] = useState(() => Object.fromEntries(
+    navItems.filter(item => item.children).map(item => [item.key, item.children.some(child => child.key === activePage)])
+  ))
+
+  useEffect(() => {
+    const activeGroup = navItems.find(item => item.children?.some(child => child.key === activePage))
+    if (activeGroup) setOpenGroups(previous => ({ ...previous, [activeGroup.key]: true }))
+  }, [activePage])
 
   return (
     <aside className="sidebar">
@@ -32,19 +41,22 @@ export default function Sidebar({ activePage, onNavigate, session }) {
       </div>
       <div className="nav-label">Navigation</div>
       <nav className="nav-list" aria-label="Main navigation">
-        {navItems.map(item => item.children ? (
-          <div className={`nav-group ${ingestionOpen ? 'open' : ''}`} key={item.key}>
+        {navItems.map(item => item.children ? (() => {
+          const groupOpen = Boolean(openGroups[item.key])
+          const groupActive = item.children.some(child => child.key === activePage)
+          return (
+          <div className={`nav-group ${groupOpen ? 'open' : ''}`} key={item.key}>
             <button
               type="button"
-              className={`nav-item nav-group-toggle ${ingestionActive ? 'active' : ''}`}
-              aria-expanded={ingestionOpen}
-              onClick={() => setIngestionOpen(value => !value)}
+              className={`nav-item nav-group-toggle ${groupActive ? 'active' : ''}`}
+              aria-expanded={groupOpen}
+              onClick={() => setOpenGroups(previous => ({ ...previous, [item.key]: !previous[item.key] }))}
             >
               <span className="nav-icon" aria-hidden="true">{item.icon}</span>
               <span>{item.label}</span>
               <span className="nav-chevron" aria-hidden="true">›</span>
             </button>
-            {ingestionOpen && <div className="nav-submenu">
+            {groupOpen && <div className="nav-submenu">
               {item.children.map(child => (
                 <button
                   key={child.key}
@@ -58,7 +70,8 @@ export default function Sidebar({ activePage, onNavigate, session }) {
               ))}
             </div>}
           </div>
-        ) : (
+          )
+        })() : (
           <button
             key={item.key}
             type="button"

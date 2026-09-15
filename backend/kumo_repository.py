@@ -16,6 +16,8 @@ _object_exists_cache = {}
 _last_run_lock_cleanup_monotonic = 0.0
 _engine_state_cache = None
 _engine_state_cache_monotonic = 0.0
+_dependency_choices_cache = None
+_dependency_choices_cache_monotonic = 0.0
 
 
 def _query(sql, params=None):
@@ -32,6 +34,126 @@ def _query(sql, params=None):
 def _execute(sql, params=None):
     """Execute KUMO metadata/admin DML through the SPCS service context."""
     return sf.execute_service(sql, params=params or {}, use_warehouse=True, include_context=True)
+
+
+def load_dependency_editor(workflow_id=None):
+    """Load workflow/model choices and dependency rules for the editor."""
+    global _dependency_choices_cache, _dependency_choices_cache_monotonic
+    choices_fresh = _dependency_choices_cache and time.monotonic() - _dependency_choices_cache_monotonic < 300
+    with sf.connection(use_warehouse=True, include_context=True, force_service=True) as conn:
+        cur = conn.cursor(DictCursor)
+        try:
+            if choices_fresh:
+                workflows, models = _dependency_choices_cache
+            else:
+                workflows = normalize_rows(_fetch_with_cursor(cur, f"""
+                    SELECT WORKFLOW_ID, WORKFLOW_NAME, WORKFLOW_GROUP
+                      FROM {config.T_WORKFLOWS}
+                     ORDER BY WORKFLOW_GROUP, WORKFLOW_NAME, WORKFLOW_ID
+                """))
+                models = normalize_rows(_fetch_with_cursor(cur, f"""
+                    SELECT DISTINCT MODEL_NAME
+                      FROM {config.MODEL_STATUS_TABLE}
+                     WHERE MODEL_NAME IS NOT NULL
+                     ORDER BY MODEL_NAME
+                """))
+                _dependency_choices_cache = (workflows, models)
+                _dependency_choices_cache_monotonic = time.monotonic()
+            rules = []
+            if workflow_id:
+                rules = normalize_rows(_fetch_with_cursor(cur, f"""
+                    SELECT WORKFLOW_ID, DEPENDEE_TYPE, DEPENDEE_ID,
+                           SUCCESS, WARNING, ERROR, NEWER, ACTIVE_FL
+                      FROM {config.WORKFLOW_DEP_RULE_TABLE}
+                     WHERE WORKFLOW_ID = %(workflow_id)s
+                     ORDER BY DEPENDEE_TYPE DESC, DEPENDEE_ID ASC
+                """, {"workflow_id": workflow_id}))
+        finally:
+            cur.close()
+    return {
+        "workflows": [{
+            "workflowId": row.get("WORKFLOW_ID"),
+            "workflowName": row.get("WORKFLOW_NAME") or row.get("WORKFLOW_ID"),
+            "workflowGroup": row.get("WORKFLOW_GROUP") or "",
+        } for row in workflows],
+        "models": [row.get("MODEL_NAME") for row in models if row.get("MODEL_NAME")],
+        "rules": [{
+            "workflowId": row.get("WORKFLOW_ID"),
+            "dependeeType": str(row.get("DEPENDEE_TYPE") or "WORKFLOW").upper(),
+            "dependeeId": row.get("DEPENDEE_ID"),
+            "success": bool(row.get("SUCCESS")),
+            "warning": bool(row.get("WARNING")),
+            "error": bool(row.get("ERROR")),
+            "newer": bool(row.get("NEWER")),
+            "activeFl": bool(row.get("ACTIVE_FL")),
+        } for row in rules],
+    }
+
+
+def save_dependency_rule(payload, create=False):
+    workflow_id = str(payload.get("workflowId") or "").strip()
+    dependee_type = str(payload.get("dependeeType") or "").strip().upper()
+    dependee_id = str(payload.get("dependeeId") or "").strip()
+    original_dependee_id = str(payload.get("originalDependeeId") or dependee_id).strip()
+    if not workflow_id or not dependee_id:
+        raise ValueError("workflowId and dependeeId are required")
+    if dependee_type not in ("WORKFLOW", "MODEL"):
+        raise ValueError("dependeeType must be WORKFLOW or MODEL")
+
+    params = {
+        "workflow_id": workflow_id,
+        "dependee_type": dependee_type.lower(),
+        "dependee_id": dependee_id,
+        "original_dependee_id": original_dependee_id,
+        "success": bool(payload.get("success")),
+        "warning": bool(payload.get("warning")),
+        "error": bool(payload.get("error")),
+        "newer": bool(payload.get("newer")),
+        "active_fl": bool(payload.get("activeFl")),
+    }
+    if create:
+        _execute(
+            f"""
+            INSERT INTO {config.WORKFLOW_DEP_RULE_TABLE}
+              (WORKFLOW_ID, DEPENDEE_TYPE, DEPENDEE_ID, SUCCESS, WARNING, ERROR, NEWER, ACTIVE_FL)
+            VALUES
+              (%(workflow_id)s, %(dependee_type)s, %(dependee_id)s,
+               %(success)s, %(warning)s, %(error)s, %(newer)s, %(active_fl)s)
+            """,
+            params,
+        )
+    else:
+        _execute(
+            f"""
+            UPDATE {config.WORKFLOW_DEP_RULE_TABLE}
+               SET DEPENDEE_TYPE = %(dependee_type)s,
+                   DEPENDEE_ID = %(dependee_id)s,
+                   SUCCESS = %(success)s,
+                   WARNING = %(warning)s,
+                   ERROR = %(error)s,
+                   NEWER = %(newer)s,
+                   ACTIVE_FL = %(active_fl)s
+             WHERE WORKFLOW_ID = %(workflow_id)s
+               AND DEPENDEE_ID = %(original_dependee_id)s
+            """,
+            params,
+        )
+    return {**params, "original_dependee_id": dependee_id}
+
+
+def delete_dependency_rule(workflow_id, dependee_id):
+    workflow_id = str(workflow_id or "").strip()
+    dependee_id = str(dependee_id or "").strip()
+    if not workflow_id or not dependee_id:
+        raise ValueError("workflowId and dependeeId are required")
+    _execute(
+        f"""
+        DELETE FROM {config.WORKFLOW_DEP_RULE_TABLE}
+         WHERE WORKFLOW_ID = %(workflow_id)s
+           AND DEPENDEE_ID = %(dependee_id)s
+        """,
+        {"workflow_id": workflow_id, "dependee_id": dependee_id},
+    )
 
 
 def _fetch_with_cursor(cur, sql, params=None):

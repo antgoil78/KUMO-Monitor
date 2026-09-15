@@ -382,6 +382,74 @@ body:has(.corona-preview) :is(.vision-popover, .modal-header) { backdrop-filter:
   .orb, .orb-ring, .radial-meter, .radial-core
 ) { border-radius: 50% !important; }
 
+/* Edit-workflow dependency paths use compact square status surfaces. Keep the
+   success/failure meaning visible instead of inheriting the generic blue card. */
+.corona-preview .dependency-editor.success .dependency-selected-list {
+  border-color: rgba(0,210,91,.38) !important;
+  border-radius: 3px !important;
+  background: rgba(0,210,91,.08) !important;
+}
+.corona-preview .dependency-editor.failure .dependency-selected-list {
+  border-color: rgba(235,22,22,.42) !important;
+  border-radius: 3px !important;
+  background: rgba(235,22,22,.09) !important;
+}
+.corona-preview .dependency-editor.success .dependency-selected-item {
+  border-color: rgba(0,210,91,.32) !important;
+  border-radius: 3px !important;
+  background: rgba(0,210,91,.13) !important;
+}
+.corona-preview .dependency-editor.failure .dependency-selected-item {
+  border-color: rgba(235,22,22,.36) !important;
+  border-radius: 3px !important;
+  background: rgba(235,22,22,.14) !important;
+}
+.corona-preview .dependency-editor.success .dependency-selected-heading b {
+  color: var(--corona-green);
+  background: rgba(0,210,91,.16);
+}
+.corona-preview .dependency-editor.failure .dependency-selected-heading b {
+  color: #fc6067;
+  background: rgba(235,22,22,.18);
+}
+
+.corona-preview .notification-rule.success {
+  border-color: rgba(0,210,91,.38) !important;
+  border-radius: 3px !important;
+  background: rgba(0,210,91,.10) !important;
+}
+.corona-preview .notification-rule.failure {
+  border-color: rgba(235,22,22,.42) !important;
+  border-radius: 3px !important;
+  background: rgba(235,22,22,.11) !important;
+}
+.corona-preview .notification-rule.success .notification-rule-heading strong,
+.corona-preview .notification-rule.success .notification-rule-heading label {
+  color: var(--corona-green);
+}
+.corona-preview .notification-rule.failure .notification-rule-heading strong,
+.corona-preview .notification-rule.failure .notification-rule-heading label {
+  color: #fc6067;
+}
+.corona-preview .button.dependency-save-button {
+  border-color: #00d25b !important;
+  background: #00a94b !important;
+  color: #fff !important;
+}
+.corona-preview .button.dependency-save-button:hover:not(:disabled) {
+  background: #00bd54 !important;
+}
+.corona-preview .button.dependency-cancel-button {
+  border-color: #3a3d47 !important;
+  background: #20232d !important;
+  color: #d8d9de !important;
+}
+.corona-preview .button.dependency-confirm-delete {
+  border-color: #fc424a !important;
+  background: #eb1616 !important;
+  color: #fff !important;
+}
+
 /* Notifications: replace the remaining legacy cyan/blue component accents. */
 .corona-preview .notification-tabs {
   border-color: #2c2e33 !important;

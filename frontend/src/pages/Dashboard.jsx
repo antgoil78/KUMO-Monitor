@@ -363,6 +363,9 @@ export default function Dashboard({ onNavigate }) {
   const summary = payload?.summary || { total: 0, success: 0, failed: 0, running: 0, queued: 0 }
   const engine = payload?.engine || { status: 'UNKNOWN' }
   const successRate = percent(summary.success, summary.total)
+  const successEnd = percent(summary.success, summary.total)
+  const runningEnd = percent(Number(summary.success || 0) + Number(summary.running || 0), summary.total)
+  const failedEnd = percent(Number(summary.success || 0) + Number(summary.running || 0) + Number(summary.failed || 0), summary.total)
   const activeCount = Number(summary.running || 0) + Number(summary.queued || 0)
   const failedWorkflows = workflows.filter(w => statusKind(w.lastStatus) === 'failed')
   const runningWorkflows = workflows.filter(w => ['running', 'queued'].includes(statusKind(w.lastStatus)))
@@ -446,16 +449,25 @@ export default function Dashboard({ onNavigate }) {
           <div className="card-title-row">
             <div>
               <h3>Workflow Success Rate</h3>
-              <span>Latest run status</span>
+              <span>Current run status</span>
             </div>
           </div>
-          <div className="radial-meter" style={{ '--meter': `${successRate}%` }}>
+          <div
+            className="radial-meter status-meter"
+            style={{
+              background: `conic-gradient(var(--green) 0 ${successEnd}%, var(--blue) ${successEnd}% ${runningEnd}%, var(--red) ${runningEnd}% ${failedEnd}%, rgba(255,255,255,0.08) ${failedEnd}% 100%)`
+            }}
+          >
             <div className="radial-core">
               <strong>{successRate}%</strong>
               <span>{summary.success || 0}/{summary.total || 0} OK</span>
             </div>
           </div>
-          <div className="radial-scale"><span>0%</span><span>100%</span></div>
+          <div className="status-meter-legend">
+            <span className="success"><i />{summary.success || 0} OK</span>
+            <span className="running"><i />{summary.running || 0} Running</span>
+            <span className="failed"><i />{summary.failed || 0} Failed</span>
+          </div>
         </div>
 
         <div className="vision-card health-card">

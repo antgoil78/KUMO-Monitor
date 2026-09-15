@@ -68,6 +68,19 @@ export const api = {
   snowflakePing: () => requestJson('/api/snowflake/ping'),
   monitor: () => requestJson('/api/monitor'),
   refreshMonitor: () => requestJson('/api/monitor/refresh', { method: 'POST' }),
+  dependencies: (workflowId = '') => requestJson(`/api/dependencies${workflowId ? `?workflowId=${encodeURIComponent(workflowId)}` : ''}`, { timeoutMs: 120000 }),
+  createDependencyRule: (payload) => requestJson('/api/dependencies/rules', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  updateDependencyRule: (payload) => requestJson('/api/dependencies/rules', {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  }),
+  deleteDependencyRule: (payload) => requestJson('/api/dependencies/rules', {
+    method: 'DELETE',
+    body: JSON.stringify(payload)
+  }),
   workflowRunLocks: () => requestJson('/api/workflow-run-locks', { timeoutMs: 12000 }),
   realtimeState: () => requestJson('/api/realtime/state', { timeoutMs: 5000 }),
   runWorkflow: (workflowId, workflowName = '', skipChildren = false, dbtCommandOverride = '') => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}/run`, {
