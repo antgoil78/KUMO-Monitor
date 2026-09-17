@@ -1007,7 +1007,8 @@ def load_execution_log(run_id, workflow_id=None):
     workflow_filter = " AND h.WORKFLOW_ID = %(workflow_id)s" if workflow_id else ""
     history_rows = normalize_rows(_query(
         f"""
-        SELECT h.*, {workflow_name_expr}
+        SELECT h.*, {workflow_name_expr},
+               COALESCE(w.WORKFLOW_TYPE, 'DBT') AS WORKFLOW_TYPE
         FROM {config.T_HISTORY} h
         LEFT JOIN {config.T_WORKFLOWS} w ON w.WORKFLOW_ID = h.WORKFLOW_ID
         WHERE h.RUN_ID = %(run_id)s{workflow_filter}
@@ -1016,21 +1017,24 @@ def load_execution_log(run_id, workflow_id=None):
         {"run_id": run_id, "workflow_id": workflow_id},
     ))
 
-    sources = {}
+    history = history_rows[0] if history_rows else None
+    is_dbt = str((history or {}).get("WORKFLOW_TYPE") or "DBT").strip().upper() == "DBT"
+    sources = {"modelProgress": [], "testProgress": [], "runLog": []}
     warnings = {}
-    for key, table_name in (
-        ("modelProgress", config.MODEL_PROGRESS_TABLE),
-        ("testProgress", config.TEST_PROGRESS_TABLE),
-        ("runLog", config.RUN_LOG_TABLE),
-    ):
-        source_rows, warning = _load_execution_source(table_name, run_id)
-        sources[key] = source_rows
-        if warning:
-            warnings[key] = warning
+    if is_dbt:
+        for key, table_name in (
+            ("modelProgress", config.MODEL_PROGRESS_TABLE),
+            ("testProgress", config.TEST_PROGRESS_TABLE),
+            ("runLog", config.RUN_LOG_TABLE),
+        ):
+            source_rows, warning = _load_execution_source(table_name, run_id)
+            sources[key] = source_rows
+            if warning:
+                warnings[key] = warning
 
     return {
         "runId": run_id,
-        "history": history_rows[0] if history_rows else None,
+        "history": history,
         **sources,
         "warnings": warnings,
     }

@@ -175,7 +175,8 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
 
   const history = data?.history || {}
   const resolvedName = history.WORKFLOW_NAME || workflowName || history.WORKFLOW_ID || 'Workflow execution'
-  const historyMessage = history.MESSAGE || history.ERROR_MESSAGE || ''
+  const historyMessage = history.ERROR_MESSAGE || history.PAYLOAD_MESSAGE || ''
+  const isDbtWorkflow = String(history.WORKFLOW_TYPE || 'DBT').toUpperCase() === 'DBT'
   const modelProgress = data?.modelProgress || []
   const testProgress = data?.testProgress || []
   const progressCounts = rows => rows.reduce((counts, row) => {
@@ -217,8 +218,8 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
           <div><span>Started</span><strong>{formatDateTime(history.START_TIME || history.REQUESTED_AT)}</strong></div>
           <div><span>Execution time</span><strong>{elapsedDuration(history.START_TIME || history.REQUESTED_AT, history.END_TIME, history.STATUS, nowMs)}</strong></div>
           <div><span>Trigger</span><strong>{history.TRIGGER_SOURCE || '—'}</strong></div>
-          <div><span>Models</span><strong>{modelProgress.length ? `${modelCounts.finished} finished · ${modelCounts.started} started · ${modelCounts.queued} queued · ${modelCounts.skipped} skipped` : 'No model progress yet'}</strong></div>
-          <div><span>Tests</span><strong>{testProgress.length ? `${testCounts.success} success · ${testCounts.warnings} warning · ${testCounts.errors} error · ${testCounts.queued} queued` : 'No tests recorded'}</strong></div>
+          {isDbtWorkflow && <div><span>Models</span><strong>{modelProgress.length ? `${modelCounts.finished} finished · ${modelCounts.started} started · ${modelCounts.queued} queued · ${modelCounts.skipped} skipped` : 'No model progress yet'}</strong></div>}
+          {isDbtWorkflow && <div><span>Tests</span><strong>{testProgress.length ? `${testCounts.success} success · ${testCounts.warnings} warning · ${testCounts.errors} error · ${testCounts.queued} queued` : 'No tests recorded'}</strong></div>}
         </div>
 
         <div className={`execution-history-message vision-card-flat ${historyMessage ? 'has-message' : ''}`}>
@@ -226,7 +227,7 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
           <p>{historyMessage || 'No message recorded in workflow history.'}</p>
         </div>
 
-        <div className="execution-log-source-card vision-card-flat">
+        {isDbtWorkflow && <div className="execution-log-source-card vision-card-flat">
           <div className="execution-log-toolbar">
             <div className="view-switch execution-log-tabs">
               {sourceDefinitions.map(source => (
@@ -240,7 +241,7 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
 
           {data.warnings?.[activeSource] && <div className="alert warning compact">This source is unavailable: {data.warnings[activeSource]}</div>}
           <LogTable rows={visibleRows} sourceKey={activeSource} onViewValue={setValueDetail} />
-        </div>
+        </div>}
       </>}
       <ValueViewer detail={valueDetail} onClose={() => setValueDetail(null)} />
     </section>
