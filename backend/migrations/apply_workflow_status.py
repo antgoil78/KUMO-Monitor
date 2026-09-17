@@ -1,8 +1,8 @@
 """Track DBT workflow execution in KUMO_TST.META.WORKFLOW_STATUS.
 
 The dispatcher records PROCESSING only after a DBT run has passed validation and
-is marked RUNNING. SP_DBT_COMPLETE then records SUCCESS or ERROR for the same
-workflow/run pair and stamps LOADED_DTTM.
+is marked RUNNING. There is one row per workflow; each run replaces RUN_ID and
+SP_DBT_COMPLETE updates that row to SUCCESS or ERROR and stamps LOADED_DTTM.
 """
 
 from snowflake.connector import DictCursor
@@ -66,10 +66,10 @@ def apply():
       MERGE INTO KUMO_TST.META.WORKFLOW_STATUS t
       USING (SELECT ? AS WORKFLOW_ID, ? AS RUN_ID) s
          ON t.WORKFLOW_ID = s.WORKFLOW_ID
-        AND t.RUN_ID = s.RUN_ID
       WHEN MATCHED THEN UPDATE SET
         STATUS = ''PROCESSING'',
-        LOADED_DTTM = NULL
+        LOADED_DTTM = NULL,
+        RUN_ID = s.RUN_ID
       WHEN NOT MATCHED THEN INSERT
         (WORKFLOW_ID, STATUS, LOADED_DTTM, RUN_ID)
       VALUES
@@ -99,8 +99,7 @@ def apply():
              FROM KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOW_HISTORY
             WHERE RUN_ID = :P_RUN_ID
             LIMIT 1
-         )
-     AND RUN_ID = :P_RUN_ID;"""
+         );"""
                 complete_ddl = complete_ddl.replace(legacy_update, "", 1)
                 log_statement = """  INSERT INTO KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOW_RUN_LOGS (RUN_ID, LOG_LEVEL, MESSAGE)
   VALUES (:P_RUN_ID, IFF(:P_SUCCESS,''INFO'',''ERROR''), ''DBT_COMPLETE: '' || IFF(:P_SUCCESS,''SUCCESS'',''FAILED: '' || COALESCE(:P_ERROR_MSG,''?'')));"""
@@ -115,8 +114,7 @@ def apply():
              FROM KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOW_HISTORY
             WHERE RUN_ID = :P_RUN_ID
             LIMIT 1
-         )
-     AND RUN_ID = :P_RUN_ID;"""
+         );"""
                 if log_statement not in complete_ddl:
                     raise RuntimeError("DBT completion log marker did not match the expected version")
                 complete_ddl = _qualify_create(
