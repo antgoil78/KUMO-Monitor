@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
+import LoadingState from '../components/LoadingState.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
 import { elapsedDuration, formatDateTime } from '../utils/time.js'
 import './History.css'
@@ -121,7 +122,7 @@ export default function History({ workflowName = '', workflowId = '', onNavigate
       </div>
 
       <div className="table-card">
-        {loading ? <div className="empty-state">Loading history...</div> : null}
+        {loading ? <LoadingState>Loading history…</LoadingState> : null}
         {!loading && rows.length === 0 ? <div className="empty-state">No history rows found.</div> : null}
         {!loading && rows.length > 0 && filteredRows.length === 0 ? <div className="empty-state">No history rows match the current filters.</div> : null}
 
@@ -134,6 +135,7 @@ export default function History({ workflowName = '', workflowId = '', onNavigate
                   <span className="history-sr-only">Run actions</span>
                 </th>
                 <th>Status</th>
+                <th>Requested by</th>
                 <th>Execution Time</th>
                 <th>Start</th>
                 <th>End</th>
@@ -180,6 +182,7 @@ export default function History({ workflowName = '', workflowId = '', onNavigate
                       </div>
                     </td>
                     <td><StatusBadge status={r.STATUS} /></td>
+                    <td>{r.REQUESTED_BY || '—'}</td>
                     <td className="duration-cell">{elapsedDuration(r.START_TIME, r.END_TIME, r.STATUS, nowMs)}</td>
                     <td>{formatDateTime(r.START_TIME || r.REQUESTED_AT)}</td>
                     <td>{formatDateTime(r.END_TIME)}</td>

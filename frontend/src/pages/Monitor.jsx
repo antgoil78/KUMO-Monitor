@@ -4,6 +4,7 @@ import { Background, Controls, MarkerType, MiniMap, ReactFlow } from '@xyflow/re
 import dagre from '@dagrejs/dagre'
 import { api } from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
+import LoadingState from '../components/LoadingState.jsx'
 import StatusBadge, { isWorkflowBusy, statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import { elapsedDuration, formatDateTime } from '../utils/time.js'
@@ -360,7 +361,7 @@ function TimelineView({ workflows, rows, loading, nowMs, rangeHours, onViewLog }
     return () => window.cancelAnimationFrame(frame)
   }, [rangeHours, loading])
 
-  if (loading) return <div className="empty-state">Loading timeline executions...</div>
+  if (loading) return <LoadingState>Loading timeline executions…</LoadingState>
 
   return (
     <div ref={timelineViewRef} className="timeline-view" style={{ width: `${Math.min(200, Math.max(100, (rangeHours / 6) * 100))}%` }}>
@@ -473,61 +474,7 @@ function RunningProgress({ workflow }) {
     </div>
   )
 }
-function useOutsideClick(ref, onClose) {
-  useEffect(() => {
-    function handler(event) {
-      if (!ref.current || ref.current.contains(event.target)) return
-      onClose()
-    }
-    function esc(event) {
-      if (event.key === 'Escape') onClose()
-    }
-    document.addEventListener('mousedown', handler)
-    document.addEventListener('keydown', esc)
-    return () => {
-      document.removeEventListener('mousedown', handler)
-      document.removeEventListener('keydown', esc)
-    }
-  }, [ref, onClose])
-}
-function RowActions({ workflow, isOpen, onOpen, onClose, onAction, disabledRun }) {
-  const ref = useRef(null)
-  useOutsideClick(ref, onClose)
-
-  const wfEnabled = Boolean(workflow.workflowEnabled)
-  const taskEnabled = Boolean(workflow.taskEnabled)
-  const isDbt = String(workflow.workflowType || '').toUpperCase() === 'DBT'
-
-  async function click(action) {
-    onClose()
-    await onAction(action, workflow)
-  }
-  return (
-    <div className="row-menu-control" ref={ref}>
-      <button
-        className={`row-menu-trigger ${isOpen ? 'open' : ''}`}
-        aria-label={`Actions for ${workflow.workflowName}`}
-        onClick={() => (isOpen ? onClose() : onOpen())}
-      >
-        <span>⋮</span><span>⌄</span>
-      </button>
-      {isOpen && (
-        <div className="row-menu-panel vision-popover">
-          <button disabled={!wfEnabled || disabledRun} onClick={() => click('run')}>▶ Run workflow</button>
-          {isDbt && <button onClick={() => click('dag')}>⌘ Show DAG run</button>}
-          <button disabled={!workflow.lastRunId} onClick={() => click('log')}>▤ View latest log</button>
-          <button onClick={() => click('history')}>◷ History</button>
-          <button onClick={() => click('edit')}>✎ Edit</button>
-          <div className="menu-divider" />
-          <button onClick={() => click('toggle-workflow')}>{wfEnabled ? 'Ⅱ Disable workflow' : '▶ Enable workflow'}</button>
-          <button disabled={!wfEnabled && !taskEnabled} onClick={() => click('toggle-schedule')}>{taskEnabled ? '◴ Disable schedule' : '◷ Enable schedule'}</button>
-          {workflow.lastRunId && <div className="run-id-note">Run ID:<code>{workflow.lastRunId}</code></div>}
-        </div>
-      )}
-    </div>
-  )
-}
-function WorkflowRow({ workflow, nowMs, onManage, onRun, pendingRun }) {
+function WorkflowRow({ workflow, nowMs, onManage, onRun, onViewLog, pendingRun }) {
   const disabled = !workflow.workflowEnabled
   const depth = Number(workflow.indent || 0)
   const type = String(workflow.workflowType || 'DBT').toUpperCase()
@@ -559,6 +506,15 @@ function WorkflowRow({ workflow, nowMs, onManage, onRun, pendingRun }) {
           onClick={() => onRun(view)}
         >
           <span className="monitor-run-icon" aria-hidden="true">▶</span>
+        </button>
+        <button
+          className="row-log-button"
+          aria-label={`View latest log for ${workflow.workflowName}`}
+          title={workflow.lastRunId ? `View latest log for ${workflow.workflowName}` : 'No workflow run is available'}
+          disabled={!workflow.lastRunId}
+          onClick={() => onViewLog(view)}
+        >
+          <span aria-hidden="true">▤</span>
         </button>
         <button
           className="row-manage-button"
@@ -820,7 +776,7 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
   }
   return (
     <Modal title="Edit workflow" subtitle={detail?.workflowName || workflowId} onClose={onClose} wide>
-      {!detail && !error && <div className="empty-state">Loading workflow...</div>}
+      {!detail && !error && <LoadingState>Loading workflow…</LoadingState>}
       {error && <div className="alert error">{error}</div>}
       {error && !detail && (
         <div className="modal-actions left">
@@ -952,7 +908,7 @@ function DagModal({ workflow, onClose }) {
   return (
     <Modal title="DAG run" subtitle={workflow.workflowName} onClose={onClose} wide>
       {error && <div className="alert error">{error}</div>}
-      {!dag && !error && <div className="empty-state">Loading DAG...</div>}
+      {!dag && !error && <LoadingState>Loading DAG…</LoadingState>}
       {dag && <>
         <div className="dag-summary"><StatusBadge status={dag.run?.STATUS || '—'} /><span>Run ID <code>{dag.run?.RUN_ID || '—'}</code></span><span>{done}/{nodes.length} completed</span>{failed > 0 && <span className="failed-text">{failed} failed</span>}</div>
         <div className="dag-progress"><ProgressBar progress={{ percent, total: nodes.length, done, failed }} status={dag.run?.STATUS} /></div>
@@ -1138,7 +1094,7 @@ function RunWorkflowModal({ workflow, pendingRun, onClose, onRun }) {
   return (
     <Modal title="Run workflow" subtitle={workflow.workflowName} onClose={onClose} wide>
       {error && <div className="alert error">{error}</div>}
-      {!detail && !error && <div className="empty-state">Loading run configuration...</div>}
+      {!detail && !error && <LoadingState>Loading run configuration…</LoadingState>}
       {detail && <>
         <div className="alert info compact">These settings apply only to this run. The saved workflow and scheduled task will not be changed.</div>
         {isDbt ? (
@@ -1161,7 +1117,7 @@ function RunWorkflowModal({ workflow, pendingRun, onClose, onRun }) {
         }}>
           <summary><span>Preview DAG</span><small>Resolve the current one-time DBT selection</small></summary>
           <div className="run-dag-preview-body">
-            {previewLoading && <div className="empty-state">Resolving the current selection. This can take about a minute...</div>}
+            {previewLoading && <LoadingState>Resolving the current selection. This can take about a minute…</LoadingState>}
             {previewError && <div className="alert error">{previewError}</div>}
             {!preview && !previewLoading && !previewError && <button type="button" className="button preview-load-button" onClick={loadPreview}>◇ Load DAG preview</button>}
             {preview && !previewLoading && <><button type="button" className="small-button preview-refresh-button" onClick={loadPreview}>↻ Refresh preview</button><EmbeddedDagPreview preview={preview} /></>}
@@ -1220,11 +1176,6 @@ function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
             <small>Open latest DBT execution progress.</small>
           </button>
         )}
-        <button className="action-tile" disabled={!view.lastRunId} onClick={() => choose('log')}>
-          <span className="action-icon">▤</span>
-          <strong>View latest log</strong>
-          <small>Inspect history messages, execution progress and run logs.</small>
-        </button>
         <button className="action-tile" onClick={() => choose('history')}>
           <span className="action-icon">◷</span>
           <strong>History</strong>
@@ -1234,6 +1185,11 @@ function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
           <span className="action-icon">✎</span>
           <strong>Edit workflow</strong>
           <small>Change metadata, schedule, dependencies and notifications.</small>
+        </button>
+        <button className="action-tile" onClick={() => choose('dependencies')}>
+          <span className="action-icon">⌘</span>
+          <strong>Dependencies</strong>
+          <small>Maintain dependency rules for this workflow.</small>
         </button>
         <button className="action-tile" onClick={() => choose('toggle-workflow')}>
           <span className="action-icon">{wfEnabled ? 'Ⅱ' : '▶'}</span>
@@ -1592,8 +1548,13 @@ export default function Monitor({ onNavigate }) {
         runId: workflow.lastRunId,
         workflowName: workflow.workflowName,
         workflowId: workflow.workflowId,
+        workflow,
         returnPage: 'monitor'
       })
+    }
+    if (action === 'dependencies') {
+      setModal(null)
+      return onNavigate('dependencies', { workflow })
     }
     if (action === 'edit') return setModal({ type: 'edit', workflow })
     setModal(null)
@@ -1682,7 +1643,7 @@ export default function Monitor({ onNavigate }) {
         <span className="summary-updated">Updated {formatDateTime(payload?.generatedAt)}</span>
       </div>
       <div className={`table-card ${viewMode === 'timeline' ? 'monitor-table-card timeline-card' : ''}`}>
-        {loading ? <div className="empty-state">Loading monitor data...</div> : null}
+        {loading ? <LoadingState>Loading monitor data…</LoadingState> : null}
         {!loading && filtered.length === 0 ? <div className="empty-state">No workflows match the current filters.</div> : null}
         {filtered.length > 0 && viewMode === 'timeline' && (
           <TimelineView
@@ -1702,7 +1663,7 @@ export default function Monitor({ onNavigate }) {
         {filtered.length > 0 && viewMode === 'table' && (
           <table className="workflow-table compact monitor-table">
             <thead><tr><th>Workflow</th><th><span className="visually-hidden">Actions</span></th><th>Status</th><th>Last Run</th><th>Duration</th><th>Schedule</th><th>Next Run</th></tr></thead>
-            <tbody>{filtered.map(w => <WorkflowRow key={w.workflowId} workflow={w} nowMs={nowMs} onManage={(workflow) => setModal({ type: 'actions', workflow })} onRun={(workflow) => setModal({ type: 'run', workflow })} pendingRun={pendingRuns[w.workflowId]} />)}</tbody>
+            <tbody>{filtered.map(w => <WorkflowRow key={w.workflowId} workflow={w} nowMs={nowMs} onManage={(workflow) => setModal({ type: 'actions', workflow })} onRun={(workflow) => setModal({ type: 'run', workflow })} onViewLog={(workflow) => handleAction('log', workflow)} pendingRun={pendingRuns[w.workflowId]} />)}</tbody>
           </table>
         )}
       </div>

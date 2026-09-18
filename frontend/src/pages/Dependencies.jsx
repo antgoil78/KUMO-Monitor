@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
+import LoadingState from '../components/LoadingState.jsx'
 
 const booleanFields = [['success', 'Success'], ['warning', 'Warning'], ['error', 'Error'], ['newer', 'Newer']]
 
@@ -27,14 +28,12 @@ function displayDate(value) {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
 }
 
-export default function Dependencies() {
+export default function Dependencies({ workflow, onNavigate }) {
   const [workflows, setWorkflows] = useState([])
   const [models, setModels] = useState([])
   const [rows, setRows] = useState([])
   const [savedRows, setSavedRows] = useState([])
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState('')
-  const [workflowSearch, setWorkflowSearch] = useState('')
-  const [workflowPickerOpen, setWorkflowPickerOpen] = useState(false)
+  const selectedWorkflowId = workflow?.workflowId || ''
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [deleteCandidate, setDeleteCandidate] = useState(null)
@@ -42,55 +41,56 @@ export default function Dependencies() {
   const [notice, setNotice] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [verification, setVerification] = useState(null)
+  const [overviewSearch, setOverviewSearch] = useState('')
+  const [overviewSort, setOverviewSort] = useState({ key: 'workflow', direction: 'asc' })
 
-  const labels = useMemo(() => new Map(workflows.map(workflow => [workflowLabel(workflow), workflow])), [workflows])
-  const filteredWorkflows = useMemo(() => {
-    const query = workflowSearch.trim().toLowerCase()
-    if (!query || labels.has(workflowSearch)) return workflows
-    return workflows.filter(workflow => `${workflowLabel(workflow)} ${workflow.workflowId}`.toLowerCase().includes(query))
-  }, [labels, workflowSearch, workflows])
   const hasUnsavedRules = rulesSnapshot(rows) !== rulesSnapshot(savedRows)
 
   useEffect(() => {
     let cancelled = false
-    api.dependencies().then(data => {
+    setLoading(true)
+    setError('')
+    api.dependencies(selectedWorkflowId).then(data => {
       if (cancelled) return
       setWorkflows(data.workflows || [])
       setModels(data.models || [])
+      const loadedRules = (data.rules || []).map(normalizeRule)
+      setRows(loadedRules)
+      setSavedRows(loadedRules)
     }).catch(err => {
       if (!cancelled) setError(err.message || String(err))
     }).finally(() => {
       if (!cancelled) setLoading(false)
     })
     return () => { cancelled = true }
-  }, [])
+  }, [selectedWorkflowId])
 
-  async function chooseWorkflow(workflow) {
-    if (!workflow) return
-    setSelectedWorkflowId(workflow.workflowId)
-    setWorkflowSearch(workflowLabel(workflow))
-    setWorkflowPickerOpen(false)
-    setLoading(true)
-    setError('')
-    setNotice('')
-    setVerification(null)
-    try {
-      const data = await api.dependencies(workflow.workflowId)
-      setWorkflows(data.workflows || workflows)
-      setModels(data.models || models)
-      const loadedRules = (data.rules || []).map(normalizeRule)
-      setRows(loadedRules)
-      setSavedRows(loadedRules)
-    } catch (err) {
-      setError(err.message || String(err))
-    } finally {
-      setLoading(false)
+  const workflowById = useMemo(() => new Map(workflows.map(item => [String(item.workflowId), item])), [workflows])
+  const overviewRows = useMemo(() => {
+    const query = overviewSearch.trim().toLowerCase()
+    const valueFor = row => {
+      const owner = workflowById.get(String(row.workflowId))
+      if (overviewSort.key === 'workflow') return workflowLabel(owner || { workflowId: row.workflowId })
+      if (overviewSort.key === 'active') return row.activeFl ? '1' : '0'
+      if (overviewSort.key === 'type') return row.dependeeType
+      if (overviewSort.key === 'dependee') return row.dependeeId
+      return ''
     }
+    return rows.filter(row => {
+      const owner = workflowById.get(String(row.workflowId))
+      return !query || `${workflowLabel(owner || { workflowId: row.workflowId })} ${row.workflowId} ${row.dependeeType} ${row.dependeeId}`.toLowerCase().includes(query)
+    }).sort((a, b) => {
+      const result = String(valueFor(a) || '').localeCompare(String(valueFor(b) || ''), undefined, { numeric: true, sensitivity: 'base' })
+      return overviewSort.direction === 'asc' ? result : -result
+    })
+  }, [rows, workflowById, overviewSearch, overviewSort])
+
+  function changeOverviewSort(key) {
+    setOverviewSort(current => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }))
   }
 
-  function updateWorkflowSearch(value) {
-    setWorkflowSearch(value)
-    setWorkflowPickerOpen(true)
+  function sortLabel(key, label) {
+    return <button type="button" className="dependency-sort-button" onClick={() => changeOverviewSort(key)}>{label}<span aria-hidden="true">{overviewSort.key === key ? (overviewSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button>
   }
 
   function patchRow(key, field, value) {
@@ -205,47 +205,34 @@ export default function Dependencies() {
 
   return (
     <div className="page dependencies-page">
-      <PageHeader breadcrumb="Workflow / Dependencies" title="Dependencies" subtitle="Maintain workflow dependency rules and their triggering statuses." actions={<button className="button primary" type="button" onClick={addRule} disabled={!selectedWorkflowId || saving}>+ Add rule</button>} />
+      <PageHeader breadcrumb="Workflow / Dependencies" title="Dependencies" subtitle={workflow ? `Maintain dependency rules for ${workflow.workflowName}.` : 'Search and review dependency rules across all workflows.'} actions={workflow ? <div className="page-header-actions"><button className="button" type="button" onClick={() => onNavigate('dependencies')}>← All dependencies</button><button className="button primary" type="button" onClick={addRule} disabled={saving}>+ Add rule</button></div> : null} />
 
-      <div className="vision-card dependency-workflow-picker">
-        <label htmlFor="dependency-workflow-search">Workflow</label>
-        <div className="dependency-workflow-combobox">
-          <input
-            id="dependency-workflow-search"
-            className="search-input"
-            value={workflowSearch}
-            onChange={event => updateWorkflowSearch(event.target.value)}
-            onFocus={() => setWorkflowPickerOpen(true)}
-            onBlur={() => window.setTimeout(() => setWorkflowPickerOpen(false), 150)}
-            onKeyDown={event => {
-              if (event.key === 'Enter' && filteredWorkflows[0]) {
-                event.preventDefault()
-                chooseWorkflow(filteredWorkflows[0])
-              }
-              if (event.key === 'Escape') setWorkflowPickerOpen(false)
-            }}
-            placeholder="Search and choose a workflow…"
-            autoComplete="off"
-            role="combobox"
-            aria-expanded={workflowPickerOpen}
-            aria-controls="dependency-workflow-options"
-          />
-          {workflowPickerOpen && <div className="dependency-workflow-options" id="dependency-workflow-options" role="listbox">
-            {filteredWorkflows.length ? filteredWorkflows.map(workflow => (
-              <button key={workflow.workflowId} type="button" role="option" aria-selected={workflow.workflowId === selectedWorkflowId} onMouseDown={event => event.preventDefault()} onClick={() => chooseWorkflow(workflow)}>
-                <strong>{workflow.workflowName}</strong>
-                <span>{workflow.workflowGroup || 'Ungrouped'} · {workflow.workflowId}</span>
-              </button>
-            )) : <div className="dependency-workflow-no-results">No workflows match your search.</div>}
-          </div>}
-        </div>
-      </div>
+      {workflow && <div className="vision-card dependency-workflow-context"><span>Workflow</span><strong>{workflow.workflowName}</strong><small>{workflow.workflowGroup || 'Ungrouped'} · {workflow.workflowId}</small></div>}
 
       {error && <div className="alert error">{error}</div>}
       {notice && <div className="alert info">{notice}</div>}
 
+      {!selectedWorkflowId && <div className="dependency-overview-toolbar"><input className="search-input" value={overviewSearch} onChange={event => setOverviewSearch(event.target.value)} placeholder="Search workflows, dependees or types…" aria-label="Search dependency rules" /><span>{overviewRows.length} rule{overviewRows.length === 1 ? '' : 's'}</span></div>}
+
       <div className="vision-card dependency-rule-card">
-        {!selectedWorkflowId ? <div className="empty-state">Choose a workflow to view and edit its dependency rules.</div> : loading ? <div className="empty-state">Loading dependency rules…</div> : rows.length === 0 ? <div className="empty-state">No dependency rules found. Click Add rule to add one.</div> : (<>
+        {loading ? <LoadingState>Loading dependency rules…</LoadingState> : !selectedWorkflowId ? (
+          overviewRows.length ? <div className="dependency-table-scroll"><table className="dependency-rule-table dependency-overview-table">
+            <thead><tr><th>{sortLabel('workflow', 'Workflow')}</th><th>{sortLabel('active', 'Active')}</th><th>{sortLabel('type', 'Dependee type')}</th><th>{sortLabel('dependee', 'Dependee')}</th><th>Accepted status</th><th>Newer</th><th /></tr></thead>
+            <tbody>{overviewRows.map(row => {
+              const owner = workflowById.get(String(row.workflowId))
+              const accepted = booleanFields.slice(0, 3).filter(([field]) => row[field]).map(([, label]) => label)
+              return <tr key={row._key}>
+                <td><strong>{owner?.workflowName || row.workflowId}</strong><small>{owner?.workflowGroup || 'Ungrouped'}</small></td>
+                <td><span className={`dependency-state ${row.activeFl ? 'active' : 'inactive'}`}>{row.activeFl ? 'Active' : 'Inactive'}</span></td>
+                <td><span className="type-chip">{row.dependeeType}</span></td>
+                <td><code>{row.dependeeId}</code></td>
+                <td>{accepted.length ? accepted.join(', ') : '—'}</td>
+                <td>{row.newer ? 'Yes' : 'No'}</td>
+                <td><button className="small-button" type="button" onClick={() => onNavigate('dependencies', { workflow: owner || { workflowId: row.workflowId, workflowName: row.workflowId } })}>Edit</button></td>
+              </tr>
+            })}</tbody>
+          </table></div> : <div className="empty-state">{rows.length ? 'No dependency rules match your search.' : 'No dependency rules are configured.'}</div>
+        ) : rows.length === 0 ? <div className="empty-state">No dependency rules found. Click Add rule to add one.</div> : (<>
           <div className="dependency-table-scroll">
             <table className="dependency-rule-table">
               <thead><tr><th className="boolean-column active-column">Active</th><th>Dependee type</th><th>Dependee</th>{booleanFields.map(([, label]) => <th className="boolean-column" key={label}>{label}</th>)}<th className="dependency-actions-column" /></tr></thead>

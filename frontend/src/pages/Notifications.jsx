@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
+import LoadingState, { LoadingSpinner } from '../components/LoadingState.jsx'
 import './Notifications.css'
 
 
@@ -292,7 +293,7 @@ export default function Notifications() {
           onClick={load}
           disabled={loading}
         >
-          {loading ? 'Refreshing…' : '↻ Refresh'}
+          {loading ? <><LoadingSpinner label="Refreshing" /> Refreshing…</> : '↻ Refresh'}
         </button>} />
 
       {error && <div className="alert error notification-alert">{error}</div>}
@@ -362,7 +363,7 @@ export default function Notifications() {
 
           <div className="table-card notification-table-card">
             {loading ? (
-              <div className="notification-empty-state">Loading email groups…</div>
+              <LoadingState className="notification-empty-state">Loading email groups…</LoadingState>
             ) : filteredGroups.length === 0 ? (
               <div className="notification-empty-state">
                 {groups.length === 0 ? 'No email groups configured.' : 'No groups match your search.'}
@@ -444,7 +445,7 @@ export default function Notifications() {
 
           <div className="table-card notification-table-card">
             {loading ? (
-              <div className="notification-empty-state">Loading workflow settings…</div>
+              <LoadingState className="notification-empty-state">Loading workflow settings…</LoadingState>
             ) : filteredWorkflows.length === 0 ? (
               <div className="notification-empty-state">
                 {workflows.length === 0 ? 'No workflows found.' : 'No workflows match your search.'}

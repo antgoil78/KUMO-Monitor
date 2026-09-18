@@ -4,6 +4,7 @@ import dagre from '@dagrejs/dagre'
 
 import { api } from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
+import LoadingState from '../components/LoadingState.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import StatusBadge, { statusKind } from '../components/StatusBadge.jsx'
 
@@ -212,11 +213,11 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
       <PageHeader breadcrumb="Pages / Workflow Monitor / DAG" title="DAG Run" subtitle={`${name} · interactive DBT model dependencies`} actions={<div className="dag-header-actions"><span className={`dag-auto-refresh ${refreshing ? 'refreshing' : ''}`}><i />{refreshing ? 'Updating…' : 'Auto refresh · 5s'}</span><button className="button" onClick={() => onNavigate('monitor')}>← Back to monitor</button></div>} />
       {error && <div className="alert error">{error}</div>}
       {notice && <div className="alert info">{notice}</div>}
-      {!dag && !error && <div className="empty-state">Loading DAG...</div>}
+      {!dag && !error && <LoadingState>Loading DAG…</LoadingState>}
       {dag && <>
         <div className="dag-page-summary vision-card-flat">
           <StatusBadge status={dag.run?.STATUS || '—'} />
-          <span>Run <code>{dag.run?.RUN_ID || '—'}</code></span>
+          <span>Run ID <code>{dag.run?.RUN_ID || '—'}</code></span>
           <strong>{allNodes.length}</strong><span>models</span>
           <strong className="success-text">{finished}</strong><span>finished</span>
           {warning > 0 && <><strong>{warning}</strong><span>warnings</span></>}

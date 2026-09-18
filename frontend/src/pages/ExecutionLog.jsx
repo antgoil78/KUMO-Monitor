@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
+import LoadingState from '../components/LoadingState.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
 import { elapsedDuration, formatDateTime } from '../utils/time.js'
 import './ExecutionLog.css'
@@ -131,7 +132,7 @@ function LogTable({ rows, sourceKey, onViewValue }) {
                 const tone = column === 'TYPE' ? logTone(value) : ''
                 return (
                   <td key={column} className={`${['MESSAGE', 'ERROR_MESSAGE'].includes(column) ? 'execution-log-message-cell' : opensViewer ? 'execution-view-cell' : ''} ${column === 'MODEL_NAME_PARENT' ? 'execution-parent-cell' : ''} ${tone}`}>
-                    {column === 'STATUS' ? <StatusBadge status={value} /> : column === 'MODEL_NAME_PARENT' ? <ParentModels value={value} /> : structured ? <FriendlyJson value={value} /> : <span>{opensViewer ? valuePreview(value) : displayValue(column, value)}</span>}
+                    {column === 'STATUS' || (sourceKey === 'runLog' && column === 'TYPE') ? <StatusBadge status={value} showIcon={column === 'STATUS'} /> : column === 'MODEL_NAME_PARENT' ? <ParentModels value={value} /> : structured ? <FriendlyJson value={value} /> : <span>{opensViewer ? valuePreview(value) : displayValue(column, value)}</span>}
                     {opensViewer && <button type="button" className="execution-view-value" onClick={() => onViewValue({ column, value, modelName: row.MODEL_NAME })}>View</button>}
                   </td>
                 )
@@ -144,17 +145,61 @@ function LogTable({ rows, sourceKey, onViewValue }) {
   )
 }
 
-export default function ExecutionLog({ runId = '', workflowId = '', workflowName = '', returnPage = 'monitor', onNavigate }) {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(true)
+export default function ExecutionLog({ runId = '', workflowId = '', workflowName = '', workflow = null, returnPage = 'monitor', onNavigate }) {
+  const workflowType = String(workflow?.workflowType || '').toUpperCase()
+  const localData = workflow && workflowType && workflowType !== 'DBT' ? {
+    history: {
+      RUN_ID: runId,
+      WORKFLOW_ID: workflowId,
+      WORKFLOW_NAME: workflowName,
+      WORKFLOW_TYPE: workflowType,
+      STATUS: workflow.lastStatus,
+      REQUESTED_BY: workflow.lastRequestedBy,
+      REQUESTED_AT: workflow.lastRequestedAt,
+      START_TIME: workflow.lastStartTime,
+      END_TIME: workflow.lastEndTime,
+      TRIGGER_SOURCE: workflow.lastTriggerSource,
+      ERROR_MESSAGE: workflow.lastErrorMessage,
+      PAYLOAD_MESSAGE: workflow.lastPayloadMessage
+    },
+    modelProgress: [], testProgress: [], runLog: [], warnings: {}
+  } : null
+  const [data, setData] = useState(localData)
+  const [loading, setLoading] = useState(!localData)
   const [error, setError] = useState(null)
   const [activeSource, setActiveSource] = useState('modelProgress')
   const [search, setSearch] = useState('')
   const [nowMs, setNowMs] = useState(Date.now())
   const [valueDetail, setValueDetail] = useState(null)
+  const [runIdCopied, setRunIdCopied] = useState(false)
+
+  async function copyRunId() {
+    const value = String(runId || '')
+    if (!value) return
+    try {
+      await navigator.clipboard.writeText(value)
+    } catch (_) {
+      const textArea = document.createElement('textarea')
+      textArea.value = value
+      textArea.setAttribute('readonly', '')
+      textArea.style.position = 'fixed'
+      textArea.style.opacity = '0'
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
+    }
+    setRunIdCopied(true)
+    window.setTimeout(() => setRunIdCopied(false), 1400)
+  }
 
   async function load() {
     if (!runId) return
+    if (localData) {
+      setData(localData)
+      setLoading(false)
+      return
+    }
     try {
       setLoading(true)
       setError(null)
@@ -166,7 +211,7 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
     }
   }
 
-  useEffect(() => { load() }, [runId, workflowId])
+  useEffect(() => { load() }, [runId, workflowId, workflowType])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000)
@@ -203,13 +248,13 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
 
   return (
     <section className="page execution-log-page">
-      <PageHeader breadcrumb="Pages / Execution Log" title={resolvedName} subtitle={<>Run <code>{runId}</code></>} actions={<div className="execution-log-header-actions">
+      <PageHeader breadcrumb="Pages / Execution Log" title={resolvedName} subtitle={<span className="execution-run-id">Run ID <code>{runId}</code><button type="button" className={runIdCopied ? 'copied' : ''} onClick={copyRunId} aria-label="Copy run ID" title={runIdCopied ? 'Copied' : 'Copy run ID'}><span className="execution-copy-icon" aria-hidden="true" />{runIdCopied ? 'Copied' : 'Copy'}</button></span>} actions={<div className="execution-log-header-actions">
           <button className="button" onClick={load} disabled={loading}>↻ Refresh</button>
           <button className="button" onClick={() => onNavigate(returnPage, returnPage === 'history' ? { workflowName, workflowId } : {})}>← Back</button>
         </div>} />
 
       {error && <div className="alert error">{error}</div>}
-      {loading && !data && <div className="empty-state">Loading execution log...</div>}
+      {loading && !data && <LoadingState>Loading execution log…</LoadingState>}
 
       {data && <>
         <div className="execution-log-summary vision-card-flat">

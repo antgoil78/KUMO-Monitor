@@ -3,6 +3,7 @@ import { api } from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
 import StatusBadge, { statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
+import LoadingState, { LoadingSpinner } from '../components/LoadingState.jsx'
 import { formatDateTime } from '../utils/time.js'
 
 function percent(value, total) {
@@ -99,7 +100,7 @@ function LimAttentionCard({ data, loading, error, onOpen }) {
       <div className="card-title-row">
         <div>
           <span className="eyebrow">LIM ingestion control</span>
-          <h3>{loading ? 'Checking ingestion readiness…' : hasAttention ? 'Ingestion needs attention' : 'Ingestion is ready'}</h3>
+          <h3>{loading ? <><LoadingSpinner label="Checking ingestion readiness" /> Checking ingestion readiness…</> : hasAttention ? 'Ingestion needs attention' : 'Ingestion is ready'}</h3>
           <span>Uses the same readiness and row-count rules as LIM Ingestion.</span>
         </div>
         <strong className="lim-attention-count">{loading ? '—' : Number(summary.attentionGroups || 0) + Number(summary.missingGroups || 0)}</strong>
@@ -404,6 +405,7 @@ export default function Dashboard({ onNavigate }) {
 
       {error && <div className="alert error">{error}</div>}
       {payload?.error && <div className="alert warning">Backend fallback: {payload.error}</div>}
+      {loading && !payload && <LoadingState>Loading dashboard…</LoadingState>}
 
       <div className="metric-grid vision-grid-4">
         <MetricCard

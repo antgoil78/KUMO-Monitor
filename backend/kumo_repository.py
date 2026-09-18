@@ -59,15 +59,14 @@ def load_dependency_editor(workflow_id=None):
                 """))
                 _dependency_choices_cache = (workflows, models)
                 _dependency_choices_cache_monotonic = time.monotonic()
-            rules = []
-            if workflow_id:
-                rules = normalize_rows(_fetch_with_cursor(cur, f"""
-                    SELECT WORKFLOW_ID, DEPENDEE_TYPE, DEPENDEE_ID,
-                           SUCCESS, WARNING, ERROR, NEWER, ACTIVE_FL
-                      FROM {config.WORKFLOW_DEP_RULE_TABLE}
-                     WHERE WORKFLOW_ID = %(workflow_id)s
-                     ORDER BY DEPENDEE_TYPE DESC, DEPENDEE_ID ASC
-                """, {"workflow_id": workflow_id}))
+            workflow_filter = "WHERE WORKFLOW_ID = %(workflow_id)s" if workflow_id else ""
+            rules = normalize_rows(_fetch_with_cursor(cur, f"""
+                SELECT WORKFLOW_ID, DEPENDEE_TYPE, DEPENDEE_ID,
+                       SUCCESS, WARNING, ERROR, NEWER, ACTIVE_FL
+                  FROM {config.WORKFLOW_DEP_RULE_TABLE}
+                  {workflow_filter}
+                 ORDER BY WORKFLOW_ID, DEPENDEE_TYPE DESC, DEPENDEE_ID ASC
+            """, {"workflow_id": workflow_id} if workflow_id else {}))
         finally:
             cur.close()
     return {
@@ -975,7 +974,7 @@ def load_workflow_history(workflow_id, limit=100):
     return normalize_rows(rows)
 
 
-def _load_execution_source(table_name, run_id, limit=5000):
+def _load_execution_source(table_name, run_id, wanted_columns, limit=5000):
     """Load a run-scoped operational table while tolerating optional sources."""
     if not table_name:
         return [], "Source is not configured"
@@ -983,10 +982,13 @@ def _load_execution_source(table_name, run_id, limit=5000):
         columns = describe_table(table_name)
         if "RUN_ID" not in columns:
             return [], f"{table_name} does not contain RUN_ID"
+        selected_columns = [column for column in wanted_columns if column in columns]
+        if not selected_columns:
+            return [], f"{table_name} does not contain any supported log columns"
         order_columns = [col for col in ("LOG_DTTM", "PROGRESS_DTTM", "STARTED_DTTM", "FINISHED_DTTM", "STATUS_DTTM", "SRT", "CREATED_AT", "UPDATED_AT") if col in columns]
         order_sql = f" ORDER BY {', '.join(order_columns)}" if order_columns else ""
         rows = _query(
-            f"SELECT * FROM {table_name} WHERE RUN_ID = %(run_id)s{order_sql} LIMIT {int(limit)}",
+            f"SELECT {', '.join(selected_columns)} FROM {table_name} WHERE RUN_ID = %(run_id)s{order_sql} LIMIT {int(limit)}",
             {"run_id": run_id},
         )
         return normalize_rows(rows), None
@@ -999,6 +1001,10 @@ def load_execution_log(run_id, workflow_id=None):
         raise ValueError("run_id is required")
 
     history_types = describe_table(config.T_HISTORY)
+    history_columns = [column for column in (
+        "RUN_ID", "WORKFLOW_ID", "STATUS", "REQUESTED_BY", "REQUESTED_AT",
+        "START_TIME", "END_TIME", "TRIGGER_SOURCE", "ERROR_MESSAGE", "PAYLOAD_MESSAGE",
+    ) if column in history_types]
     workflow_name_expr = (
         "COALESCE(h.WORKFLOW_NAME, w.WORKFLOW_NAME, h.WORKFLOW_ID) AS WORKFLOW_NAME"
         if "WORKFLOW_NAME" in history_types
@@ -1007,7 +1013,7 @@ def load_execution_log(run_id, workflow_id=None):
     workflow_filter = " AND h.WORKFLOW_ID = %(workflow_id)s" if workflow_id else ""
     history_rows = normalize_rows(_query(
         f"""
-        SELECT h.*, {workflow_name_expr},
+        SELECT {', '.join(f'h.{column}' for column in history_columns)}, {workflow_name_expr},
                COALESCE(w.WORKFLOW_TYPE, 'DBT') AS WORKFLOW_TYPE
         FROM {config.T_HISTORY} h
         LEFT JOIN {config.T_WORKFLOWS} w ON w.WORKFLOW_ID = h.WORKFLOW_ID
@@ -1022,12 +1028,16 @@ def load_execution_log(run_id, workflow_id=None):
     sources = {"modelProgress": [], "testProgress": [], "runLog": []}
     warnings = {}
     if is_dbt:
-        for key, table_name in (
-            ("modelProgress", config.MODEL_PROGRESS_TABLE),
-            ("testProgress", config.TEST_PROGRESS_TABLE),
-            ("runLog", config.RUN_LOG_TABLE),
+        progress_columns = (
+            "MODEL_NAME", "TYPE", "STATUS", "PROGRESS", "STARTED_DTTM",
+            "FINISHED_DTTM", "MODEL_NAME_PARENT",
+        )
+        for key, table_name, wanted_columns in (
+            ("modelProgress", config.MODEL_PROGRESS_TABLE, progress_columns),
+            ("testProgress", config.TEST_PROGRESS_TABLE, progress_columns),
+            ("runLog", config.RUN_LOG_TABLE, ("LOG_DTTM", "ORIGIN", "TYPE", "MESSAGE")),
         ):
-            source_rows, warning = _load_execution_source(table_name, run_id)
+            source_rows, warning = _load_execution_source(table_name, run_id, wanted_columns)
             sources[key] = source_rows
             if warning:
                 warnings[key] = warning
@@ -1156,6 +1166,8 @@ def load_monitor_rows():
     has_requested_at = "REQUESTED_AT" in h_types
     has_requested_by = "REQUESTED_BY" in h_types
     has_trigger_source = "TRIGGER_SOURCE" in h_types
+    has_error_message = "ERROR_MESSAGE" in h_types
+    has_payload_message = "PAYLOAD_MESSAGE" in h_types
 
     desc_expr = "w.DESCRIPTION" if has_desc else "NULL"
     workflow_type_expr = "w.WORKFLOW_TYPE" if has_workflow_type else "'DBT'"
@@ -1170,6 +1182,10 @@ def load_monitor_rows():
         extra_select.append("hh.REQUESTED_BY")
     if has_trigger_source:
         extra_select.append("hh.TRIGGER_SOURCE")
+    if has_error_message:
+        extra_select.append("hh.ERROR_MESSAGE")
+    if has_payload_message:
+        extra_select.append("hh.PAYLOAD_MESSAGE")
     extra_sql = (", " + ", ".join(extra_select)) if extra_select else ""
 
     q = f"""
@@ -1225,6 +1241,8 @@ def load_monitor_rows():
       {(', lr.REQUESTED_AT AS LAST_REQUESTED_AT' if has_requested_at else '')}
       {(', lr.REQUESTED_BY AS LAST_REQUESTED_BY' if has_requested_by else '')}
       {(', lr.TRIGGER_SOURCE AS LAST_TRIGGER_SOURCE' if has_trigger_source else '')},
+      {('lr.ERROR_MESSAGE AS LAST_ERROR_MESSAGE,' if has_error_message else '')}
+      {('lr.PAYLOAD_MESSAGE AS LAST_PAYLOAD_MESSAGE,' if has_payload_message else '')}
       CASE
         WHEN lr.START_TIME IS NULL OR lr.END_TIME IS NULL THEN NULL
         ELSE DATEDIFF('second', lr.START_TIME, lr.END_TIME)
@@ -1305,6 +1323,8 @@ def _order_and_enrich(rows):
             "lastRequestedAt": row.get("LAST_REQUESTED_AT"),
             "lastRequestedBy": row.get("LAST_REQUESTED_BY"),
             "lastTriggerSource": row.get("LAST_TRIGGER_SOURCE"),
+            "lastErrorMessage": row.get("LAST_ERROR_MESSAGE"),
+            "lastPayloadMessage": row.get("LAST_PAYLOAD_MESSAGE"),
             "scheduleCron": row.get("SCHEDULE_CRON") or "-",
             "scheduleTimezone": row.get("SCHEDULE_TIMEZONE") or "UTC",
             "nextRunTime": next_run(row.get("SCHEDULE_CRON"), row.get("SCHEDULE_TIMEZONE") or "UTC") if bool(row.get("TASK_ENABLED", True)) else None,
@@ -2084,8 +2104,19 @@ def load_dag_run(workflow_id, run_id=None):
             errors = []
 
     error_models = {str(e.get("ORIGIN")) for e in errors if e.get("ORIGIN")}
+    terminal_progress_states = {"FINISHED", "SKIPPED"}
+    model_dag_complete = bool(progress_rows) and all(
+        str(row.get("PROGRESS") or "QUEUED").upper() in terminal_progress_states
+        for row in progress_rows
+    )
     tests_by_model = {}
-    for test in test_rows:
+    # TEST_PROGRESS rows can be created in QUEUED state before the model DAG is
+    # complete. Do not present those placeholders as passed test results.
+    completed_test_rows = [
+        test for test in test_rows
+        if model_dag_complete and str(test.get("PROGRESS") or "QUEUED").upper() in terminal_progress_states
+    ]
+    for test in completed_test_rows:
         related = parse_variant_array(test.get("MODEL_NAME_PARENT"))
         if not related:
             related = str(test.get("MODEL_NAME_PARENT") or "").split(";")
@@ -2141,7 +2172,16 @@ def load_dag_run(workflow_id, run_id=None):
             if key not in seen_edges:
                 seen_edges.add(key)
                 edges.append({"source": parent, "target": model})
-    return {"workflowId": workflow_id, "run": run, "nodes": nodes, "edges": edges, "tests": test_rows, "errors": errors}
+    return {
+        "workflowId": workflow_id,
+        "run": run,
+        "nodes": nodes,
+        "edges": edges,
+        "tests": completed_test_rows,
+        "testsPending": max(0, len(test_rows) - len(completed_test_rows)),
+        "modelDagComplete": model_dag_complete,
+        "errors": errors,
+    }
 
 
 def _short_model_name(model):

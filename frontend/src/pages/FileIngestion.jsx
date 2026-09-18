@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { fileIngestionApi } from '../fileIngestionApi.js'
 import PageHeader from '../components/PageHeader.jsx'
+import LoadingState, { LoadingSpinner } from '../components/LoadingState.jsx'
 import './FileIngestion.css'
 
 const HISTORY_DAYS = 30
@@ -808,7 +809,7 @@ function LatestRunDetails({ detail, onClose, standalone = false }) {
         </div>}
 
         {detail.loading ? (
-          <div className="lim-detail-loading">Loading latest run details...</div>
+          <LoadingState className="lim-detail-loading">Loading latest run details…</LoadingState>
         ) : detail.error ? (
           <div className="alert error">{detail.error}</div>
         ) : (
@@ -943,7 +944,7 @@ export default function FileIngestion({ onNavigate }) {
   return (
     <section className="page lim-page">
       <PageHeader breadcrumb="RAW LIM / File Ingestion Monitor" title="File Ingestion Monitor" subtitle="Monitor LIM package groups, file readiness, rowcount checks and SET_READY processing." actions={<button type="button" className="button ghost-refresh" onClick={refreshAll} disabled={loading || rawLoading}>
-          {loading || rawLoading ? 'Refreshing...' : '↻ Refresh'}
+          {loading || rawLoading ? <><LoadingSpinner label="Refreshing" /> Refreshing…</> : '↻ Refresh'}
         </button>} />
 
       {error && <div className="alert error">{error}</div>}
@@ -964,13 +965,13 @@ export default function FileIngestion({ onNavigate }) {
           <span>{filteredRows.length} package groups</span>
         </div>
         <div className="lim-overview-controls">
-          {rawLoading && <span className="lim-raw-loading">Loading RAW status…</span>}
+          {rawLoading && <span className="lim-raw-loading"><LoadingSpinner label="Loading RAW status" /> Loading RAW status…</span>}
           <input className="search-input lim-search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search subject area, package group or status..." />
         </div>
       </div>
 
       {loading && !data ? (
-        <div className="table-card lim-empty-state">Loading ingestion overview...</div>
+        <LoadingState className="table-card lim-empty-state">Loading ingestion overview…</LoadingState>
       ) : !filteredRows.length ? (
         <div className="table-card lim-empty-state">No active package groups found.</div>
       ) : (

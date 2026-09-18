@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
+import LoadingState from '../components/LoadingState.jsx'
 
 const groups = [
   { key: 'ENVIRONMENT', label: 'Environment variables' },
@@ -128,7 +129,7 @@ export default function EnvironmentSettings() {
     {notice && <div className="alert info">{notice}</div>}
 
     <div className="vision-card parameter-card">
-      {loading ? <div className="empty-state">Loading application parameters…</div> : visibleRows.length === 0 ? <div className="empty-state">No {activeGroup === 'ENVIRONMENT' ? 'environment variables' : 'system settings'} configured yet.</div> : <div className="parameter-table-scroll"><table className="parameter-table">
+      {loading ? <LoadingState>Loading application parameters…</LoadingState> : visibleRows.length === 0 ? <div className="empty-state">No {activeGroup === 'ENVIRONMENT' ? 'environment variables' : 'system settings'} configured yet.</div> : <div className="parameter-table-scroll"><table className="parameter-table">
         <thead><tr><th>Active</th><th>Key</th><th>Value</th><th>Type</th><th>Description</th><th>Secret</th><th /></tr></thead>
         <tbody>{visibleRows.map(row => <tr key={row._key} className={row._new ? 'parameter-new-row' : ''}>
           <td className="parameter-check"><input type="checkbox" checked={Boolean(row.activeFl)} onChange={event => patch(row._key, 'activeFl', event.target.checked)} /></td>
