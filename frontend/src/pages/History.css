@@ -23,7 +23,7 @@
 
 .history-copy-heading,
 .history-copy-cell {
-  width: 92px;
+  width: 120px;
   text-align: center;
 }
 
@@ -36,7 +36,57 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-width: 76px;
+  min-width: 108px;
+}
+
+.history-dag-button {
+  color: #69f0ae;
+}
+
+.history-dag-icon {
+  position: absolute;
+  inset: 0;
+}
+
+.history-dag-icon::before,
+.history-dag-icon::after {
+  position: absolute;
+  height: 1.5px;
+  background: currentColor;
+  content: '';
+  transform-origin: left center;
+}
+
+.history-dag-icon::before {
+  top: 11px;
+  left: 11px;
+  width: 10px;
+  transform: rotate(30deg);
+}
+
+.history-dag-icon::after {
+  top: 19px;
+  left: 11px;
+  width: 10px;
+  transform: rotate(-30deg);
+}
+
+.history-dag-icon i {
+  position: absolute;
+  z-index: 1;
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  background: var(--panel);
+}
+
+.history-dag-icon i:nth-child(1) { top: 12px; left: 6px; }
+.history-dag-icon i:nth-child(2) { top: 6px; right: 5px; }
+.history-dag-icon i:nth-child(3) { right: 5px; bottom: 5px; }
+
+.history-dag-button:disabled {
+  color: inherit;
 }
 
 .history-icon-button {

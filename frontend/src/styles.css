@@ -1254,6 +1254,8 @@ tr.child-row td { background-image: linear-gradient(90deg, rgba(1,232,255,0.025)
 .dag-graph-node.success { border-color: rgba(1, 181, 116, 0.38) !important; }
 .dag-graph-node.failed { border-color: rgba(255, 75, 110, 0.5) !important; }
 .dag-graph-node.running { border-color: rgba(0, 117, 255, 0.55) !important; }
+.dag-graph-node.run-selected { border-color: rgba(1,181,116,.72) !important; box-shadow: 0 0 0 1px rgba(1,181,116,.16), 0 10px 30px rgba(1,181,116,.18) !important; }
+.dag-graph-node.run-selected::after { position: absolute; z-index: 3; top: -10px; right: -10px; display: grid; width: 25px; height: 25px; place-items: center; border: 2px solid #b7ffdc; border-radius: 50%; color: #fff; background: var(--green); box-shadow: 0 0 16px rgba(1,181,116,.72); content: '✓'; font-size: 15px; font-weight: 900; line-height: 1; }
 .dag-graph .react-flow__controls { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; box-shadow: none; }
 .dag-graph .react-flow__controls-button { border-bottom-color: var(--line-soft); background: rgba(9, 23, 55, 0.96); fill: var(--text); }
 .dag-graph .react-flow__controls-button:hover { background: rgba(0, 117, 255, 0.3); }

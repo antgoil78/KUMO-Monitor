@@ -87,7 +87,7 @@ function affectedGraph(nodes, edges, nodeId, includeUpstream, includeDownstream)
   }
 }
 
-function layoutGraph(rawNodes, rawEdges, direction) {
+function layoutGraph(rawNodes, rawEdges, direction, highlightRunSelection = false) {
   const horizontal = direction === 'LR'
   const defaultSize = { width: 190, height: 64 }
   const layout = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}))
@@ -110,7 +110,7 @@ function layoutGraph(rawNodes, rawEdges, direction) {
           label: <><span className={`dag-graph-dot ${kind}`} /><span title={node.label || node.id}>{node.label || node.id}</span><small>{String(node.status || 'UNKNOWN')}</small>{node.testsTotal > 0 && <em className={`dag-test-count ${node.testsFailed ? 'failed' : 'passed'}`}>{node.testsFailed ? `${node.testsFailed}/${node.testsTotal} tests failed` : `${node.testsTotal} tests passed`}</em>}</>,
           refreshKey: [node.status, node.progress, node.modelStatus, node.testsTotal, node.testsFailed, node.testsWarning].join(':')
         },
-        className: `dag-graph-node ${kind}${compact ? ' view-model' : ''}`,
+        className: `dag-graph-node ${kind}${compact ? ' view-model' : ''}${highlightRunSelection ? ' run-selected' : ''}`,
         sourcePosition: horizontal ? 'right' : 'bottom',
         targetPosition: horizontal ? 'left' : 'top',
         style: { width: defaultSize.width, height: defaultSize.height }
@@ -133,7 +133,7 @@ function layoutGraph(rawNodes, rawEdges, direction) {
   }
 }
 
-export default function DagView({ workflow, workflowId, workflowName, partialRun = null, onNavigate }) {
+export default function DagView({ workflow, workflowId, workflowName, partialRun = null, historicalRunId = '', returnPage = 'monitor', onNavigate }) {
   const id = workflow?.workflowId || workflowId
   const name = workflow?.workflowName || workflowName || 'DBT workflow'
   const [dag, setDag] = useState(null)
@@ -151,6 +151,7 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
   const [includeUpstream, setIncludeUpstream] = useState(false)
   const [includeDownstream, setIncludeDownstream] = useState(false)
   const partialRunRef = useRef(partialRun)
+  const isHistorical = Boolean(historicalRunId && !partialRun)
   if (partialRun && partialRunRef.current?.requestId !== partialRun.requestId) {
     partialRunRef.current = partialRun
   }
@@ -192,11 +193,11 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
       return () => { cancelled = true }
     }
     setDag(null)
-    api.workflowDag(id).then(data => {
+    api.workflowDag(id, historicalRunId).then(data => {
       if (!cancelled && !partialRunRef.current) setDag(data)
     }).catch(err => !cancelled && setError(err.message))
     return () => { cancelled = true }
-  }, [id, partialRun?.requestId])
+  }, [id, partialRun?.requestId, historicalRunId])
 
   async function refreshDag() {
     if (!id || refreshingRef.current) return
@@ -204,17 +205,26 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
     setRefreshing(true)
     setError(null)
     try {
-      // Poll without the navigation-time run id so a newly started run is
-      // picked up while this page remains open.
       const currentPartialRun = partialRunRef.current
-      const data = await api.workflowDag(id, currentPartialRun?.resolvedRunId || '')
-      const isPreviousRun = currentPartialRun && (!data.run?.RUN_ID || String(data.run.RUN_ID) === String(currentPartialRun.previousRunId || ''))
-      if (!isPreviousRun) {
-        if (currentPartialRun && data.run?.RUN_ID) currentPartialRun.resolvedRunId = data.run.RUN_ID
-        const nextDag = currentPartialRun ? mergePartialDag(currentPartialRun, data) : data
-        setDag(nextDag)
-        setSelectedNode(current => current ? (nextDag.nodes || []).find(node => String(node.id) === String(current.id)) || null : null)
+      if (currentPartialRun && !currentPartialRun.resolvedRunId) {
+        // Never query the ambiguous "latest" DAG here. Resolve this request's
+        // real run ID from the live lock/event stream first, then pin to it.
+        const realtime = await api.realtimeState()
+        const candidates = [...(realtime.locks || []), ...(realtime.events || [])]
+        const match = candidates.find(item => {
+          if (String(item.workflowId || '') !== String(id)) return false
+          const candidateId = String(item.runId || '')
+          if (!candidateId || candidateId === 'pending' || candidateId === String(currentPartialRun.previousRunId || '')) return false
+          const eventTime = Date.parse(item.rememberedAt || item.requestedAt || item.lastRequestedAt || '')
+          return !Number.isFinite(eventTime) || eventTime >= Number(currentPartialRun.startedAt || 0) - 2000
+        })
+        if (!match) return
+        currentPartialRun.resolvedRunId = match.runId
       }
+      const data = await api.workflowDag(id, currentPartialRun?.resolvedRunId || '')
+      const nextDag = currentPartialRun ? mergePartialDag(currentPartialRun, data) : data
+      setDag(nextDag)
+      setSelectedNode(current => current ? (nextDag.nodes || []).find(node => String(node.id) === String(current.id)) || null : null)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -224,10 +234,10 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
   }
 
   useEffect(() => {
-    if (!id) return undefined
+    if (!id || isHistorical) return undefined
     const timer = window.setInterval(refreshDag, 5000)
     return () => window.clearInterval(timer)
-  }, [id, partialRun?.requestId])
+  }, [id, partialRun?.requestId, isHistorical])
 
   const allNodes = dag?.nodes || []
   const modelOptions = useMemo(() => [...allNodes]
@@ -282,7 +292,7 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
     if (affectedPreview) return affectedPreview.edges
     return showViewModels ? (dag?.edges || []) : collapseViewModelEdges(allNodes, dag?.edges || [])
   }, [allNodes, dag?.edges, showViewModels, affectedPreview, partialRun])
-  const graph = useMemo(() => layoutGraph(visibleNodes, visibleEdges, direction), [visibleNodes, visibleEdges, direction])
+  const graph = useMemo(() => layoutGraph(visibleNodes, visibleEdges, direction, Boolean(selectedNode && !partialRun)), [visibleNodes, visibleEdges, direction, selectedNode, partialRun])
   const graphViewKey = `${direction}|${selectedModelId}|${includeRelated}|${showViewModels}|${statusFilter}|${graph.nodes.map(node => `${node.id}:${node.data.refreshKey}`).join(',')}`
   const counts = useMemo(() => allNodes.reduce((result, node) => {
     const kind = statusKind(node.status)
@@ -317,6 +327,7 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
     const preview = partialPreview(selectedNode)
     const request = {
       requestId: `${Date.now()}-${selectedNode.id}`,
+      startedAt: Date.now(),
       command,
       previousRunId: dag?.run?.RUN_ID || '',
       ...preview
@@ -332,11 +343,20 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
     })
   }
 
-  if (!id) return <section className="page dag-page"><PageHeader breadcrumb="Pages / Workflow Monitor / DAG" title="DAG Run" subtitle="No workflow was selected." actions={<button className="button" onClick={() => onNavigate('monitor')}>← Back to monitor</button>} /><div className="alert warning">Select a workflow from Workflow Monitor to view its DAG.</div></section>
+  if (!id) return <section className="page dag-page"><PageHeader breadcrumb="Pages / Workflow Monitor / DAG" title="Latest DAG Run" subtitle="No workflow was selected." actions={<button className="button" onClick={() => onNavigate('monitor')}>← Back to monitor</button>} /><div className="alert warning">Select a workflow from Workflow Monitor to view its DAG.</div></section>
+
+  const pageTitle = partialRun ? 'DAG Run - Partial' : isHistorical ? 'Historical DAG Run' : 'Latest DAG Run'
+  const subtitle = partialRun
+    ? `${name} · DAG Run Preview`
+    : isHistorical
+      ? `${name} · Run ID ${historicalRunId}`
+      : `${name} · interactive DBT model dependencies`
+  const backPage = isHistorical ? returnPage : 'monitor'
+  const backLabel = isHistorical && returnPage === 'history' ? 'history' : 'monitor'
 
   return (
     <section className="page dag-page">
-      <PageHeader breadcrumb="Pages / Workflow Monitor / DAG" title={partialRun ? 'DAG Run - Partial' : 'DAG Run'} subtitle={partialRun ? `${name} · DAG Run Preview` : `${name} · interactive DBT model dependencies`} actions={<div className="dag-header-actions"><span className={`dag-auto-refresh ${refreshing ? 'refreshing' : ''}`}><i />{refreshing ? 'Updating…' : 'Auto refresh · 5s'}</span><button className="button" onClick={() => onNavigate('monitor')}>← Back to monitor</button></div>} />
+      <PageHeader breadcrumb={isHistorical ? 'Pages / History / DAG' : 'Pages / Workflow Monitor / DAG'} title={pageTitle} subtitle={subtitle} actions={<div className="dag-header-actions"><span className={`dag-auto-refresh ${refreshing ? 'refreshing' : ''}`}><i />{isHistorical ? 'Pinned run · no refresh' : refreshing ? 'Updating…' : 'Auto refresh · 5s'}</span><button className="button" onClick={() => onNavigate(backPage, backPage === 'history' ? { workflowName: name, workflowId: id } : {})}>← Back to {backLabel}</button></div>} />
       {error && <div className="alert error">{error}</div>}
       {notice && <div className="alert info">{notice}</div>}
       {!dag && !error && <LoadingState>Loading DAG…</LoadingState>}

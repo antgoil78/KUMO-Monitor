@@ -179,6 +179,21 @@ export default function History({ workflowName = '', workflowId = '', onNavigate
                         >
                           <span className="history-log-icon" aria-hidden="true" />
                         </button>
+                        <button
+                          type="button"
+                          className="small-button history-icon-button history-dag-button"
+                          title={`Show DAG for run ${runId}`}
+                          aria-label={`Show DAG for run ${runId}`}
+                          disabled={!runId || String(r.WORKFLOW_TYPE || 'DBT').toUpperCase() !== 'DBT'}
+                          onClick={() => onNavigate('dag', {
+                            workflowId: r.WORKFLOW_ID,
+                            workflowName,
+                            historicalRunId: runId,
+                            returnPage: 'history'
+                          })}
+                        >
+                          <span className="history-dag-icon" aria-hidden="true"><i /><i /><i /></span>
+                        </button>
                       </div>
                     </td>
                     <td><StatusBadge status={r.STATUS} /></td>

@@ -1172,7 +1172,7 @@ function ActionsModal({ workflow, onClose, onAction, pendingRun }) {
         {isDbt && (
           <button className="action-tile" onClick={() => choose('dag')}>
             <span className="action-icon">⌘</span>
-            <strong>Show DAG run</strong>
+            <strong>Latest DAG Run</strong>
             <small>Open latest DBT execution progress.</small>
           </button>
         )}
