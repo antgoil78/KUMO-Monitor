@@ -2153,7 +2153,8 @@ def workflow_history(workflow_id):
 @app.route("/api/workflows/<workflow_id>/dag")
 def workflow_dag(workflow_id):
     if config.USE_MOCK or not sf.is_configured():
-        return jsonify({"ok": True, "run": {"RUN_ID": "mock-run", "STATUS": "RUNNING"}, "nodes": [], "edges": [], "errors": []})
+        workflow = next((item for item in MOCK_MONITOR["workflows"] if item["workflowId"] == workflow_id), {})
+        return jsonify({"ok": True, "dbtCommand": workflow.get("dbtCommand", "dbt build --select tag:daily"), "run": {"RUN_ID": "mock-run", "STATUS": "RUNNING"}, "nodes": [], "edges": [], "errors": []})
     actor = _actor_context()
     try:
         # The DAG data and its audit records are all application-owned, so reuse

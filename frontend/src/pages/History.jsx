@@ -11,6 +11,7 @@ export default function History({ workflowName = '', workflowId = '', onNavigate
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [copiedRunId, setCopiedRunId] = useState('')
+  const [openingDagRunId, setOpeningDagRunId] = useState('')
   const [nowMs, setNowMs] = useState(Date.now())
   const [workflowFilter, setWorkflowFilter] = useState(workflowName)
   const [selectedWorkflowId, setSelectedWorkflowId] = useState(workflowId)
@@ -52,6 +53,25 @@ export default function History({ workflowName = '', workflowId = '', onNavigate
     }
 
     setCopiedRunId(value)
+  }
+
+  async function openDag(row, workflowName, runId) {
+    try {
+      setOpeningDagRunId(runId)
+      setError(null)
+      const monitor = await api.monitor()
+      const workflow = (monitor.workflows || []).find(item => String(item.workflowId) === String(row.WORKFLOW_ID))
+      if (!workflow) throw new Error(`Workflow ${workflowName} was not found in Workflow Monitor.`)
+      onNavigate('dag', {
+        workflow,
+        historicalRunId: runId,
+        returnPage: 'history'
+      })
+    } catch (err) {
+      setError(`Could not open DAG: ${err.message || String(err)}`)
+    } finally {
+      setOpeningDagRunId('')
+    }
   }
 
   useEffect(() => { load() }, [])
@@ -184,13 +204,8 @@ export default function History({ workflowName = '', workflowId = '', onNavigate
                           className="small-button history-icon-button history-dag-button"
                           title={`Show DAG for run ${runId}`}
                           aria-label={`Show DAG for run ${runId}`}
-                          disabled={!runId || String(r.WORKFLOW_TYPE || 'DBT').toUpperCase() !== 'DBT'}
-                          onClick={() => onNavigate('dag', {
-                            workflowId: r.WORKFLOW_ID,
-                            workflowName,
-                            historicalRunId: runId,
-                            returnPage: 'history'
-                          })}
+                          disabled={!runId || Boolean(openingDagRunId) || String(r.WORKFLOW_TYPE || 'DBT').toUpperCase() !== 'DBT'}
+                          onClick={() => openDag(r, workflowName, runId)}
                         >
                           <span className="history-dag-icon" aria-hidden="true"><i /><i /><i /></span>
                         </button>

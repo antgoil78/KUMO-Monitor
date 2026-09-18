@@ -310,7 +310,9 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
 
   function modelCommand(node) {
     const selector = `${includeUpstream ? '+' : ''}${node?.id || ''}${includeDownstream ? '+' : ''}`
-    const originalSelections = dbtSelections(workflow?.dbtCommand)
+    // The DAG response is the authoritative source for the workflow command.
+    // Navigation context is retained as a fallback for older API responses.
+    const originalSelections = dbtSelections(dag?.dbtCommand || workflow?.dbtCommand)
     const selections = originalSelections.length
       ? originalSelections.map(original => `${original},${selector}`)
       : [selector]
@@ -338,7 +340,13 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
     setSelectedNode(null)
     setDag(blankPartialDag(request))
     onNavigate('dag', {
-      workflow,
+      // History opens the DAG with the scalar workflowId/workflowName props,
+      // so `workflow` is not always available to carry into this DAG-to-DAG
+      // navigation. Preserve both forms to keep the partial run associated
+      // with its workflow regardless of where the DAG was opened.
+      workflow: workflow || { workflowId: id, workflowName: name },
+      workflowId: id,
+      workflowName: name,
       partialRun: request
     })
   }

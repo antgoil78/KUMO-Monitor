@@ -2031,6 +2031,16 @@ def clone_workflow(workflow_id):
 
 
 def load_dag_run(workflow_id, run_id=None):
+    workflow_rows = normalize_rows(_query(
+        f"""
+        SELECT DBT_COMMAND
+        FROM {config.T_WORKFLOWS}
+        WHERE WORKFLOW_ID = %(workflow_id)s
+        LIMIT 1
+        """,
+        {"workflow_id": workflow_id},
+    ))
+    dbt_command = workflow_rows[0].get("DBT_COMMAND") if workflow_rows else ""
     run_filter = "AND RUN_ID = %(run_id)s" if run_id else ""
     params = {"workflow_id": workflow_id}
     if run_id:
@@ -2052,7 +2062,7 @@ def load_dag_run(workflow_id, run_id=None):
         params,
     ))
     if not h:
-        return {"workflowId": workflow_id, "run": None, "nodes": [], "edges": [], "errors": []}
+        return {"workflowId": workflow_id, "dbtCommand": dbt_command or "", "run": None, "nodes": [], "edges": [], "errors": []}
     run = h[0]
     run_id = run.get("RUN_ID")
     progress_rows = []
@@ -2175,6 +2185,7 @@ def load_dag_run(workflow_id, run_id=None):
                 edges.append({"source": parent, "target": model})
     return {
         "workflowId": workflow_id,
+        "dbtCommand": dbt_command or "",
         "run": run,
         "nodes": nodes,
         "edges": edges,
