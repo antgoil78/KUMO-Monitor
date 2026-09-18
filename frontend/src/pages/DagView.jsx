@@ -12,6 +12,18 @@ function isViewModel(node) {
   return String(node?.label || node?.id || '').trim().toUpperCase().endsWith('_V')
 }
 
+function dbtSelections(command) {
+  const parts = String(command || '').trim().split(/\s+/).filter(Boolean)
+  const selectionIndex = parts.findIndex(part => ['-s', '--select'].includes(part))
+  if (selectionIndex < 0) return []
+  const selections = []
+  for (const part of parts.slice(selectionIndex + 1)) {
+    if (part.startsWith('-')) break
+    selections.push(part.replace(/^['"]|['"]$/g, ''))
+  }
+  return selections
+}
+
 function collapseViewModelEdges(rawNodes, rawEdges) {
   const byId = new Map(rawNodes.map(node => [String(node.id), node]))
   const outgoing = new Map()
@@ -41,6 +53,38 @@ function collapseViewModelEdges(rawNodes, rawEdges) {
     }
   }
   return Array.from(collapsed.values())
+}
+
+function affectedGraph(nodes, edges, nodeId, includeUpstream, includeDownstream) {
+  if (!nodeId) return { nodes: [], edges: [] }
+  const selectedIds = new Set([String(nodeId)])
+  const upstream = new Map()
+  const downstream = new Map()
+  for (const edge of edges || []) {
+    const source = String(edge.source)
+    const target = String(edge.target)
+    if (!upstream.has(target)) upstream.set(target, [])
+    if (!downstream.has(source)) downstream.set(source, [])
+    upstream.get(target).push(source)
+    downstream.get(source).push(target)
+  }
+  const collect = connections => {
+    const queue = [String(nodeId)]
+    while (queue.length) {
+      const current = queue.shift()
+      for (const related of connections.get(current) || []) {
+        if (selectedIds.has(related)) continue
+        selectedIds.add(related)
+        queue.push(related)
+      }
+    }
+  }
+  if (includeUpstream) collect(upstream)
+  if (includeDownstream) collect(downstream)
+  return {
+    nodes: (nodes || []).filter(node => selectedIds.has(String(node.id))),
+    edges: (edges || []).filter(edge => selectedIds.has(String(edge.source)) && selectedIds.has(String(edge.target)))
+  }
 }
 
 function layoutGraph(rawNodes, rawEdges, direction) {
@@ -89,7 +133,7 @@ function layoutGraph(rawNodes, rawEdges, direction) {
   }
 }
 
-export default function DagView({ workflow, workflowId, workflowName, onNavigate }) {
+export default function DagView({ workflow, workflowId, workflowName, partialRun = null, onNavigate }) {
   const id = workflow?.workflowId || workflowId
   const name = workflow?.workflowName || workflowName || 'DBT workflow'
   const [dag, setDag] = useState(null)
@@ -103,17 +147,56 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
   const [direction, setDirection] = useState('LR')
   const [selectedNode, setSelectedNode] = useState(null)
   const [notice, setNotice] = useState('')
+  const [modelAction, setModelAction] = useState('run')
+  const [includeUpstream, setIncludeUpstream] = useState(false)
+  const [includeDownstream, setIncludeDownstream] = useState(false)
+  const partialRunRef = useRef(partialRun)
+  if (partialRun && partialRunRef.current?.requestId !== partialRun.requestId) {
+    partialRunRef.current = partialRun
+  }
+
+  function blankPartialDag(request, status = 'INITIATING', runId = 'pending') {
+    return {
+      run: { RUN_ID: runId, STATUS: status },
+      nodes: (request?.nodes || []).map(node => ({ ...node, status: 'QUEUED', modelStatus: null, progress: 'QUEUED', testsTotal: 0, testsFailed: 0, testsWarning: 0 })),
+      edges: request?.edges || [],
+      tests: [], errors: [], modelDagComplete: false, partial: true
+    }
+  }
+
+  function mergePartialDag(request, liveDag) {
+    const liveById = new Map((liveDag?.nodes || []).map(node => [String(node.id), node]))
+    const preview = blankPartialDag(request, liveDag?.run?.STATUS || 'QUEUED', liveDag?.run?.RUN_ID || 'pending')
+    return {
+      ...liveDag,
+      partial: true,
+      nodes: preview.nodes.map(node => ({ ...node, ...(liveById.get(String(node.id)) || {}) })),
+      edges: preview.edges
+    }
+  }
 
   useEffect(() => {
     if (!id) return
     let cancelled = false
-    setDag(null)
     setError(null)
-    api.workflowDag(id, workflow?.lastRunId).then(data => {
-      if (!cancelled) setDag(data)
+    if (partialRun) {
+      setDag(blankPartialDag(partialRun))
+      api.runWorkflow(id, name, true, partialRun.command).then(result => {
+        if (!cancelled) {
+          if (result.runId && result.runId !== 'pending') partialRunRef.current.resolvedRunId = result.runId
+          setDag(current => ({ ...current, run: { RUN_ID: result.runId || 'pending', STATUS: result.status || 'INITIATING' } }))
+        }
+      }).catch(err => {
+        if (!cancelled) setError(err.message || String(err))
+      })
+      return () => { cancelled = true }
+    }
+    setDag(null)
+    api.workflowDag(id).then(data => {
+      if (!cancelled && !partialRunRef.current) setDag(data)
     }).catch(err => !cancelled && setError(err.message))
     return () => { cancelled = true }
-  }, [id, workflow?.lastRunId])
+  }, [id, partialRun?.requestId])
 
   async function refreshDag() {
     if (!id || refreshingRef.current) return
@@ -123,9 +206,15 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
     try {
       // Poll without the navigation-time run id so a newly started run is
       // picked up while this page remains open.
-      const data = await api.workflowDag(id)
-      setDag(data)
-      setSelectedNode(current => current ? (data.nodes || []).find(node => String(node.id) === String(current.id)) || null : null)
+      const currentPartialRun = partialRunRef.current
+      const data = await api.workflowDag(id, currentPartialRun?.resolvedRunId || '')
+      const isPreviousRun = currentPartialRun && (!data.run?.RUN_ID || String(data.run.RUN_ID) === String(currentPartialRun.previousRunId || ''))
+      if (!isPreviousRun) {
+        if (currentPartialRun && data.run?.RUN_ID) currentPartialRun.resolvedRunId = data.run.RUN_ID
+        const nextDag = currentPartialRun ? mergePartialDag(currentPartialRun, data) : data
+        setDag(nextDag)
+        setSelectedNode(current => current ? (nextDag.nodes || []).find(node => String(node.id) === String(current.id)) || null : null)
+      }
     } catch (err) {
       setError(err.message)
     } finally {
@@ -138,13 +227,19 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
     if (!id) return undefined
     const timer = window.setInterval(refreshDag, 5000)
     return () => window.clearInterval(timer)
-  }, [id, workflow?.lastRunId])
+  }, [id, partialRun?.requestId])
 
   const allNodes = dag?.nodes || []
   const modelOptions = useMemo(() => [...allNodes]
     .filter(node => !isViewModel(node))
     .sort((left, right) => String(left.label || left.id).localeCompare(String(right.label || right.id))), [allNodes])
+  const affectedPreview = useMemo(
+    () => selectedNode ? affectedGraph(allNodes, dag?.edges || [], selectedNode.id, includeUpstream, includeDownstream) : null,
+    [allNodes, dag?.edges, selectedNode, includeUpstream, includeDownstream]
+  )
   const visibleNodes = useMemo(() => {
+    if (partialRun) return allNodes.filter(node => !statusFilter || statusKind(node.status) === statusFilter)
+    if (affectedPreview) return affectedPreview.nodes.filter(node => !statusFilter || statusKind(node.status) === statusFilter)
     const relatedIds = new Set()
     if (selectedModelId) {
       relatedIds.add(String(selectedModelId))
@@ -181,10 +276,12 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
       const matchesViewSetting = showViewModels || !isViewModel(node)
       return matchesSearch && matchesViewSetting && (!statusFilter || statusKind(node.status) === statusFilter)
     })
-  }, [allNodes, dag?.edges, selectedModelId, includeRelated, showViewModels, statusFilter])
-  const visibleEdges = useMemo(() => showViewModels
-    ? (dag?.edges || [])
-    : collapseViewModelEdges(allNodes, dag?.edges || []), [allNodes, dag?.edges, showViewModels])
+  }, [allNodes, dag?.edges, selectedModelId, includeRelated, showViewModels, statusFilter, affectedPreview, partialRun])
+  const visibleEdges = useMemo(() => {
+    if (partialRun) return dag?.edges || []
+    if (affectedPreview) return affectedPreview.edges
+    return showViewModels ? (dag?.edges || []) : collapseViewModelEdges(allNodes, dag?.edges || [])
+  }, [allNodes, dag?.edges, showViewModels, affectedPreview, partialRun])
   const graph = useMemo(() => layoutGraph(visibleNodes, visibleEdges, direction), [visibleNodes, visibleEdges, direction])
   const graphViewKey = `${direction}|${selectedModelId}|${includeRelated}|${showViewModels}|${statusFilter}|${graph.nodes.map(node => `${node.id}:${node.data.refreshKey}`).join(',')}`
   const counts = useMemo(() => allNodes.reduce((result, node) => {
@@ -201,16 +298,45 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
   const testsFailed = allNodes.reduce((total, node) => total + Number(node.testsFailed || 0), 0)
   const percent = allNodes.length ? Math.round((finished / allNodes.length) * 100) : 0
 
-  function placeholder(action) {
-    setNotice(`${action} is a placeholder and is not connected yet.`)
-    window.setTimeout(() => setNotice(''), 3500)
+  function modelCommand(node) {
+    const selector = `${includeUpstream ? '+' : ''}${node?.id || ''}${includeDownstream ? '+' : ''}`
+    const originalSelections = dbtSelections(workflow?.dbtCommand)
+    const selections = originalSelections.length
+      ? originalSelections.map(original => `${original},${selector}`)
+      : [selector]
+    return `dbt ${modelAction} --select ${selections.join(' ')}`
+  }
+
+  function partialPreview(node) {
+    return affectedGraph(dag?.nodes || [], dag?.edges || [], node.id, includeUpstream, includeDownstream)
+  }
+
+  function startSelectedModel() {
+    if (!selectedNode) return
+    const command = modelCommand(selectedNode)
+    const preview = partialPreview(selectedNode)
+    const request = {
+      requestId: `${Date.now()}-${selectedNode.id}`,
+      command,
+      previousRunId: dag?.run?.RUN_ID || '',
+      ...preview
+    }
+    // Invalidate any normal-DAG request already in flight before navigation is
+    // rendered, so it cannot replace the new queued preview with the old run.
+    partialRunRef.current = request
+    setSelectedNode(null)
+    setDag(blankPartialDag(request))
+    onNavigate('dag', {
+      workflow,
+      partialRun: request
+    })
   }
 
   if (!id) return <section className="page dag-page"><PageHeader breadcrumb="Pages / Workflow Monitor / DAG" title="DAG Run" subtitle="No workflow was selected." actions={<button className="button" onClick={() => onNavigate('monitor')}>← Back to monitor</button>} /><div className="alert warning">Select a workflow from Workflow Monitor to view its DAG.</div></section>
 
   return (
     <section className="page dag-page">
-      <PageHeader breadcrumb="Pages / Workflow Monitor / DAG" title="DAG Run" subtitle={`${name} · interactive DBT model dependencies`} actions={<div className="dag-header-actions"><span className={`dag-auto-refresh ${refreshing ? 'refreshing' : ''}`}><i />{refreshing ? 'Updating…' : 'Auto refresh · 5s'}</span><button className="button" onClick={() => onNavigate('monitor')}>← Back to monitor</button></div>} />
+      <PageHeader breadcrumb="Pages / Workflow Monitor / DAG" title={partialRun ? 'DAG Run - Partial' : 'DAG Run'} subtitle={partialRun ? `${name} · DAG Run Preview` : `${name} · interactive DBT model dependencies`} actions={<div className="dag-header-actions"><span className={`dag-auto-refresh ${refreshing ? 'refreshing' : ''}`}><i />{refreshing ? 'Updating…' : 'Auto refresh · 5s'}</span><button className="button" onClick={() => onNavigate('monitor')}>← Back to monitor</button></div>} />
       {error && <div className="alert error">{error}</div>}
       {notice && <div className="alert info">{notice}</div>}
       {!dag && !error && <LoadingState>Loading DAG…</LoadingState>}
@@ -263,11 +389,19 @@ export default function DagView({ workflow, workflowId, workflowName, onNavigate
               <span>Model status <strong>{selectedNode.modelStatus || '—'}</strong></span>
               <span>Tests <strong className={selectedNode.testsFailed ? 'failed-text' : ''}>{selectedNode.testsTotal ? `${selectedNode.testsTotal - selectedNode.testsFailed - (selectedNode.testsWarning || 0)} success · ${selectedNode.testsWarning || 0} warning · ${selectedNode.testsFailed} error` : 'None'}</strong></span>
             </div>
-            <div className="dag-model-actions">
-              <button className="button primary" onClick={() => placeholder('Restart model')}>↻ Restart</button>
-              <button className="button" onClick={() => placeholder('View log')}>▤ View log</button>
+            <div className="dag-model-run-controls">
+              <label><span>Action</span><select value={modelAction} onChange={event => setModelAction(event.target.value)}><option value="run">Run</option><option value="build">Build</option><option value="test">Test</option></select></label>
+              <div className="dag-model-direction-options">
+                <label className={includeUpstream ? 'active' : ''}><input type="checkbox" checked={includeUpstream} onChange={event => setIncludeUpstream(event.target.checked)} /><span>UPSTREAM</span></label>
+                <label className={includeDownstream ? 'active' : ''}><input type="checkbox" checked={includeDownstream} onChange={event => setIncludeDownstream(event.target.checked)} /><span>DOWNSTREAM</span></label>
+              </div>
+              <div className="dag-model-affected-count">{affectedPreview?.nodes.length || 1} affected model{affectedPreview?.nodes.length === 1 ? '' : 's'}</div>
+              <div className="dag-model-command"><span>Command</span><code>{modelCommand(selectedNode)}</code></div>
             </div>
-            <small>Actions are preview placeholders.</small>
+            <div className="dag-model-actions">
+              <button className="button primary" onClick={startSelectedModel}>{`▶ ${modelAction[0].toUpperCase()}${modelAction.slice(1)} model`}</button>
+            </div>
+            <small>This starts a new workflow run with child workflows disabled.</small>
           </aside>}
         </div>
         {dag.errors?.length > 0 && <div className="modal-table-wrap dag-error-table"><table className="workflow-table compact"><thead><tr><th>Time</th><th>Model</th><th>Error</th></tr></thead><tbody>{dag.errors.map((item, index) => <tr key={`${item.ORIGIN}-${index}`}><td>{item.LOG_DTTM || '—'}</td><td>{item.ORIGIN}</td><td>{String(item.MESSAGE || '').slice(0, 300)}</td></tr>)}</tbody></table></div>}

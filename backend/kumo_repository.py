@@ -1312,6 +1312,7 @@ def _order_and_enrich(rows):
             "workflowGroup": row.get("WORKFLOW_GROUP") or "Ungrouped",
             "workflowName": row.get("WORKFLOW_NAME") or "",
             "workflowType": row.get("WORKFLOW_TYPE") or "DBT",
+            "dbtCommand": row.get("DBT_COMMAND") or "",
             "description": row.get("DESCRIPTION") or "",
             "workflowEnabled": bool(row.get("WORKFLOW_ENABLED", True)),
             "taskEnabled": bool(row.get("TASK_ENABLED", True)),
