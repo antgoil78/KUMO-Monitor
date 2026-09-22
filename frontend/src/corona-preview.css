@@ -56,6 +56,9 @@ body:has(.corona-preview) .lim-modal-backdrop { background: #000 !important; }
 .corona-preview .brand { height: 78px; padding: 0 4px 14px; margin-bottom: 16px; border-bottom: 1px solid var(--corona-border); }
 .corona-preview .brand-lockup { height: 60px; }
 .corona-preview .sidebar.collapsed .brand { height: 64px; padding-bottom: 14px; }
+.corona-preview .brand { background: transparent; }
+.corona-preview .about-hero { border-color: #2c2e33; border-radius: 3px; background: radial-gradient(circle at 50% 35%, rgba(0,117,255,.2), transparent 52%), #191c24; }
+.corona-preview .about-info-card { border-color: #2c2e33; border-radius: 3px; background: #191c24; }
 .corona-preview .brand-mark { width: 34px; height: 34px; border-radius: 50%; background: var(--corona-red); box-shadow: none; color: #fff; }
 .corona-preview .brand-dot { font-size: 12px; }
 .corona-preview .brand-kumo { color: #fff; font-size: 20px; font-weight: 700; letter-spacing: .08em; }

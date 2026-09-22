@@ -36,6 +36,8 @@ app.register_blueprint(file_ingestion_bp)
 logging.basicConfig(level=logging.INFO)
 
 _RUNTIME_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+_STARTED_AT = datetime.now(timezone.utc)
+_STARTED_MONOTONIC = time.monotonic()
 _active_users_lock = Lock()
 _active_users = {}
 _session_cache_lock = Lock()
@@ -101,6 +103,9 @@ def _build_info():
     return {
         "buildSha": os.getenv("KUMO_BUILD_SHA", "").strip() or "local",
         "imageVersion": os.getenv("KUMO_IMAGE_VERSION", "").strip() or "latest",
+        "containerId": socket.gethostname(),
+        "startedAt": _STARTED_AT.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "uptimeSeconds": max(0, int(time.monotonic() - _STARTED_MONOTONIC)),
         "runtimeId": _RUNTIME_ID,
     }
 

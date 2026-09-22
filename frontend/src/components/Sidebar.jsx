@@ -28,7 +28,7 @@ export default function Sidebar({ activePage, onNavigate, session, buildInfo, co
 
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
-      <div className="brand">
+      <button type="button" className="brand" onClick={() => onNavigate('about')} aria-label="About KUMO Monitor">
         <img
           className="brand-lockup"
           src="/brand/kumo-monitor-logotype.png"
@@ -37,7 +37,7 @@ export default function Sidebar({ activePage, onNavigate, session, buildInfo, co
         <span className="brand-icon" aria-hidden="true">
           <img src="/brand/kumo-monitor-logotype.png" alt="" />
         </span>
-      </div>
+      </button>
       <div className="sidebar-user" title={`${session?.displayName || session?.userName || 'KUMO user'} · ${session?.roleName || 'Unknown role'}`}>
         <span>{String(session?.displayName || session?.userName || 'K').slice(0, 1).toUpperCase()}</span>
         <div><strong>{session?.displayName || session?.userName || 'KUMO user'}</strong><small>{session?.roleName || 'Snowflake operations'}</small></div>

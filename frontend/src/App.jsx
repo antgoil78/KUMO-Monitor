@@ -14,6 +14,7 @@ import Admin from './pages/Admin.jsx'
 import Settings from './pages/Settings.jsx'
 import Dependencies from './pages/Dependencies.jsx'
 import EnvironmentSettings from './pages/EnvironmentSettings.jsx'
+import About from './pages/About.jsx'
 
 const pages = {
   dashboard: Dashboard,
@@ -28,7 +29,8 @@ const pages = {
   admin: Admin,
   settings: Settings,
   dependencies: Dependencies,
-  environmentSettings: EnvironmentSettings
+  environmentSettings: EnvironmentSettings,
+  about: About
 }
 
 export default function App() {
@@ -128,7 +130,7 @@ export default function App() {
             </div>
           </div>
         )}
-        <Page {...pageContext} onNavigate={navigate} />
+        <Page {...pageContext} onNavigate={navigate} buildInfo={buildInfo} />
       </main>
     </div>
   )
