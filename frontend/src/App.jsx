@@ -45,6 +45,8 @@ export default function App() {
   const [pageContext, setPageContext] = useState({})
   const [topbarSession, setTopbarSession] = useState(null)
   const [buildInfo, setBuildInfo] = useState(null)
+  const [realtimeConnected, setRealtimeConnected] = useState(false)
+  const [snowflakeStatus, setSnowflakeStatus] = useState(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('kumoSidebarCollapsed') === 'true')
   const Page = pages[page] || Dashboard
 
@@ -52,17 +54,33 @@ export default function App() {
   // including pages that do not otherwise consume realtime status events.
   useEffect(() => {
     let cancelled = false
-    const source = createKumoEventSource((event) => {
-      window.dispatchEvent(new CustomEvent('kumo:realtime', { detail: event }))
-    }, () => {}, { page })
+    let source = null
+    setRealtimeConnected(false)
+    // Register this browser's current Snowflake identity before opening the
+    // presence stream, so run requests cannot inherit an older client actor.
     api.session().catch(() => null).then(sessionData => {
-      if (!cancelled && sessionData) setTopbarSession(sessionData)
+      if (cancelled) return
+      if (sessionData) setTopbarSession(sessionData)
+      source = createKumoEventSource((event) => {
+        if (event?.type === 'connected') setRealtimeConnected(true)
+        window.dispatchEvent(new CustomEvent('kumo:realtime', { detail: event }))
+      }, () => setRealtimeConnected(false), { page })
     })
     api.health().catch(() => null).then(healthData => {
       if (!cancelled && healthData) setBuildInfo(healthData)
     })
     return () => { cancelled = true; source?.close() }
   }, [page])
+
+  useEffect(() => {
+    let cancelled = false
+    const loadSnowflakeStatus = () => api.snowflakePing()
+      .then(data => { if (!cancelled) setSnowflakeStatus(data) })
+      .catch(error => { if (!cancelled) setSnowflakeStatus({ ok: false, error: error.message }) })
+    loadSnowflakeStatus()
+    const id = window.setInterval(loadSnowflakeStatus, 10000)
+    return () => { cancelled = true; window.clearInterval(id) }
+  }, [])
 
   useEffect(() => {
     const renew = () => api.activity().catch(() => {})
@@ -125,8 +143,9 @@ export default function App() {
           <div className="corona-topbar">
             <button type="button" className="corona-menu" aria-label={sidebarCollapsed ? 'Expand side menu' : 'Collapse side menu'} title={sidebarCollapsed ? 'Expand side menu' : 'Collapse side menu'} aria-expanded={!sidebarCollapsed} onClick={toggleSidebar}>☰</button>
             <div className="corona-top-actions">
-              <span className="corona-live"><i /> Live</span>
-              <button type="button" aria-label="Notifications">♢<i /></button>
+              <span className={`corona-connection ${realtimeConnected ? 'connected' : 'disconnected'}`} title="Live server-to-browser event stream"><i /> Realtime {realtimeConnected ? 'connected' : 'reconnecting'}</span>
+              <span className={`corona-connection ${snowflakeStatus?.ok ? 'connected' : 'disconnected'}`} title={snowflakeStatus?.error || `Snowflake ${snowflakeStatus?.mode || 'connection'}`}><i /> Snowflake {snowflakeStatus?.ok ? 'connected' : 'unavailable'}</span>
+              <button type="button" className={`corona-settings-button ${page === 'settings' ? 'active' : ''}`} aria-label="Open settings" title="Settings" onClick={() => navigate('settings')}><span aria-hidden="true">⚙</span></button>
             </div>
           </div>
         )}

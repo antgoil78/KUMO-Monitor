@@ -20,7 +20,7 @@ const statusOptions = [
 const activeRunStatuses = new Set(['INITIATING', 'RUNNING', 'IN_PROGRESS', 'EXECUTING', 'QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED', 'STARTING'])
 const runningRunStatuses = new Set(['RUNNING', 'IN_PROGRESS', 'EXECUTING', 'STARTING'])
 const terminalRunStatuses = new Set(['SUCCESS', 'SUCCEEDED', 'COMPLETED', 'OK', 'FAILED', 'FAILURE', 'ERROR', 'CANCELLED', 'CANCELED', 'SKIPPED'])
-const terminalOverlayTtlMs = 30000
+const terminalOverlayTtlMs = 120000
 const initiatingDisplayMs = 1000
 const statusRank = {
   INITIATING: 10,
@@ -60,6 +60,7 @@ function liveRunFromEvent(data) {
     status,
     requestedAt: data?.requestedAt || data?.lock?.requestedAt || new Date().toISOString(),
     requestedBy: data?.requestedBy || data?.lock?.requestedBy || data?.actor?.displayName || data?.actor?.userName || '',
+    requestedByUser: data?.requestedByUser || data?.lock?.requestedByUser || data?.actor?.userName || '',
     lastStartTime: data?.lastStartTime || data?.lock?.lastStartTime || null,
     lastEndTime: data?.lastEndTime || data?.lock?.lastEndTime || null,
     message: data?.message || data?.lock?.message || '',
@@ -114,14 +115,15 @@ function upsertLock(locks, lock) {
   const nextStatus = normalizeStatus(lock.status, '')
   const previousRun = String(previous.runId || '')
   const nextRun = String(lock.runId || previousRun || '')
+  const sameRun = !previousRun || !nextRun || previousRun === nextRun
   const previousSequence = Number(previous.sequence || 0)
   const nextSequence = Number(lock.sequence || 0)
   if (previousSequence && nextSequence && previousRun === nextRun && previousSequence > nextSequence) {
     return Array.from(next.values())
   }
   const isDowngrade = previousStatus && nextStatus && previousRun === nextRun && (statusRank[previousStatus] || 0) > (statusRank[nextStatus] || 0)
-  const requestedBy = lock.requestedBy || previous.requestedBy || ''
-  const requestedByUser = lock.requestedByUser || previous.requestedByUser || ''
+  const requestedBy = lock.requestedBy || (sameRun ? previous.requestedBy : '') || ''
+  const requestedByUser = lock.requestedByUser || (sameRun ? previous.requestedByUser : '') || ''
   const sequence = Math.max(previousSequence, nextSequence)
   const merged = isDowngrade
     ? { ...lock, ...previous, requestedBy, requestedByUser, sequence, status: previousStatus, updatedAt: previous.updatedAt || now }
@@ -1249,8 +1251,14 @@ export default function Monitor({ onNavigate }) {
           if (pendingIsAhead) continue
           const actualBusy = activeRunStatuses.has(status)
           const runVisible = pending.runId && pending.runId !== 'pending' && String(wf.lastRunId || '') === String(pending.runId)
-          const expired = now - Number(pending.startedAt || now) > 120000
+          const pendingTimestamp = terminalRunStatuses.has(pendingStatus)
+            ? (pending.completedAt || pending.startedAt)
+            : pending.startedAt
+          const expired = now - Number(pendingTimestamp || now) > terminalOverlayTtlMs
 
+          // A terminal realtime event is newer than a cached RUNNING snapshot.
+          // Keep it until Snowflake's authoritative snapshot reaches terminal.
+          if (terminalRunStatuses.has(pendingStatus) && runVisible && actualBusy && !expired) continue
           if (actualBusy || (runVisible && terminalRunStatuses.has(status)) || expired) {
             delete next[wf.workflowId]
           }
@@ -1284,6 +1292,8 @@ export default function Monitor({ onNavigate }) {
           sequence: Math.max(Number(previous.sequence || 0), Number(liveRun.sequence || 0)),
           lastStartTime: liveRun.lastStartTime || previous.lastStartTime || null,
           lastEndTime: liveRun.lastEndTime || previous.lastEndTime || null,
+          requestedBy: liveRun.requestedBy || previous.requestedBy || '',
+          requestedByUser: liveRun.requestedByUser || previous.requestedByUser || '',
           completedAt: Date.now()
         }
       }
@@ -1326,6 +1336,8 @@ export default function Monitor({ onNavigate }) {
           sequence: Math.max(previousSequence, liveSequence),
           lastStartTime: liveRun.lastStartTime || prev[liveRun.workflowId]?.lastStartTime || null,
           lastEndTime: liveRun.lastEndTime || prev[liveRun.workflowId]?.lastEndTime || null,
+          requestedBy: liveRun.requestedBy || previous.requestedBy || '',
+          requestedByUser: liveRun.requestedByUser || previous.requestedByUser || '',
           completedAt: terminalRunStatuses.has(normalizeStatus(liveRun.status, '-')) ? Date.now() : prev[liveRun.workflowId]?.completedAt
         }
       }
@@ -1379,6 +1391,11 @@ export default function Monitor({ onNavigate }) {
             const status = normalizeStatus(wf.lastStatus, '-')
             const pendingStatus = normalizeStatus(pending.status, '')
             const sameRun = pending.runId && pending.runId !== 'pending' && String(wf.lastRunId || '') === String(pending.runId)
+            const pendingTerminal = terminalRunStatuses.has(pendingStatus)
+            const pendingExpired = Date.now() - Number(pending.completedAt || pending.startedAt || Date.now()) > terminalOverlayTtlMs
+            if (pendingTerminal && sameRun && activeRunStatuses.has(status) && !pendingExpired) {
+              continue
+            }
             if (sameRun && (statusRank[pendingStatus] || 0) > (statusRank[status] || 0)) {
               continue
             }
@@ -1467,7 +1484,7 @@ export default function Monitor({ onNavigate }) {
       }
       const pendingLock = {
         ...pending,
-        requestedBy: pending.requestedBy || view.runLock?.requestedBy || view.lastRequestedBy || '',
+        requestedBy: pending.requestedBy || view.runLock?.requestedBy || '',
         requestedByUser: pending.requestedByUser || view.runLock?.requestedByUser || ''
       }
       return {

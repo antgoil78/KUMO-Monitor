@@ -156,6 +156,7 @@ export default function History({ workflowName = '', workflowId = '', onNavigate
                 </th>
                 <th>Status</th>
                 <th>Requested by</th>
+                <th>Trigger</th>
                 <th>Execution Time</th>
                 <th>Start</th>
                 <th>End</th>
@@ -213,6 +214,7 @@ export default function History({ workflowName = '', workflowId = '', onNavigate
                     </td>
                     <td><StatusBadge status={r.STATUS} /></td>
                     <td>{r.REQUESTED_BY || '—'}</td>
+                    <td><span className="history-trigger">{String(r.TRIGGER_SOURCE || '—').replaceAll('_', ' ')}</span></td>
                     <td className="duration-cell">{elapsedDuration(r.START_TIME, r.END_TIME, r.STATUS, nowMs)}</td>
                     <td>{formatDateTime(r.START_TIME || r.REQUESTED_AT)}</td>
                     <td>{formatDateTime(r.END_TIME)}</td>

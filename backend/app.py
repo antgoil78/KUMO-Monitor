@@ -211,6 +211,11 @@ def _upsert_live_run_lock(lock):
         next_status = str(item.get("status") or "").upper()
         previous_run = str(previous.get("runId") or "")
         next_run = str(item.get("runId") or previous_run or "")
+        # A workflow's local lock slot is reused for each run. Never let actor,
+        # timing, or status fields from the preceding run leak into a new one.
+        if previous_run and next_run and previous_run != next_run:
+            previous = {}
+            previous_status = ""
         if (
             previous_status
             and next_status
@@ -1814,6 +1819,13 @@ def _run_workflow_impl(workflow_id, payload, request_method):
     workflow_name = payload.get("workflowName") or workflow_id
     trigger_source = str(payload.get("triggerSource") or "MANUAL").upper()
     requested_at = _now_iso()
+    actor = _actor_context()
+    requested_by = (
+        payload.get("requestedBy")
+        or actor.get("displayName")
+        or actor.get("userName")
+        or "UNKNOWN"
+    )
 
     if not config.USE_MOCK and sf.is_configured():
         existing_lock = _active_local_run_lock(workflow_id)
@@ -1844,9 +1856,9 @@ def _run_workflow_impl(workflow_id, payload, request_method):
             "workflowName": workflow_name,
             "runId": "pending",
             "status": "INITIATING",
-            "requestedBy": payload.get("requestedBy") or "",
-            "requestedByUser": "",
-            "requestedByRole": "",
+            "requestedBy": requested_by,
+            "requestedByUser": actor.get("userName") or "",
+            "requestedByRole": actor.get("roleName") or "",
             "requestedAt": requested_at,
             "message": "Initiating. Validating request.",
         })
@@ -1856,17 +1868,10 @@ def _run_workflow_impl(workflow_id, payload, request_method):
             "runId": "pending",
             "status": "INITIATING",
             "lock": lock,
-            "requestedBy": lock.get("requestedBy") or "",
+            "actor": actor,
+            "requestedBy": requested_by,
             "requestedAt": requested_at,
         })
-
-    actor = _actor_context()
-    requested_by = (
-        payload.get("requestedBy")
-        or actor.get("displayName")
-        or actor.get("userName")
-        or "UNKNOWN"
-    )
 
     app.logger.info(
         "KUMO_ACTION action=run_workflow method=%s workflow_id=%s actor=%s user=%s role=%s caller_rights=%s",

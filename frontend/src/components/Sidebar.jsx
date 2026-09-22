@@ -12,8 +12,7 @@ const navItems = [
     { key: 'limReload', label: 'Load / Reload', icon: '↻' }
   ] },
   { key: 'notifications', label: 'Notifications', icon: '✉' },
-  { key: 'admin', label: 'Application Log', icon: '▤' },
-  { key: 'settings', label: 'Settings', icon: '⚙' }
+  { key: 'admin', label: 'Application Log', icon: '▤' }
 ]
 
 export default function Sidebar({ activePage, onNavigate, session, buildInfo, collapsed = false }) {
