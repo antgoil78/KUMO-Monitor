@@ -114,6 +114,46 @@ def _now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def _json_size_bytes(value):
+    try:
+        return len(json.dumps(value, default=str, separators=(",", ":")).encode("utf-8"))
+    except Exception:
+        return 0
+
+
+def _process_memory_snapshot():
+    fields = {"VmRSS": "rssBytes", "VmHWM": "peakRssBytes", "VmSize": "virtualBytes"}
+    result = {target: None for target in fields.values()}
+    try:
+        with open("/proc/self/status", "r", encoding="utf-8") as status_file:
+            for line in status_file:
+                name, _, raw_value = line.partition(":")
+                if name not in fields:
+                    continue
+                value_kb = int(raw_value.strip().split()[0])
+                result[fields[name]] = value_kb * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return result
+
+
+def _backend_cache_snapshot():
+    monitor_payload = monitor_cache.get()
+    dashboard_payload = _dashboard_cache_snapshot()
+    return {
+        "monitor": {
+            **monitor_cache.diagnostics(),
+            "source": monitor_payload.get("source"),
+            "workflowCount": len(monitor_payload.get("workflows") or []),
+            "payloadBytes": _json_size_bytes(monitor_payload),
+        },
+        "dashboard": {
+            **_dashboard_cache_diagnostics(),
+            "payloadBytes": _json_size_bytes(dashboard_payload),
+        },
+    }
+
+
 def _next_run_event_sequence(workflow_id):
     workflow_id = str(workflow_id or "")
     with _run_event_sequences_lock:
@@ -1372,6 +1412,8 @@ def _health_snapshot():
         "refreshSeconds": _runtime_refresh_settings()["refreshSeconds"],
         "db": config.DB,
         "schema": config.SCHEMA,
+        "processMemory": _process_memory_snapshot(),
+        "backendCaches": _backend_cache_snapshot(),
     }
 
 
