@@ -16,7 +16,7 @@ const navItems = [
   { key: 'settings', label: 'Settings', icon: '⚙' }
 ]
 
-export default function Sidebar({ activePage, onNavigate, session }) {
+export default function Sidebar({ activePage, onNavigate, session, collapsed = false }) {
   const [openGroups, setOpenGroups] = useState(() => Object.fromEntries(
     navItems.filter(item => item.children).map(item => [item.key, item.children.some(child => child.key === activePage)])
   ))
@@ -27,7 +27,7 @@ export default function Sidebar({ activePage, onNavigate, session }) {
   }, [activePage])
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="brand">
         <div className="brand-mark"><span className="brand-dot">◆</span></div>
         <div>

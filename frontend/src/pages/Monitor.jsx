@@ -1120,7 +1120,7 @@ function RunWorkflowModal({ workflow, pendingRun, onClose, onRun }) {
             {previewLoading && <LoadingState>Resolving the current selection. This can take about a minute…</LoadingState>}
             {previewError && <div className="alert error">{previewError}</div>}
             {!preview && !previewLoading && !previewError && <button type="button" className="button preview-load-button" onClick={loadPreview}>◇ Load DAG preview</button>}
-            {preview && !previewLoading && <><button type="button" className="small-button preview-refresh-button" onClick={loadPreview}>↻ Refresh preview</button><EmbeddedDagPreview preview={preview} /></>}
+            {preview && !previewLoading && <><button type="button" className="small-button preview-refresh-button" onClick={loadPreview}>↻ Refresh</button><EmbeddedDagPreview preview={preview} /></>}
           </div>
         </details>}
         <div className="modal-actions">
@@ -1595,7 +1595,7 @@ export default function Monitor({ onNavigate }) {
   }
   return (
     <section className="page monitor-page">
-      <PageHeader breadcrumb="Pages / Workflow Monitor" title="Workflow Monitor" subtitle="Live operational control for KUMO workflow runs, schedules and dependencies." actions={<button className="button refresh-button" onClick={() => load(true)}>↻ Refresh now</button>} />
+      <PageHeader breadcrumb="Pages / Workflow Monitor" title="Workflow Monitor" subtitle="Live operational control for KUMO workflow runs, schedules and dependencies." actions={<button className="button refresh-button" onClick={() => load(true)}>↻ Refresh</button>} />
       {error && <div className="alert error">{error}</div>}
       {payload?.error && <div className="alert warning">Backend fallback: {payload.error}</div>}
       {actionMessage && <div className="alert info">{actionMessage}</div>}

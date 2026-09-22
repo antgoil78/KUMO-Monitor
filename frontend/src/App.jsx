@@ -42,6 +42,7 @@ export default function App() {
   const [page, setPage] = useState(pages[requestedPage] ? requestedPage : 'dashboard')
   const [pageContext, setPageContext] = useState({})
   const [topbarSession, setTopbarSession] = useState(null)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('kumoSidebarCollapsed') === 'true')
   const Page = pages[page] || Dashboard
 
   // Keep one presence connection open for the lifetime of the application,
@@ -84,6 +85,14 @@ export default function App() {
     }
   }
 
+  function toggleSidebar() {
+    setSidebarCollapsed(current => {
+      const next = !current
+      window.localStorage.setItem('kumoSidebarCollapsed', String(next))
+      return next
+    })
+  }
+
   function closeStylePreview() {
     const url = new URL(window.location.href)
     url.searchParams.delete('preview')
@@ -92,8 +101,8 @@ export default function App() {
   }
 
   return (
-    <div className={`app-shell ${astelPreview ? 'astel-preview' : ''} ${coronaPreview ? 'corona-preview' : ''}`}>
-      <Sidebar activePage={page} onNavigate={navigate} session={topbarSession} />
+    <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${astelPreview ? 'astel-preview' : ''} ${coronaPreview ? 'corona-preview' : ''}`}>
+      <Sidebar activePage={page} onNavigate={navigate} session={topbarSession} collapsed={sidebarCollapsed} />
       <main className="main-content">
         {astelPreview && (
           <div className="astel-topbar">
@@ -108,7 +117,7 @@ export default function App() {
         )}
         {coronaPreview && (
           <div className="corona-topbar">
-            <button type="button" className="corona-menu" aria-label="Open environment and system settings" title="Environment and system settings" onClick={() => navigate('environmentSettings')}>☰</button>
+            <button type="button" className="corona-menu" aria-label={sidebarCollapsed ? 'Expand side menu' : 'Collapse side menu'} title={sidebarCollapsed ? 'Expand side menu' : 'Collapse side menu'} aria-expanded={!sidebarCollapsed} onClick={toggleSidebar}>☰</button>
             <div className="corona-top-actions">
               <span className="corona-live"><i /> Live</span>
               <button type="button" aria-label="Notifications">♢<i /></button>

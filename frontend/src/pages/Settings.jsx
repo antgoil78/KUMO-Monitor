@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
 import { formatDateTimeSeconds } from '../utils/time.js'
+import EnvironmentSettings from './EnvironmentSettings.jsx'
 
 const backendIntervals = [5, 10, 30, 60, 120, 300]
 
@@ -15,7 +16,8 @@ function StatusItem({ label, value, ok = true, detail }) {
   )
 }
 
-export default function Settings() {
+export default function Settings({ initialSection = 'cache' }) {
+  const [section, setSection] = useState(initialSection)
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -80,7 +82,14 @@ export default function Settings() {
 
   return (
     <section className="page admin-page">
-      <PageHeader breadcrumb="Application Administration / Settings" title="Settings" subtitle="Configure the shared backend cache refresh cycle." actions={<button type="button" className="button" onClick={load}>↻ Refresh status</button>} />
+      <PageHeader breadcrumb="Application Administration / Settings" title="Settings" subtitle="Configure cache behavior, environment variables and system settings." actions={section === 'cache' ? <button type="button" className="button" onClick={load}>↻ Refresh</button> : null} />
+
+      <div className="parameter-tabs settings-tabs" role="tablist">
+        <button type="button" role="tab" aria-selected={section === 'cache'} onClick={() => setSection('cache')}>Cache</button>
+        <button type="button" role="tab" aria-selected={section === 'parameters'} onClick={() => setSection('parameters')}>Environment &amp; system</button>
+      </div>
+
+      {section === 'parameters' ? <EnvironmentSettings embedded /> : <>
 
       {error && <div className="alert error">{error}</div>}
 
@@ -105,6 +114,7 @@ export default function Settings() {
           <StatusItem label="Latest error" value={monitor.lastError || 'None'} ok={!monitor.lastError} />
         </div>
       </div>
+      </>}
     </section>
   )
 }

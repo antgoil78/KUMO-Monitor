@@ -17,15 +17,18 @@
 .execution-history-message p { margin: 9px 0 0; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .execution-history-message.has-message { border-color: rgba(255, 181, 71, .28); }
 .execution-history-message.has-message p { color: var(--text); }
-.execution-log-source-card { margin-top: 14px; padding: 0; overflow: hidden; }
+.execution-log-source-card { margin-top: 14px; padding: 0; overflow: visible; }
 .execution-log-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px; border-bottom: 1px solid var(--line-soft); }
 .execution-log-tabs button { display: inline-flex; align-items: center; gap: 7px; }
 .execution-log-tabs button span { display: inline-grid; min-width: 19px; height: 19px; place-items: center; border-radius: 999px; color: var(--muted); background: rgba(255,255,255,.07); font-size: 9px; }
 .execution-log-toolbar .search-input { width: min(320px, 35vw); }
 .execution-log-source-card > .alert { margin: 14px 16px 0; }
-.execution-log-table-wrap { max-height: calc(100vh - 430px); min-height: 220px; overflow: auto; }
-.execution-log-table { min-width: 850px; }
-.execution-log-table th { position: sticky; z-index: 1; top: 0; white-space: nowrap; }
+.execution-log-table-wrap { height: auto; min-height: 220px; max-height: none; overflow-x: visible; overflow-y: visible; }
+.execution-log-table { min-width: 1180px; }
+.execution-log-table th { position: sticky; z-index: 1; top: 0; padding: 0; white-space: nowrap; }
+.execution-sort-button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 0; color: inherit; background: transparent; font: inherit; font-weight: inherit; letter-spacing: inherit; text-align: left; text-transform: inherit; cursor: pointer; }
+.execution-sort-button:hover { color: var(--cyan); background: rgba(1, 232, 255, .06); }
+.execution-sort-button span { color: var(--muted2); font-size: 8px; }
 .execution-log-table td { max-width: 320px; vertical-align: top; white-space: nowrap; }
 .execution-log-row.failed { background: rgba(255, 75, 110, .055); }
 .execution-log-row.warning { background: rgba(255, 181, 71, .045); }
@@ -38,6 +41,12 @@
 .execution-log-table .execution-log-message-cell { min-width: 360px; max-width: 720px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .execution-log-table .execution-log-message-cell { color: var(--text); font-weight: 400; }
 .execution-log-table .execution-parent-cell { min-width: 280px; max-width: 480px; white-space: normal; }
+.execution-log-table .execution-model-heading,
+.execution-log-table .execution-model-cell { width: 360px; min-width: 360px; max-width: 360px; }
+.execution-log-table .execution-model-cell { white-space: normal; overflow-wrap: anywhere; }
+.execution-log-table .execution-time-cell { min-width: 150px; color: var(--text-strong); font-weight: 700; font-variant-numeric: tabular-nums; }
+.execution-time-track { width: 100%; height: 8px; margin-top: 7px; overflow: hidden; border: 1px solid rgba(105, 139, 255, .22); border-radius: 999px; background: rgba(105, 139, 255, .16); }
+.execution-time-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #347dff, var(--cyan)); box-shadow: 0 0 8px rgba(1, 232, 255, .45); }
 .execution-parent-list { display: flex; flex-wrap: wrap; gap: 5px; }
 .execution-parent-list code { display: inline-block; padding: 4px 7px; border: 1px solid rgba(105,139,255,.22); border-radius: 6px; color: #b8c9e5; background: rgba(9,23,55,.68); font-size: 9px; white-space: nowrap; }
 .execution-log-table .execution-view-cell { min-width: 210px; max-width: 340px; white-space: normal; }

@@ -18,7 +18,7 @@ function clean(item) {
   return JSON.stringify({ group: item.parameterGroup, key: item.parameterKey, value: item.parameterValue, type: item.valueType, description: item.description, secret: Boolean(item.isSecret), active: Boolean(item.activeFl) })
 }
 
-export default function EnvironmentSettings() {
+export default function EnvironmentSettings({ embedded = false }) {
   const [activeGroup, setActiveGroup] = useState('ENVIRONMENT')
   const [rows, setRows] = useState([])
   const [savedRows, setSavedRows] = useState([])
@@ -121,8 +121,10 @@ export default function EnvironmentSettings() {
     })
   }
 
-  return <div className="page environment-settings-page">
-    <PageHeader breadcrumb="Application / Configuration" title="Environment & System Settings" subtitle="Maintain table-backed configuration for this KUMO instance." actions={<button className="button primary" type="button" onClick={addParameter} disabled={saving}>+ Add parameter</button>} />
+  return <div className={`${embedded ? 'settings-parameters-panel' : 'page'} environment-settings-page`}>
+    {!embedded && <PageHeader breadcrumb="Application / Configuration" title="Environment & System Settings" subtitle="Maintain table-backed configuration for this KUMO instance." actions={<button className="button primary" type="button" onClick={addParameter} disabled={saving}>+ Add parameter</button>} />}
+
+    {embedded && <div className="settings-parameters-heading"><div><h2>Environment &amp; system</h2><p>Maintain table-backed configuration for this KUMO instance.</p></div><button className="button primary" type="button" onClick={addParameter} disabled={saving}>+ Add parameter</button></div>}
 
     <div className="parameter-tabs" role="tablist">{groups.map(group => <button key={group.key} role="tab" aria-selected={activeGroup === group.key} onClick={() => setActiveGroup(group.key)}>{group.label}<span>{rows.filter(row => row.parameterGroup === group.key).length}</span></button>)}</div>
     {error && <div className="alert error">{error}</div>}

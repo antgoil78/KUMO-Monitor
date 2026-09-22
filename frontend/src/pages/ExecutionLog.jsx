@@ -15,8 +15,8 @@ const sourceDefinitions = [
 
 const preferredColumns = {
   runLog: ['LOG_DTTM', 'ORIGIN', 'TYPE', 'MESSAGE'],
-  modelProgress: ['MODEL_NAME', 'TYPE', 'STATUS', 'PROGRESS', 'STARTED_DTTM', 'FINISHED_DTTM', 'MODEL_NAME_PARENT'],
-  testProgress: ['MODEL_NAME', 'TYPE', 'STATUS', 'PROGRESS', 'STARTED_DTTM', 'FINISHED_DTTM', 'MODEL_NAME_PARENT']
+  modelProgress: ['MODEL_NAME', 'TYPE', 'STATUS', 'PROGRESS', 'STARTED_DTTM', 'START_DTTM', 'FINISHED_DTTM', 'FINISH_DTTM', 'MODEL_NAME_PARENT'],
+  testProgress: ['MODEL_NAME', 'TYPE', 'STATUS', 'PROGRESS', 'STARTED_DTTM', 'START_DTTM', 'FINISHED_DTTM', 'FINISH_DTTM', 'MODEL_NAME_PARENT']
 }
 
 function displayValue(column, value) {
@@ -50,18 +50,59 @@ function logTone(value) {
   const text = String(value ?? '').trim().toUpperCase()
   if (!text) return ''
   if (/\b(ERROR|FAILED|FAILURE|FATAL|ABORTED)\b/.test(text)) return 'failed'
-  if (/\b(WARN|WARNING|SKIPPED)\b/.test(text)) return 'warning'
+  if (/\b(WARN|WARNING|VARNING|SKIPPED)\b/.test(text)) return 'warning'
   if (/\b(SUCCESS|SUCCEEDED|COMPLETED|DONE|OK)\b/.test(text)) return 'success'
   if (/\b(RUNNING|EXECUTING|IN_PROGRESS|STARTED)\b/.test(text)) return 'running'
   if (/\b(INFO|DEBUG|TRACE|NOTICE)\b/.test(text)) return 'info'
   return ''
 }
 
+function timestamp(value) {
+  const parsed = Date.parse(value || '')
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function executionDuration(row) {
+  const started = timestamp(row.STARTED_DTTM || row.START_DTTM)
+  const finished = timestamp(row.FINISHED_DTTM || row.FINISH_DTTM)
+  return started !== null && finished !== null ? Math.max(0, finished - started) : null
+}
+
+function formatDuration(milliseconds) {
+  if (milliseconds === null) return '—'
+  if (milliseconds < 1000) return `${milliseconds} ms`
+  const totalSeconds = Math.floor(milliseconds / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours) return `${hours}h ${minutes}m ${seconds}s`
+  if (minutes) return `${minutes}m ${seconds}s`
+  return `${seconds}s`
+}
+
+function compareValues(left, right, column) {
+  if (column === 'ELAPSED_TIME') return (executionDuration(left) ?? -1) - (executionDuration(right) ?? -1)
+  const a = left[column]
+  const b = right[column]
+  if (a === b) return 0
+  if (a === null || a === undefined || a === '') return -1
+  if (b === null || b === undefined || b === '') return 1
+  if (column.includes('DTTM') || column.endsWith('_AT') || column.endsWith('_TIME')) {
+    return (timestamp(a) ?? 0) - (timestamp(b) ?? 0)
+  }
+  const aNumber = typeof a === 'number' ? a : Number.NaN
+  const bNumber = typeof b === 'number' ? b : Number.NaN
+  if (Number.isFinite(aNumber) && Number.isFinite(bNumber)) return aNumber - bNumber
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })
+}
+
 function columnsFor(rows, sourceKey) {
   const available = new Set(rows.flatMap(row => Object.keys(row)))
   const preferred = (preferredColumns[sourceKey] || []).filter(column => available.has(column))
-  const remaining = Array.from(available).filter(column => column !== 'RUN_ID' && !preferred.includes(column))
-  return [...preferred, ...remaining]
+  const hidden = new Set(['RUN_ID', ...(['modelProgress', 'testProgress'].includes(sourceKey) ? ['TYPE', 'FINISHED_DTTM', 'FINISH_DTTM'] : [])])
+  const visiblePreferred = preferred.filter(column => !hidden.has(column))
+  const remaining = Array.from(available).filter(column => !hidden.has(column) && !visiblePreferred.includes(column))
+  return [...visiblePreferred, ...remaining]
 }
 
 function ValueViewer({ detail, onClose }) {
@@ -115,23 +156,47 @@ function ParentModels({ value }) {
 }
 
 function LogTable({ rows, sourceKey, onViewValue }) {
-  const columns = columnsFor(rows, sourceKey)
+  const [sort, setSort] = useState({ column: '', direction: 'asc' })
+  const dataColumns = columnsFor(rows, sourceKey)
+  const hasTiming = ['modelProgress', 'testProgress'].includes(sourceKey)
+  const startedIndex = Math.max(dataColumns.indexOf('STARTED_DTTM'), dataColumns.indexOf('START_DTTM'))
+  const columns = hasTiming && startedIndex >= 0
+    ? [...dataColumns.slice(0, startedIndex + 1), 'ELAPSED_TIME', ...dataColumns.slice(startedIndex + 1)]
+    : dataColumns
+  const sortedRows = useMemo(() => {
+    if (!sort.column) return rows
+    return rows.map((row, index) => ({ row, index })).sort((left, right) => {
+      const result = compareValues(left.row, right.row, sort.column)
+      return (result || left.index - right.index) * (sort.direction === 'asc' ? 1 : -1)
+    }).map(item => item.row)
+  }, [rows, sort])
+  const maxDuration = Math.max(1, ...rows.map(executionDuration).filter(value => value !== null))
+  function toggleSort(column) {
+    setSort(current => current.column === column
+      ? { column, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+      : { column, direction: 'asc' })
+  }
   if (!rows.length) return <div className="execution-log-empty">No rows found for this run.</div>
 
   return (
     <div className="execution-log-table-wrap">
       <table className="workflow-table compact execution-log-table">
-        <thead><tr>{columns.map(column => <th key={column}>{column.replaceAll('_', ' ')}</th>)}</tr></thead>
+        <thead><tr>{columns.map(column => <th key={column} className={column === 'MODEL_NAME' ? 'execution-model-heading' : ''} aria-sort={sort.column === column ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}><button type="button" className="execution-sort-button" onClick={() => toggleSort(column)}>{column.replaceAll('_', ' ')}<span aria-hidden="true">{sort.column === column ? (sort.direction === 'asc' ? '▲' : '▼') : '↕'}</span></button></th>)}</tr></thead>
         <tbody>
-          {rows.map((row, index) => (
+          {sortedRows.map((row, index) => (
             <tr key={`${row.LOG_ID || row.SRT || row.LOG_DTTM || index}-${index}`} className={`execution-log-row ${logTone(row.TYPE)}`}>
               {columns.map(column => {
+                if (column === 'ELAPSED_TIME') {
+                  const duration = executionDuration(row)
+                  const width = duration === null ? 0 : Math.max(3, (duration / maxDuration) * 100)
+                  return <td key={column} className="execution-time-cell"><span>{formatDuration(duration)}</span>{duration !== null && <div className="execution-time-track" aria-hidden="true"><i style={{ width: `${width}%` }} /></div>}</td>
+                }
                 const value = row[column]
                 const structured = structuredValue(value)
                 const opensViewer = column !== 'MODEL_NAME_PARENT' && (['LATEST_SQL', 'SQL'].includes(column) || structured || String(value ?? '').length > 240)
                 const tone = column === 'TYPE' ? logTone(value) : ''
                 return (
-                  <td key={column} className={`${['MESSAGE', 'ERROR_MESSAGE'].includes(column) ? 'execution-log-message-cell' : opensViewer ? 'execution-view-cell' : ''} ${column === 'MODEL_NAME_PARENT' ? 'execution-parent-cell' : ''} ${tone}`}>
+                  <td key={column} className={`${['MESSAGE', 'ERROR_MESSAGE'].includes(column) ? 'execution-log-message-cell' : opensViewer ? 'execution-view-cell' : ''} ${column === 'MODEL_NAME' ? 'execution-model-cell' : ''} ${column === 'MODEL_NAME_PARENT' ? 'execution-parent-cell' : ''} ${tone}`}>
                     {column === 'STATUS' || (sourceKey === 'runLog' && column === 'TYPE') ? <StatusBadge status={value} showIcon={column === 'STATUS'} /> : column === 'MODEL_NAME_PARENT' ? <ParentModels value={value} /> : structured ? <FriendlyJson value={value} /> : <span>{opensViewer ? valuePreview(value) : displayValue(column, value)}</span>}
                     {opensViewer && <button type="button" className="execution-view-value" onClick={() => onViewValue({ column, value, modelName: row.MODEL_NAME })}>View</button>}
                   </td>
@@ -285,7 +350,7 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
           </div>
 
           {data.warnings?.[activeSource] && <div className="alert warning compact">This source is unavailable: {data.warnings[activeSource]}</div>}
-          <LogTable rows={visibleRows} sourceKey={activeSource} onViewValue={setValueDetail} />
+          <LogTable key={activeSource} rows={visibleRows} sourceKey={activeSource} onViewValue={setValueDetail} />
         </div>}
       </>}
       <ValueViewer detail={valueDetail} onClose={() => setValueDetail(null)} />

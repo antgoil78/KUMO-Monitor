@@ -1029,8 +1029,8 @@ def load_execution_log(run_id, workflow_id=None):
     warnings = {}
     if is_dbt:
         progress_columns = (
-            "MODEL_NAME", "TYPE", "STATUS", "PROGRESS", "STARTED_DTTM",
-            "FINISHED_DTTM", "MODEL_NAME_PARENT",
+            "MODEL_NAME", "TYPE", "STATUS", "PROGRESS", "STARTED_DTTM", "START_DTTM",
+            "FINISHED_DTTM", "FINISH_DTTM", "MODEL_NAME_PARENT",
         )
         for key, table_name, wanted_columns in (
             ("modelProgress", config.MODEL_PROGRESS_TABLE, progress_columns),

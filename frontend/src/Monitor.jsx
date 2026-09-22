@@ -652,7 +652,7 @@ export default function Monitor() {
           <h1 className="page-heading">Workflow Monitor</h1>
           <p className="page-subtitle">Live operational control for KUMO workflow runs, schedules and dependencies.</p>
         </div>
-        <button className="button refresh-button" onClick={() => load(true)}>↻ Refresh now</button>
+        <button className="button refresh-button" onClick={() => load(true)}>↻ Refresh</button>
       </div>
 
       {error && <div className="alert error">{error}</div>}
