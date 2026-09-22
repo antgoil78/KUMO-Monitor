@@ -44,6 +44,7 @@ export default function App() {
   const [page, setPage] = useState(pages[requestedPage] ? requestedPage : 'dashboard')
   const [pageContext, setPageContext] = useState({})
   const [topbarSession, setTopbarSession] = useState(null)
+  const [identityReady, setIdentityReady] = useState(false)
   const [buildInfo, setBuildInfo] = useState(null)
   const [realtimeConnected, setRealtimeConnected] = useState(false)
   const [snowflakeStatus, setSnowflakeStatus] = useState(null)
@@ -61,6 +62,7 @@ export default function App() {
     api.session().catch(() => null).then(sessionData => {
       if (cancelled) return
       if (sessionData) setTopbarSession(sessionData)
+      setIdentityReady(true)
       source = createKumoEventSource((event) => {
         if (event?.type === 'connected') setRealtimeConnected(true)
         window.dispatchEvent(new CustomEvent('kumo:realtime', { detail: event }))
@@ -73,6 +75,7 @@ export default function App() {
   }, [page])
 
   useEffect(() => {
+    if (!identityReady) return undefined
     let cancelled = false
     const loadSnowflakeStatus = () => api.snowflakePing()
       .then(data => { if (!cancelled) setSnowflakeStatus(data) })
@@ -80,9 +83,10 @@ export default function App() {
     loadSnowflakeStatus()
     const id = window.setInterval(loadSnowflakeStatus, 10000)
     return () => { cancelled = true; window.clearInterval(id) }
-  }, [])
+  }, [identityReady])
 
   useEffect(() => {
+    if (!identityReady) return undefined
     const renew = () => api.activity().catch(() => {})
     renew()
     const id = window.setInterval(renew, 30000)
@@ -97,7 +101,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onFocus)
     }
-  }, [])
+  }, [identityReady])
 
   function navigate(nextPage, context = {}) {
     setPageContext(context)
@@ -149,7 +153,9 @@ export default function App() {
             </div>
           </div>
         )}
-        <Page {...pageContext} onNavigate={navigate} buildInfo={buildInfo} />
+        {identityReady
+          ? <Page {...pageContext} onNavigate={navigate} buildInfo={buildInfo} />
+          : <div className="loading-state">Resolving Snowflake user…</div>}
       </main>
     </div>
   )

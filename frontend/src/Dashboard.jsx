@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, createKumoEventSource } from '../api.js'
+import { api } from '../api.js'
 import StatusBadge, { statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import { formatDateTime } from '../utils/time.js'
@@ -192,7 +192,8 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    const source = createKumoEventSource((event) => {
+    const handleRealtime = browserEvent => {
+      const event = browserEvent.detail
       const type = event?.type
       const data = event?.data || {}
       if (type === 'monitor_update') {
@@ -202,8 +203,9 @@ export default function Dashboard() {
       if (['workflow_run_requested', 'workflow_run_queued'].includes(type)) {
         setPayload(prev => applyRealtimeRun(prev, data))
       }
-    }, () => {})
-    return () => source?.close()
+    }
+    window.addEventListener('kumo:realtime', handleRealtime)
+    return () => window.removeEventListener('kumo:realtime', handleRealtime)
   }, [])
 
   const workflows = payload?.workflows || []

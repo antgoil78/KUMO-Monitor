@@ -759,7 +759,10 @@ def _live_active_users():
     users = {}
     for client in realtime_broker.client_details():
         key = _user_key(client)
-        if not key or key == "UNKNOWN":
+        # An SSE connection can briefly arrive before SPCS has resolved its
+        # caller token. It is a connection, but not an identified logged-in
+        # user and must not be rendered as a separate person.
+        if not key or key in ("UNKNOWN", "UNIDENTIFIED"):
             continue
         connected_at = client.get("connectedAt")
         last_activity_at = client.get("lastActivityAt") or connected_at
@@ -1234,6 +1237,12 @@ def _json_error(message, status=400):
 
 
 def _request_activity_actor():
+    # A client ID is stable for the browser tab and is registered by
+    # /api/session. Prefer that exact binding on EventSource/heartbeat requests,
+    # where the SPCS ingress caller-token header may not always be forwarded.
+    actor = _client_actor()
+    if actor:
+        return actor
     try:
         key = _session_cache_key()
         with _session_cache_lock:
@@ -1247,9 +1256,6 @@ def _request_activity_actor():
             }
     except Exception:
         pass
-    actor = _client_actor()
-    if actor:
-        return actor
     # Local/password mode has one configured Snowflake identity, so it can be
     # attributed without opening a database connection. In caller-rights SPCS,
     # only use identity resolved from that caller's token cache above.
