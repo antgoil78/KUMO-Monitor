@@ -25,6 +25,20 @@ http://localhost:5000
 settings into the container at runtime. Do not pass Snowflake credentials as
 Docker build args or commit them to Git.
 
+### Image version
+
+The image tag and the version displayed in the sidebar use
+`KUMO_IMAGE_VERSION`. It defaults to `latest`, so the existing workflow keeps
+working. To build and run a versioned image:
+
+```bash
+KUMO_IMAGE_VERSION=1.2.0 docker compose up --build -d
+```
+
+This creates `kumo-monitor:1.2.0`, exposes `imageVersion` from `/api/health`,
+and displays `1.2.0` in the application sidebar. You can optionally provide
+`GIT_SHA` alongside it to expose the source revision in the version tooltip.
+
 ### Snowflake account identifier
 
 If Snowflake returns an error like:

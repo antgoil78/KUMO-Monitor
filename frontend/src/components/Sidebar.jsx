@@ -16,7 +16,7 @@ const navItems = [
   { key: 'settings', label: 'Settings', icon: '⚙' }
 ]
 
-export default function Sidebar({ activePage, onNavigate, session, collapsed = false }) {
+export default function Sidebar({ activePage, onNavigate, session, buildInfo, collapsed = false }) {
   const [openGroups, setOpenGroups] = useState(() => Object.fromEntries(
     navItems.filter(item => item.children).map(item => [item.key, item.children.some(child => child.key === activePage)])
   ))
@@ -29,11 +29,14 @@ export default function Sidebar({ activePage, onNavigate, session, collapsed = f
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="brand">
-        <div className="brand-mark"><span className="brand-dot">◆</span></div>
-        <div>
-          <div className="brand-kumo">KUMO</div>
-          <div className="brand-subtitle">Monitor</div>
-        </div>
+        <img
+          className="brand-lockup"
+          src="/brand/kumo-monitor-logotype.png"
+          alt="KUMO Monitor"
+        />
+        <span className="brand-icon" aria-hidden="true">
+          <img src="/brand/kumo-monitor-logotype.png" alt="" />
+        </span>
       </div>
       <div className="sidebar-user" title={`${session?.displayName || session?.userName || 'KUMO user'} · ${session?.roleName || 'Unknown role'}`}>
         <span>{String(session?.displayName || session?.userName || 'K').slice(0, 1).toUpperCase()}</span>
@@ -83,6 +86,14 @@ export default function Sidebar({ activePage, onNavigate, session, collapsed = f
           </button>
         ))}
       </nav>
+
+      <div
+        className="sidebar-version"
+        title={`Image ${buildInfo?.imageVersion || 'latest'} · build ${buildInfo?.buildSha || 'local'}`}
+      >
+        <span>Version</span>
+        <strong>{buildInfo?.imageVersion || 'latest'}</strong>
+      </div>
 
       <div className="sidebar-help">
         <strong>KUMO Monitor</strong>

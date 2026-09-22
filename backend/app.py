@@ -100,6 +100,7 @@ _activity_supervisor_thread = None
 def _build_info():
     return {
         "buildSha": os.getenv("KUMO_BUILD_SHA", "").strip() or "local",
+        "imageVersion": os.getenv("KUMO_IMAGE_VERSION", "").strip() or "latest",
         "runtimeId": _RUNTIME_ID,
     }
 

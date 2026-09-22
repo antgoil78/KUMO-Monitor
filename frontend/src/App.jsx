@@ -42,6 +42,7 @@ export default function App() {
   const [page, setPage] = useState(pages[requestedPage] ? requestedPage : 'dashboard')
   const [pageContext, setPageContext] = useState({})
   const [topbarSession, setTopbarSession] = useState(null)
+  const [buildInfo, setBuildInfo] = useState(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('kumoSidebarCollapsed') === 'true')
   const Page = pages[page] || Dashboard
 
@@ -54,6 +55,9 @@ export default function App() {
     }, () => {}, { page })
     api.session().catch(() => null).then(sessionData => {
       if (!cancelled && sessionData) setTopbarSession(sessionData)
+    })
+    api.health().catch(() => null).then(healthData => {
+      if (!cancelled && healthData) setBuildInfo(healthData)
     })
     return () => { cancelled = true; source?.close() }
   }, [page])
@@ -102,7 +106,7 @@ export default function App() {
 
   return (
     <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${astelPreview ? 'astel-preview' : ''} ${coronaPreview ? 'corona-preview' : ''}`}>
-      <Sidebar activePage={page} onNavigate={navigate} session={topbarSession} collapsed={sidebarCollapsed} />
+      <Sidebar activePage={page} onNavigate={navigate} session={topbarSession} buildInfo={buildInfo} collapsed={sidebarCollapsed} />
       <main className="main-content">
         {astelPreview && (
           <div className="astel-topbar">
