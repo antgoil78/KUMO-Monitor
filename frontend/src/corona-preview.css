@@ -122,6 +122,9 @@ body:has(.corona-preview) .lim-modal-backdrop { background: #000 !important; }
 .corona-settings-button:hover span,
 .corona-settings-button.active span { transform: rotate(25deg) scale(1.08); color: #01e8ff; }
 .corona-settings-button.active { border-color: rgba(1,232,255,.55) !important; }
+.corona-logout-button { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 12px !important; border: 1px solid #343740 !important; border-radius: 9px !important; background: #20232d !important; color: #9a9ca5 !important; font: 600 12px/1 var(--font-body); white-space: nowrap; transition: border-color 160ms ease, color 160ms ease, box-shadow 160ms ease; }
+.corona-logout-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.corona-logout-button:hover { border-color: rgba(1,232,255,.55) !important; color: #67d9ff !important; box-shadow: 0 0 14px rgba(0,117,255,.18); }
 .corona-profile { display: flex; align-items: center; gap: 9px; color: #fff; font-size: 12px; }
 .corona-profile > b { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg,#6c7293,#282b34); font-size: 11px; }
 .corona-profile > span { display: grid; gap: 2px; }
@@ -259,6 +262,8 @@ body:has(.corona-preview) .lim-modal-backdrop { background: #000 !important; }
   .corona-preview .nav-item > span:last-child,
   .corona-preview .nav-label,
   .corona-connection { display: none; }
+  .corona-logout-button span { display: none; }
+  .corona-logout-button { width: 34px; padding: 0 !important; justify-content: center; }
   .corona-preview .nav-item { padding: 8px; border-radius: 4px; justify-content: center; }
   .corona-preview .sidebar-user { padding: 7px; justify-content: center; }
   .corona-preview .sidebar-user > div { display: none; }

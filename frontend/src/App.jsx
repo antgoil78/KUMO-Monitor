@@ -121,6 +121,10 @@ export default function App() {
     })
   }
 
+  function logout() {
+    window.location.assign('/sfc-endpoint/logout')
+  }
+
   function closeStylePreview() {
     const url = new URL(window.location.href)
     url.searchParams.delete('preview')
@@ -150,6 +154,10 @@ export default function App() {
               <span className={`corona-connection ${realtimeConnected ? 'connected' : 'disconnected'}`} title="Live server-to-browser event stream"><i /> Realtime {realtimeConnected ? 'connected' : 'reconnecting'}</span>
               <span className={`corona-connection ${snowflakeStatus?.ok ? 'connected' : 'disconnected'}`} title={snowflakeStatus?.error || `Snowflake ${snowflakeStatus?.mode || 'connection'}`}><i /> Snowflake {snowflakeStatus?.ok ? 'connected' : 'unavailable'}</span>
               <button type="button" className={`corona-settings-button ${page === 'settings' ? 'active' : ''}`} aria-label="Open settings" title="Settings" onClick={() => navigate('settings')}><span aria-hidden="true">⚙</span></button>
+              <button type="button" className="corona-logout-button" aria-label="Log out of KUMO Monitor" title="Log out" onClick={logout}>
+                <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path d="M10 5H5v14h5M14 8l4 4-4 4M8 12h10" /></svg>
+                <span>Log out</span>
+              </button>
             </div>
           </div>
         )}
