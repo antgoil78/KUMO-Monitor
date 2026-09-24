@@ -64,7 +64,7 @@ export default function App() {
       if (sessionData) setTopbarSession(sessionData)
       setIdentityReady(true)
       source = createKumoEventSource((event) => {
-        if (event?.type === 'connected') setRealtimeConnected(true)
+        if (event?.type === 'connected' || event?.type === 'heartbeat') setRealtimeConnected(true)
         window.dispatchEvent(new CustomEvent('kumo:realtime', { detail: event }))
       }, () => setRealtimeConnected(false), { page })
     })

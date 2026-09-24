@@ -19,6 +19,8 @@ const resultLabels = {
   SDL_CLONES_CREATED: 'SDL clones created', SDL_TABLES_DROPPED: 'SDL tables dropped'
 }
 
+const wait = (milliseconds) => new Promise(resolve => window.setTimeout(resolve, milliseconds))
+
 export default function LimReload() {
   const [form, setForm] = useState({ limFormat: '', mode: 'PARTIAL_RELOAD', fromDate: '', toDate: '', resetPackageCheck: true, setReadyToLoad: false, confirmed: false })
   const [running, setRunning] = useState(false)
@@ -80,13 +82,24 @@ export default function LimReload() {
   async function executeReload() {
     setRunning(true); setError(''); setResult(null)
     try {
-      const response = await fileIngestionApi.reload({
+      let response = await fileIngestionApi.reload({
         limFormat: form.limFormat.trim().toUpperCase(), mode: form.mode,
         fromDate: usesDateRange ? form.fromDate : null, toDate: usesDateRange ? form.toDate : null,
         resetPackageCheck: form.resetPackageCheck, setReadyToLoad: form.setReadyToLoad,
         confirmation: isReload ? 'RELOAD' : ''
       })
-      setResult(response.result || {})
+      if (response.job?.jobId) {
+        let job = response.job
+        while (job.status === 'QUEUED' || job.status === 'RUNNING') {
+          await wait(2000)
+          response = await fileIngestionApi.reloadStatus(job.jobId)
+          job = response.job || {}
+        }
+        if (job.status === 'FAILED') throw new Error(job.error || 'RAW LIM reload failed.')
+        setResult(job.result || {})
+      } else {
+        setResult(response.result || {})
+      }
     } catch (err) { setError(err.message) } finally { setRunning(false) }
   }
   function submit(event) {

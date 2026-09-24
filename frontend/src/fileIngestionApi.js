@@ -38,8 +38,6 @@ async function requestJson(url, options = {}) {
   return data
 }
 
-const RAW_RELOAD_TIMEOUT_MS = 30 * 60 * 1000
-
 export const fileIngestionApi = {
   subjectAreas: () => requestJson('/api/file-ingestion/reload/subject-areas'),
 
@@ -88,6 +86,11 @@ export const fileIngestionApi = {
     requestJson('/api/file-ingestion/reload', {
       method: 'POST',
       body: JSON.stringify(payload),
-      timeoutMs: RAW_RELOAD_TIMEOUT_MS
+      timeoutMs: 60 * 1000
+    }),
+
+  reloadStatus: (jobId) =>
+    requestJson(`/api/file-ingestion/reload/${encodeURIComponent(jobId)}`, {
+      timeoutMs: 30 * 1000
     })
 }

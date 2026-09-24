@@ -10,6 +10,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from datetime import date
 
 from flask import Blueprint, current_app, jsonify, request
@@ -52,6 +53,9 @@ LIM_HEADER_FIELDS = (
 _dashboard_attention_lock = threading.Lock()
 _dashboard_attention_cache = {"payload": None, "cached_at": 0.0}
 _DASHBOARD_ATTENTION_CACHE_SECONDS = 30
+_reload_jobs_lock = threading.Lock()
+_reload_jobs = {}
+_RELOAD_JOB_TTL_SECONDS = 24 * 60 * 60
 
 
 def _json_error(error, status=500):
@@ -76,6 +80,63 @@ def _procedure_result(row):
         except (TypeError, ValueError):
             return {"MESSAGE": value}
     return value if isinstance(value, dict) else {"RESULT": value}
+
+
+def _reload_job_snapshot(job_id):
+    with _reload_jobs_lock:
+        job = _reload_jobs.get(job_id)
+        return dict(job) if job else None
+
+
+def _update_reload_job(job_id, **updates):
+    with _reload_jobs_lock:
+        job = _reload_jobs.get(job_id)
+        if job is not None:
+            job.update(updates)
+
+
+def _prune_reload_jobs():
+    cutoff = time.time() - _RELOAD_JOB_TTL_SECONDS
+    with _reload_jobs_lock:
+        stale = [job_id for job_id, job in _reload_jobs.items()
+                 if float(job.get("updatedEpoch") or job.get("createdEpoch") or 0) < cutoff]
+        for job_id in stale:
+            _reload_jobs.pop(job_id, None)
+
+
+def _run_reload_job(app, job_id, params):
+    with app.app_context():
+        _update_reload_job(job_id, status="RUNNING", startedAt=time.time(), updatedEpoch=time.time())
+        try:
+            database = params["database"]
+            role = params["role"]
+            with sf.connection_scope(force_service=True) as conn:
+                cur = conn.cursor(DictCursor)
+                try:
+                    cur.execute(f"USE ROLE {role}")
+                    cur.execute(f"USE DATABASE {database}")
+                    cur.execute(
+                        f"""
+                        CALL {database}.META.LOAD_RAW_LIM_FROM_STAGE(
+                          P_LIM_FORMAT => %(lim_format)s,
+                          P_FROM_DLVY_END_DATE => %(from_date)s::DATE,
+                          P_TO_DLVY_END_DATE => %(to_date)s::DATE,
+                          P_RELOAD => %(reload)s,
+                          P_RESET_DLVY_PKG_CHECK => %(reset)s,
+                          P_SET_READY_TO_LOAD => %(ready)s
+                        )
+                        """,
+                        params,
+                    )
+                    row = cur.fetchone()
+                finally:
+                    cur.close()
+            now = time.time()
+            _update_reload_job(job_id, status="SUCCESS", result=_procedure_result(row), finishedAt=now, updatedEpoch=now)
+        except Exception as exc:
+            now = time.time()
+            app.logger.exception("Failed to execute asynchronous RAW LIM load/reload job %s", job_id)
+            _update_reload_job(job_id, status="FAILED", error=str(exc), finishedAt=now, updatedEpoch=now)
 
 
 def _history_days():
@@ -1006,17 +1067,27 @@ def file_ingestion_reload():
             return _json_error("Reload confirmation is required.", 400)
 
         if config.USE_MOCK or not sf.is_configured():
-            return jsonify({"ok": True, "source": "mock", "result": {
+            job_id = str(uuid.uuid4())
+            now = time.time()
+            job = {
+                "jobId": job_id, "status": "SUCCESS", "source": "mock",
+                "limFormat": lim_format, "mode": effective_mode,
+                "createdAt": now, "startedAt": now, "finishedAt": now,
+                "createdEpoch": now, "updatedEpoch": now, "error": None,
+                "result": {
                 "STATUS": "SUCCESS", "LOAD_MODE": effective_mode, "LIM_FORMAT": lim_format,
                 "FROM_DLVY_END_DATE": from_date, "TO_DLVY_END_DATE": to_date,
                 "FILES_SELECTED": 0, "RAW_ROWS_DELETED": 0, "COPY_COMMANDS_EXECUTED": 0,
-            }})
+                },
+            }
+            with _reload_jobs_lock:
+                _reload_jobs[job_id] = job
+            return jsonify({"ok": True, "source": "mock", "job": dict(job)}), 202
 
         database = _identifier(LIM_DATABASE, "LIM database")
         role = _identifier(LIM_ROLE, "LIM role")
-        # Loads are an application-owned administrative operation. In SPCS the
-        # browser caller token may not have visibility of KUMO_TST.META even
-        # though the container service role does, so use the service context.
+        # Validate the subject before accepting the background job. Loads are
+        # application-owned and therefore run with the service context.
         with sf.connection_scope(force_service=True) as conn:
             cur = conn.cursor(DictCursor)
             try:
@@ -1025,30 +1096,48 @@ def file_ingestion_reload():
                 subject_areas = _load_lim_subject_areas(cur, database)
                 if lim_format not in subject_areas:
                     return _json_error(f"RAW_LIM_{lim_format} was not found in {database}.RAW_LIM.", 400)
-                cur.execute(
-                    f"""
-                    CALL {database}.META.LOAD_RAW_LIM_FROM_STAGE(
-                      P_LIM_FORMAT => %(lim_format)s,
-                      P_FROM_DLVY_END_DATE => %(from_date)s::DATE,
-                      P_TO_DLVY_END_DATE => %(to_date)s::DATE,
-                      P_RELOAD => %(reload)s,
-                      P_RESET_DLVY_PKG_CHECK => %(reset)s,
-                      P_SET_READY_TO_LOAD => %(ready)s
-                    )
-                    """,
-                    {"lim_format": lim_format, "from_date": from_date, "to_date": to_date,
-                     "reload": reload_enabled, "reset": reset_package_check, "ready": set_ready_to_load},
-                )
-                row = cur.fetchone()
             finally:
                 cur.close()
 
-        return jsonify({"ok": True, "source": "snowflake", "result": _procedure_result(row)})
+        _prune_reload_jobs()
+        job_id = str(uuid.uuid4())
+        now = time.time()
+        with _reload_jobs_lock:
+            existing = next((dict(job) for job in _reload_jobs.values()
+                             if job.get("limFormat") == lim_format
+                             and job.get("status") in ("QUEUED", "RUNNING")), None)
+            if existing:
+                return jsonify({"ok": True, "source": "snowflake", "job": existing, "alreadyRunning": True}), 202
+            _reload_jobs[job_id] = {
+                "jobId": job_id, "status": "QUEUED", "source": "snowflake",
+                "limFormat": lim_format, "mode": effective_mode,
+                "createdAt": now, "createdEpoch": now, "updatedEpoch": now,
+                "result": None, "error": None,
+            }
+        params = {
+            "database": database, "role": role, "lim_format": lim_format,
+            "from_date": from_date, "to_date": to_date, "reload": reload_enabled,
+            "reset": reset_package_check, "ready": set_ready_to_load,
+        }
+        app = current_app._get_current_object()
+        threading.Thread(
+            target=_run_reload_job, args=(app, job_id, params),
+            name=f"lim-reload-{job_id[:8]}", daemon=True,
+        ).start()
+        return jsonify({"ok": True, "source": "snowflake", "job": _reload_job_snapshot(job_id)}), 202
     except ValueError as exc:
         return _json_error(exc, 400)
     except Exception as exc:
         current_app.logger.exception("Failed to execute RAW LIM load/reload")
         return _json_error(exc, 500)
+
+
+@file_ingestion_bp.get("/api/file-ingestion/reload/<job_id>")
+def file_ingestion_reload_status(job_id):
+    job = _reload_job_snapshot(str(job_id or ""))
+    if not job:
+        return _json_error("Reload job was not found. It may have expired or the service restarted.", 404)
+    return jsonify({"ok": True, "source": job.get("source"), "job": job})
 
 
 @file_ingestion_bp.get("/api/file-ingestion/reload/subject-areas")

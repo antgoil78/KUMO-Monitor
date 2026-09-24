@@ -116,9 +116,16 @@ class RealtimeEventBroker:
                     touch()
                     yield encode(event)
                 except queue.Empty:
-                    # Comments are valid SSE heartbeats and are ignored by EventSource.
                     touch()
-                    yield f": ping {int(time.time())}\n\n"
+                    # Use an explicit event instead of an SSE comment. SPCS
+                    # ingress/proxies can buffer comment-only chunks, while a
+                    # data event also lets the browser confirm the stream is live.
+                    yield encode({
+                        "id": str(uuid.uuid4()),
+                        "type": "heartbeat",
+                        "at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+                        "data": {"ok": True, "serverTime": int(time.time())},
+                    })
         finally:
             self.unsubscribe(client)
 
