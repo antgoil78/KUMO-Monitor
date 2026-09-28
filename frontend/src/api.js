@@ -68,6 +68,7 @@ export const api = {
   snowflakePing: () => requestJson('/api/snowflake/ping'),
   monitor: () => requestJson('/api/monitor'),
   refreshMonitor: () => requestJson('/api/monitor/refresh', { method: 'POST' }),
+  workflowFlow: () => requestJson('/api/workflow-flow', { timeoutMs: 120000 }),
   dependencies: (workflowId = '') => requestJson(`/api/dependencies${workflowId ? `?workflowId=${encodeURIComponent(workflowId)}` : ''}`, { timeoutMs: 120000 }),
   createDependencyRule: (payload) => requestJson('/api/dependencies/rules', {
     method: 'POST',

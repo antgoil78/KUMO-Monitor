@@ -15,6 +15,7 @@ import Settings from './pages/Settings.jsx'
 import Dependencies from './pages/Dependencies.jsx'
 import EnvironmentSettings from './pages/EnvironmentSettings.jsx'
 import About from './pages/About.jsx'
+import WorkflowFlow from './pages/WorkflowFlow.jsx'
 
 const pages = {
   dashboard: Dashboard,
@@ -30,7 +31,8 @@ const pages = {
   settings: Settings,
   dependencies: Dependencies,
   environmentSettings: EnvironmentSettings,
-  about: About
+  about: About,
+  workflowFlow: WorkflowFlow
 }
 
 export default function App() {

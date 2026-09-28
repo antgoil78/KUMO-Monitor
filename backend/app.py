@@ -1546,6 +1546,60 @@ def refresh_monitor():
     return jsonify({**payload, "refreshQueued": True})
 
 
+@app.route("/api/workflow-flow")
+def workflow_flow():
+    """Return the sandbox workflow model used by the React Flow explorer."""
+    if config.USE_MOCK or not sf.is_configured():
+        return jsonify({"ok": True, "source": "mock", "workflows": [], "jobs": [], "dependencies": []})
+    try:
+        with sf.connection_scope():
+            workflows = sf.query("""
+                SELECT
+                    WF_ID::VARCHAR AS WORKFLOW_ID,
+                    WF_NAME AS WORKFLOW_NAME,
+                    EXTERNAL_TRIGGERS
+                FROM KUMO_ADMIN.SANDBOX.WORKFLOW_ATTRIBUTE
+                ORDER BY WF_NAME
+            """)
+            jobs = sf.query("""
+                SELECT
+                    D.WF_ID::VARCHAR AS WORKFLOW_ID,
+                    D.JOB_ID_PARENT::VARCHAR AS PARENT_JOB_ID,
+                    D.JOB_ID_CHILD::VARCHAR AS JOB_ID,
+                    J.JOB_NAME,
+                    J.COMMAND_LINE,
+                    J.ON_SUCESS_COMMAND_LINE,
+                    J.ON_WARNING_COMMAND_LINE,
+                    J.ON_ERROR_COMMAND_LINE,
+                    D.MIN_STATUS_LEVEL,
+                    D.DEPENDECY_TYPE AS DEPENDENCY_TYPE
+                FROM KUMO_ADMIN.SANDBOX.WORKFLOW_DEFINITION D
+                JOIN KUMO_ADMIN.SANDBOX.JOB_ATTRIBUTE J
+                  ON J.JOB_ID = D.JOB_ID_CHILD
+                ORDER BY D.WF_ID, D.JOB_ID_PARENT NULLS FIRST, J.JOB_NAME
+            """)
+            dependencies = sf.query("""
+                SELECT
+                    WF_DEP_ID::VARCHAR AS DEPENDENCY_ID,
+                    WF_ID_PARENT::VARCHAR AS PARENT_WORKFLOW_ID,
+                    WF_ID_CHILD::VARCHAR AS CHILD_WORKFLOW_ID,
+                    MIN_STATUS_LEVEL,
+                    DEPENDECY_TYPE AS DEPENDENCY_TYPE
+                FROM KUMO_ADMIN.SANDBOX.WORKFLOW_DEPENDENCY
+                ORDER BY WF_ID_PARENT, WF_ID_CHILD
+            """)
+        return jsonify({
+            "ok": True,
+            "source": "KUMO_ADMIN.SANDBOX",
+            "workflows": workflows,
+            "jobs": jobs,
+            "dependencies": dependencies,
+            "generatedAt": _now_iso(),
+        })
+    except Exception as exc:
+        return _json_error(exc, 500)
+
+
 @app.route("/api/dependencies")
 def dependencies():
     workflow_id = str(request.args.get("workflowId") or "").strip()

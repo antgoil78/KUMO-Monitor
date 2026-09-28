@@ -5,7 +5,8 @@ const navItems = [
   { key: 'workflow', label: 'Workflow', icon: '◫', children: [
     { key: 'monitor', label: 'Monitor', icon: '◫' },
     { key: 'history', label: 'History', icon: '↺' },
-    { key: 'dependencies', label: 'Dependencies', icon: '⌘' }
+    { key: 'dependencies', label: 'Dependencies', icon: '⌘' },
+    { key: 'workflowFlow', label: 'Workflow flow', icon: '⌁' }
   ] },
   { key: 'lim', label: 'LIM', icon: '⇩', children: [
     { key: 'fileIngestion', label: 'Ingestion', icon: '⇩' },
