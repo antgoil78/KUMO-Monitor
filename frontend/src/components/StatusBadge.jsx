@@ -3,7 +3,7 @@ const groups = {
   running: ['RUNNING', 'IN_PROGRESS', 'EXECUTING', 'STARTING'],
   queued: ['INITIATING', 'QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED'],
   failed: ['FAILED', 'FAILURE', 'ERROR'],
-  warning: ['WARNING', 'WARN', 'VARNING'],
+  warning: ['WARNING', 'WARNINGS', 'WARN', 'VARNING', 'VARNINGAR'],
   info: ['INFO', 'DEBUG', 'TRACE', 'NOTICE'],
   skipped: ['SKIPPED']
 }

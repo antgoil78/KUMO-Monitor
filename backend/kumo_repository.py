@@ -2149,7 +2149,10 @@ def load_dag_run(workflow_id, run_id=None):
         progress_state = str(row.get("PROGRESS") or "QUEUED").upper()
         model_tests = tests_by_model.get(model, [])
         failed_tests = sum(str(test.get("STATUS") or "").upper() in ("FAILED", "FAILURE", "ERROR") for test in model_tests)
-        warning_tests = sum(str(test.get("STATUS") or "").upper() == "WARNING" for test in model_tests)
+        warning_tests = sum(
+            str(test.get("STATUS") or "").upper() in ("WARNING", "WARN", "VARNING")
+            for test in model_tests
+        )
         if progress_state == "QUEUED":
             display_status = "QUEUED"
         elif progress_state == "STARTED":
@@ -2158,7 +2161,7 @@ def load_dag_run(workflow_id, run_id=None):
             display_status = "SKIPPED"
         elif failed_tests or status == "ERROR":
             display_status = "ERROR"
-        elif warning_tests or status == "WARNING":
+        elif warning_tests or status in ("WARNING", "WARN", "VARNING"):
             display_status = "WARNING"
         else:
             display_status = status

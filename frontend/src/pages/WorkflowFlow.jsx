@@ -26,6 +26,10 @@ function relationVisual(dependency) {
 
 function orderedJobs(rows) {
   const byId = new Map(rows.map(row => [String(row.JOB_ID), row]))
+  const compareJobs = (a, b) => {
+    const sequenceDifference = Number(byId.get(a)?.JOB_SEQUENCE || 0) - Number(byId.get(b)?.JOB_SEQUENCE || 0)
+    return sequenceDifference || String(byId.get(a)?.JOB_NAME).localeCompare(String(byId.get(b)?.JOB_NAME))
+  }
   const children = new Map()
   const roots = []
   rows.forEach(row => {
@@ -39,9 +43,9 @@ function orderedJobs(rows) {
     if (!id || seen.has(id) || !byId.has(id)) return
     seen.add(id)
     result.push(byId.get(id))
-    ;(children.get(id) || []).sort((a, b) => String(byId.get(a)?.JOB_NAME).localeCompare(String(byId.get(b)?.JOB_NAME))).forEach(visit)
+    ;(children.get(id) || []).sort(compareJobs).forEach(visit)
   }
-  roots.sort((a, b) => String(byId.get(a)?.JOB_NAME).localeCompare(String(byId.get(b)?.JOB_NAME))).forEach(visit)
+  roots.sort(compareJobs).forEach(visit)
   rows.forEach(row => visit(String(row.JOB_ID)))
   return result
 }
@@ -131,14 +135,17 @@ function buildGraph(payload) {
   return { nodes, jobEdges, dependencies }
 }
 
-function WorkflowNode({ data }) {
+function WorkflowNode({ id, data }) {
   const handlesVisible = data.isRelationshipFocus || data.isRelationshipRelated
   return (
     <div className={`workflow-flow-group ${data.isRelationshipFocus ? 'relationship-focus' : ''}`}>
       {(data.inputs || []).map((input, index) => <Handle key={`in-${input.port}`} id={`in-${input.port}`} type="target" position={Position.Left} className={`workflow-flow-handle ${handlesVisible ? 'visible' : ''}`} style={{ top: `${32 + index * 24}%`, background: input.color }} />)}
       <div className="workflow-flow-group-icon" aria-hidden="true">⌘</div>
       <div className="workflow-flow-group-copy"><span>Workflow</span><strong>{data.label}</strong><small>{data.description}</small></div>
-      <div className="workflow-flow-expand-state"><span>{data.jobCount} jobs</span><b aria-hidden="true">{data.expanded ? '−' : '+'}</b></div>
+      <div className="workflow-flow-expand-state">
+        <span>{data.jobCount} jobs</span>
+        <button className="nodrag nowheel" type="button" aria-label={`${data.expanded ? 'Collapse' : 'Expand'} ${data.label} jobs`} aria-expanded={data.expanded} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); data.onToggle(id) }}>{data.expanded ? '−' : '+'}</button>
+      </div>
       {(data.outputs || []).map((output, index) => <Handle key={`out-${output.port}`} id={`out-${output.port}`} type="source" position={Position.Right} className={`workflow-flow-handle ${handlesVisible ? 'visible' : ''}`} style={{ top: `${32 + index * 24}%`, background: output.color }} />)}
     </div>
   )
@@ -171,7 +178,7 @@ export default function WorkflowFlow() {
     setLoading(true)
     setError('')
     try {
-      const payload = await api.workflowFlow()
+      const payload = await api.orchestrationFlow()
       const nextGraph = buildGraph(payload)
       setGraph({ ...nextGraph, source: payload.source, generatedAt: payload.generatedAt })
       setNodes(nextGraph.nodes)
@@ -202,32 +209,39 @@ export default function WorkflowFlow() {
   }), [graph, selectedWorkflow, showAllRelations])
 
   const relatedIds = useMemo(() => new Set(relationshipEdges.flatMap(edge => [edge.source, edge.target])), [relationshipEdges])
+  const visibleWorkflowIds = useMemo(() => {
+    if (showAllRelations) return new Set(nodes.filter(node => node.type === 'workflow').map(node => node.id))
+    const visible = new Set(relatedIds)
+    if (selectedWorkflow) visible.add(selectedWorkflow)
+    return visible
+  }, [nodes, relatedIds, selectedWorkflow, showAllRelations])
   const displayedNodes = useMemo(() => nodes.map(node => {
     if (node.type === 'workflow') {
       const expanded = expandedWorkflows.has(node.id)
-      return { ...node, hidden: !relatedIds.has(node.id), style: { ...node.style, height: expanded ? node.data.expandedHeight : 86 }, data: { ...node.data, expanded, isRelationshipFocus: node.id === selectedWorkflow, isRelationshipRelated: relatedIds.has(node.id) } }
+      return { ...node, hidden: !visibleWorkflowIds.has(node.id), style: { ...node.style, height: expanded ? node.data.expandedHeight : 86 }, data: { ...node.data, expanded, onToggle: toggleWorkflow, isRelationshipFocus: node.id === selectedWorkflow, isRelationshipRelated: relatedIds.has(node.id) } }
     }
-    return { ...node, hidden: !relatedIds.has(node.parentId) || !expandedWorkflows.has(node.parentId) }
-  }), [nodes, selectedWorkflow, relatedIds, expandedWorkflows])
+    return { ...node, hidden: !visibleWorkflowIds.has(node.parentId) || !expandedWorkflows.has(node.parentId) }
+  }), [nodes, selectedWorkflow, relatedIds, visibleWorkflowIds, expandedWorkflows])
   const selectedWorkflowLabel = nodes.find(node => node.id === selectedWorkflow)?.data?.label
+
+  function toggleWorkflow(workflowId) {
+    setExpandedWorkflows(current => {
+      const next = new Set(current)
+      if (next.has(workflowId)) next.delete(workflowId)
+      else next.add(workflowId)
+      return next
+    })
+  }
 
   function selectNode(node) {
     const workflowId = node.parentId || node.id
     setShowAllRelations(false)
     setSelectedWorkflow(workflowId)
-    if (node.type === 'workflow') {
-      setExpandedWorkflows(current => {
-        const next = new Set(current)
-        if (next.has(workflowId)) next.delete(workflowId)
-        else next.add(workflowId)
-        return next
-      })
-    }
   }
 
   return (
     <section className="page workflow-flow-page">
-      <PageHeader breadcrumb="Workflow / Workflow flow" title="Workflow flow" subtitle="Live workflow and job dependencies from KUMO_ADMIN.SANDBOX." actions={<button className="button" type="button" onClick={load} disabled={loading}>↻ Refresh</button>} />
+      <PageHeader breadcrumb="Orchestration / Flow" title="Flow" subtitle="Live workflow and job relationships from KUMO_TST.MONITOR_APP." actions={<button className="button" type="button" onClick={load} disabled={loading}>↻ Refresh</button>} />
       {error && <div className="alert error">{error}</div>}
       {loading && !graph && <LoadingState>Loading workflow graph…</LoadingState>}
       {graph && <>
@@ -245,13 +259,13 @@ export default function WorkflowFlow() {
           </div>
         </div>
         <div className="workflow-flow-canvas">
-          {displayedNodes.length ? <ReactFlow key={graph.generatedAt || graph.source} nodes={displayedNodes} onNodesChange={onNodesChange} edges={[...(graph.jobEdges || []).filter(edge => relatedIds.has(edge.data.workflowId) && expandedWorkflows.has(edge.data.workflowId)), ...relationshipEdges]} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.12 }} minZoom={0.2} maxZoom={1.6} nodesConnectable={false} elementsSelectable onNodeClick={(_, node) => selectNode(node)} onPaneClick={() => { setSelectedWorkflow(''); setShowAllRelations(true) }} proOptions={{ hideAttribution: true }}>
+          {displayedNodes.length ? <ReactFlow key={graph.generatedAt || graph.source} nodes={displayedNodes} onNodesChange={onNodesChange} edges={[...(graph.jobEdges || []).filter(edge => visibleWorkflowIds.has(edge.data.workflowId) && expandedWorkflows.has(edge.data.workflowId)), ...relationshipEdges]} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.12 }} minZoom={0.2} maxZoom={1.6} nodesConnectable={false} elementsSelectable onNodeClick={(_, node) => selectNode(node)} onPaneClick={() => { setSelectedWorkflow(''); setShowAllRelations(true) }} proOptions={{ hideAttribution: true }}>
             <Background color="rgba(154, 156, 165, 0.18)" gap={24} size={1} />
             <MiniMap pannable zoomable nodeColor={node => node.type === 'workflow' ? '#4299ff' : '#444750'} maskColor="rgba(24, 26, 32, 0.72)" />
             <Controls showInteractive={false} />
-          </ReactFlow> : <div className="soft-empty">No workflows were found in KUMO_ADMIN.SANDBOX.</div>}
+          </ReactFlow> : <div className="soft-empty">No workflows were found in KUMO_TST.MONITOR_APP.</div>}
         </div>
-        <p className="workflow-flow-hint">Click a collapsed workflow to reveal its jobs and direct relationships. Click it again to collapse it. Workflow boxes can be moved freely.</p>
+        <p className="workflow-flow-hint">Click a workflow card to focus its relationships. Use +/− to expand or collapse its jobs. Workflow boxes can be moved freely.</p>
       </>}
     </section>
   )

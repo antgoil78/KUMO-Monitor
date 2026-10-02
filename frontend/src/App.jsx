@@ -16,6 +16,7 @@ import Dependencies from './pages/Dependencies.jsx'
 import EnvironmentSettings from './pages/EnvironmentSettings.jsx'
 import About from './pages/About.jsx'
 import WorkflowFlow from './pages/WorkflowFlow.jsx'
+import { JobCatalog, WorkflowCatalog } from './pages/OrchestrationCatalog.jsx'
 
 const pages = {
   dashboard: Dashboard,
@@ -32,7 +33,9 @@ const pages = {
   dependencies: Dependencies,
   environmentSettings: EnvironmentSettings,
   about: About,
-  workflowFlow: WorkflowFlow
+  orchestrationWorkflow: WorkflowCatalog,
+  orchestrationJob: JobCatalog,
+  orchestrationFlow: WorkflowFlow
 }
 
 export default function App() {
@@ -42,7 +45,8 @@ export default function App() {
   // Astel query switch temporarily as an internal comparison/rollback aid.
   const coronaPreview = !astelPreview
   const stylePreview = astelPreview || coronaPreview
-  const requestedPage = query.get('page')
+  const requestedPageValue = query.get('page')
+  const requestedPage = requestedPageValue === 'workflowFlow' ? 'orchestrationFlow' : requestedPageValue
   const [page, setPage] = useState(pages[requestedPage] ? requestedPage : 'dashboard')
   const [pageContext, setPageContext] = useState({})
   const [topbarSession, setTopbarSession] = useState(null)

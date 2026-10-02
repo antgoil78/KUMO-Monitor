@@ -864,7 +864,8 @@ function DagModal({ workflow, onClose }) {
     return () => { cancelled = true }
   }, [workflow.workflowId])
   const nodes = dag?.nodes || []
-  const done = nodes.filter(n => ['DONE', 'SUCCESS', 'SUCCEEDED', 'COMPLETED', 'OK'].includes(String(n.status).toUpperCase())).length
+  const warning = nodes.filter(n => statusKind(n.status) === 'warning').length
+  const done = nodes.filter(n => ['success', 'warning'].includes(statusKind(n.status))).length
   const failed = nodes.filter(n => ['ERROR', 'FAILED', 'FAILURE'].includes(String(n.status).toUpperCase())).length
   const percent = nodes.length ? Math.round((done / nodes.length) * 100) : 0
   const graph = useMemo(() => {
@@ -884,7 +885,7 @@ function DagModal({ workflow, onClose }) {
       return {
         id: String(node.id),
         position: { x: position.x - nodeWidth / 2, y: position.y - nodeHeight / 2 },
-        data: { label: <><span className={`dag-graph-dot ${kind}`} /><span>{node.label}</span><small>{String(node.status || 'UNKNOWN')}</small></> },
+        data: { label: <><span className={`dag-graph-dot ${kind}`} /><span>{node.label}</span><small>{String(node.status || 'UNKNOWN')}</small>{node.testsWarning > 0 && <em className="dag-test-count warning">{node.testsWarning} test {node.testsWarning === 1 ? 'warning' : 'warnings'}</em>}</> },
         className: `dag-graph-node ${kind}`,
         sourcePosition: 'right',
         targetPosition: 'left',
@@ -894,7 +895,7 @@ function DagModal({ workflow, onClose }) {
     const statusById = new Map(uniqueNodes.map(node => [String(node.id), statusKind(node.status)]))
     const flowEdges = validEdges.map((edge, index) => {
       const targetKind = statusById.get(String(edge.target)) || ''
-      const color = targetKind === 'failed' ? '#ff4b6e' : '#4779c9'
+      const color = targetKind === 'failed' ? '#ff4b6e' : targetKind === 'warning' ? '#ffb547' : '#4779c9'
       return {
         id: `dag-edge-${edge.source}-${edge.target}-${index}`,
         source: String(edge.source),
@@ -912,13 +913,13 @@ function DagModal({ workflow, onClose }) {
       {error && <div className="alert error">{error}</div>}
       {!dag && !error && <LoadingState>Loading DAG…</LoadingState>}
       {dag && <>
-        <div className="dag-summary"><StatusBadge status={dag.run?.STATUS || '—'} /><span>Run ID <code>{dag.run?.RUN_ID || '—'}</code></span><span>{done}/{nodes.length} completed</span>{failed > 0 && <span className="failed-text">{failed} failed</span>}</div>
+        <div className="dag-summary"><StatusBadge status={dag.run?.STATUS || '—'} />{warning > 0 && <StatusBadge status={`${warning} ${warning === 1 ? 'WARNING' : 'WARNINGS'}`} />}<span>Run ID <code>{dag.run?.RUN_ID || '—'}</code></span><span>{done}/{nodes.length} completed</span>{failed > 0 && <span className="failed-text">{failed} failed</span>}</div>
         <div className="dag-progress"><ProgressBar progress={{ percent, total: nodes.length, done, failed }} status={dag.run?.STATUS} /></div>
         {nodes.length ? (
           <div className="dag-graph" aria-label="DBT execution dependency graph">
             <ReactFlow nodes={graph.nodes} edges={graph.edges} fitView fitViewOptions={{ padding: 0.18 }} minZoom={0.15} maxZoom={1.8} nodesDraggable={false} nodesConnectable={false} elementsSelectable>
               <Background color="rgba(105, 139, 255, 0.18)" gap={22} size={1} />
-              <MiniMap pannable zoomable nodeColor={node => node.className?.includes('failed') ? '#ff4b6e' : node.className?.includes('success') ? '#01b574' : node.className?.includes('running') ? '#0075ff' : '#647695'} maskColor="rgba(3, 9, 31, 0.72)" />
+              <MiniMap pannable zoomable nodeColor={node => node.className?.includes('failed') ? '#ff4b6e' : node.className?.includes('warning') ? '#ffb547' : node.className?.includes('success') ? '#01b574' : node.className?.includes('running') ? '#0075ff' : '#647695'} maskColor="rgba(3, 9, 31, 0.72)" />
               <Controls showInteractive={false} />
             </ReactFlow>
           </div>
