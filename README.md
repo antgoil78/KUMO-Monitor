@@ -111,3 +111,34 @@ The Vite dev server proxies `/api` to the Flask backend on port `5000`.
 2. Keep `.env` local only; commit `.env.example`, code, and docs.
 3. Push the repo to Git.
 4. Build and deploy the Snowflake container from the Git source.
+
+## Orchestration access in SPCS
+
+The Workflow, Job and Flow pages read `KUMO_TST.MONITOR_APP`. Local runs use
+the configured `SNOWFLAKE_ROLE`, while SPCS service connections use the role
+that owns the service. The Orchestration endpoints use service credentials,
+as the existing admin pages do, even when a browser caller token is present.
+Users with access to the application can view and edit this shared catalog.
+Caller credentials continue to identify users for sessions and request logging;
+`CURRENT_USER()` in catalog table audit columns records the database service user.
+
+After creating the new schemas and tables, run
+[`backend/migrations/grant_monitor_orchestration_access.sql`](backend/migrations/grant_monitor_orchestration_access.sql)
+in a Snowflake worksheet as `SECURITYADMIN`, or another role authorized to
+manage existing and future grants in both schemas. Run its statements in order
+in the same session. It discovers the owner of
+`KUMO_ADMIN.KUMO_MONITOR.KUMO_MONITOR_SERVICE`, then grants database/schema
+`USAGE` and table `SELECT`, `INSERT`, `UPDATE` and `DELETE` in `MONITOR_APP` and
+`MONITOR_META`, including future tables. The included schema migration creates
+no tables in `MONITOR_META`; it is not queried by the Orchestration pages.
+
+Deploy the updated backend image so these endpoints use the service role.
+In the service specification, leave `SNOWFLAKE_ROLE` unset to use the service
+owner by default, or set it to that owner role. The owner also needs `USAGE`
+on the configured `SNOWFLAKE_WAREHOUSE`, as for the other admin pages.
+
+After deployment, check `/api/orchestration/catalog` and
+`/api/orchestration/flow` from the signed-in application. If an object still
+cannot be found, check that the service is in the account containing
+`KUMO_TST.MONITOR_APP` and that the schema migration created `WORKFLOW`, `JOB`,
+`WORKFLOW_JOB` and `WORKFLOW_DEPENDENCY` there.

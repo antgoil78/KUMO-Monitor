@@ -322,6 +322,11 @@ def query_service(sql, params=None, use_warehouse=True, include_context=True):
     return query(sql, params=params, use_warehouse=use_warehouse, include_context=include_context, force_service=True)
 
 
+def query_one_service(sql, params=None, use_warehouse=True, include_context=True):
+    """Return one row using the service context, even with a caller token."""
+    return query_one(sql, params=params, use_warehouse=use_warehouse, include_context=include_context, force_service=True)
+
+
 def execute_service(sql, params=None, use_warehouse=True, include_context=True):
     """Execute DML as the service context, even when caller-rights token is present."""
     return execute(sql, params=params, use_warehouse=use_warehouse, include_context=include_context, force_service=True)
