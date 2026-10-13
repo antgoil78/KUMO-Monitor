@@ -422,8 +422,6 @@ def _lock_payload(row):
 def cleanup_workflow_run_locks():
     """Release UI locks once history reaches a terminal state, and expire stale locks."""
     global _last_run_lock_cleanup_monotonic
-    if not _run_lock_table_available():
-        return
     now = time.monotonic()
     if now - _last_run_lock_cleanup_monotonic < 30:
         return
@@ -432,7 +430,7 @@ def cleanup_workflow_run_locks():
     terminal = ", ".join([f"'{s}'" for s in sorted(TERMINAL_RUN_STATUSES)])
     active = ", ".join([f"'{s}'" for s in sorted(ACTIVE_RUN_STATUSES)])
 
-    # A syntax error can prevent the body of a temporary execution task from
+    # A syntax error or task timeout can prevent a temporary execution task from
     # reaching SP_SQL_COMPLETE/SP_DBT_COMPLETE. Reconcile those failures from
     # Snowflake's authoritative task history. Do not infer failure from elapsed
     # time or a missing ENGINE_QUERY_ID; successful legacy runs omit that id too.
@@ -443,10 +441,15 @@ def cleanup_workflow_run_locks():
               tmp.RUN_ID,
               tmp.WORKFLOW_ID,
               th.QUERY_ID,
+              CONVERT_TIMEZONE('UTC', th.COMPLETED_TIME)::TIMESTAMP_NTZ AS END_TIME,
               th.ERROR_MESSAGE
             FROM TABLE({config.DB}.INFORMATION_SCHEMA.TASK_HISTORY(
-              SCHEDULED_TIME_RANGE_START => DATEADD('hour', -24, CURRENT_TIMESTAMP()),
-              RESULT_LIMIT => 1000
+              SCHEDULED_TIME_RANGE_START => DATEADD('day', -7, CURRENT_TIMESTAMP()),
+              SCHEDULED_TIME_RANGE_END => CURRENT_TIMESTAMP(),
+              DATABASE_NAME => '{sql_escape(config.DB)}',
+              SCHEMA_NAME => '{sql_escape(config.SCHEMA)}',
+              ERROR_ONLY => TRUE,
+              RESULT_LIMIT => 10000
             )) th
             JOIN {config.DB}.{config.SCHEMA}.WORKFLOW_TMP_TASKS tmp
               ON UPPER(th.NAME) = UPPER(tmp.TASK_NAME)
@@ -466,21 +469,43 @@ def cleanup_workflow_run_locks():
                 f"""
                 UPDATE {config.T_HISTORY}
                 SET STATUS = 'FAILED',
-                    END_TIME = COALESCE(END_TIME, {utc_now}),
+                    END_TIME = COALESCE(END_TIME, %(end_time)s::TIMESTAMP_NTZ, {utc_now}),
                     ERROR_MESSAGE = %(error_message)s,
                     UPDATED_AT = {utc_now}
                 WHERE RUN_ID = %(run_id)s
                   AND UPPER(COALESCE(STATUS, '')) IN ({active})
                 """,
-                {"run_id": failed.get("RUN_ID"), "error_message": error_message},
+                {"run_id": failed.get("RUN_ID"), "error_message": error_message,
+                 "end_time": failed.get("END_TIME")},
             )
             _execute(
-                f"UPDATE {config.T_QUEUE} SET STATUS = 'FAILED' WHERE RUN_ID = %(run_id)s",
+                f"""UPDATE {config.T_QUEUE} SET STATUS = 'FAILED'
+                    WHERE RUN_ID = %(run_id)s
+                      AND UPPER(COALESCE(STATUS, '')) IN ({active})""",
                 {"run_id": failed.get("RUN_ID")},
             )
+            # A timeout also bypasses the DBT completion status update. Match
+            # RUN_ID so recovering an older run cannot overwrite a newer one.
+            status_table = getattr(config, "WORKFLOW_STATUS_TABLE", None)
+            if status_table and object_exists(status_table):
+                _execute(
+                    f"""
+                    UPDATE {status_table}
+                    SET STATUS = 'ERROR',
+                        LOADED_DTTM = COALESCE(%(end_time)s::TIMESTAMP_NTZ, {utc_now})
+                    WHERE WORKFLOW_ID = %(workflow_id)s
+                      AND RUN_ID = %(run_id)s
+                      AND UPPER(COALESCE(STATUS, '')) = 'PROCESSING'
+                    """,
+                    {"workflow_id": failed.get("WORKFLOW_ID"),
+                     "run_id": failed.get("RUN_ID"), "end_time": failed.get("END_TIME")},
+                )
     except Exception:
         # Lock cleanup is best effort and must never take down monitor reads.
         pass
+
+    if not _run_lock_table_available():
+        return
 
     try:
         _execute(
@@ -521,9 +546,9 @@ def cleanup_workflow_run_locks():
 
 
 def load_active_run_locks(limit=500):
+    cleanup_workflow_run_locks()
     if not _run_lock_table_available():
         return []
-    cleanup_workflow_run_locks()
     limit = max(1, min(int(limit or 500), 2000))
     rows = _query(
         f"""

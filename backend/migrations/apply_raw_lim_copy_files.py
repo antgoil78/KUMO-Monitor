@@ -52,7 +52,9 @@ FILE_SELECTION_REPLACEMENT = """    INSERT INTO TMP_RAW_LIM_FILES (FILE_PATH, FI
     SELECT
           IFF(
               STARTSWITH("name", :V_STAGE_URL || ''/''),
-              SUBSTR("name", LENGTH(:V_STAGE_URL) + 2),
+              -- Keep the leading slash: Snowflake concatenates the external
+              -- stage URL and FILES entries without inserting a separator.
+              SUBSTR("name", LENGTH(:V_STAGE_URL) + 1),
               "name"
           ),
           SPLIT_PART("name", ''/'', -1),
