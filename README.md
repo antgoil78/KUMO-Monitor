@@ -112,6 +112,20 @@ The Vite dev server proxies `/api` to the Flask backend on port `5000`.
 3. Push the repo to Git.
 4. Build and deploy the Snowflake container from the Git source.
 
+## Snowflake definitions and account migration
+
+Current table, procedure and persistent task definitions are stored under
+[`snowflake/`](snowflake/README.md), together with supporting views, functions,
+streams and file formats, an object inventory, a restore order and a repeatable
+export script. Generated
+workflow scheduler tasks and temporary workflow run tasks are excluded.
+
+**Whenever a Snowflake object is updated, always update its SQL definition in
+Git as part of the same change.** This also applies to edits made directly in
+Snowsight. Refresh the definitions with `python snowflake/export_ddl.py`, review
+the Git diff, and commit the changed SQL and any applicable migration script.
+Repository agents follow the same rule in [`AGENTS.md`](AGENTS.md).
+
 ## Orchestration access in SPCS
 
 The Workflow, Job and Flow pages read `KUMO_TST.MONITOR_APP`. Local runs use

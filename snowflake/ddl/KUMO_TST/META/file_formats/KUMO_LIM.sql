@@ -1,0 +1,10 @@
+-- Source: KUMO_TST.META.KUMO_LIM
+-- Refresh: python snowflake/export_ddl.py
+USE DATABASE "KUMO_TST";
+USE SCHEMA "KUMO_TST"."META";
+
+CREATE OR REPLACE FILE FORMAT KUMO_TST.META.KUMO_LIM
+	FIELD_DELIMITER = 'NONE'
+	ENCODING = 'ISO88591'
+COMMENT='File format to handle all LIM files'
+;

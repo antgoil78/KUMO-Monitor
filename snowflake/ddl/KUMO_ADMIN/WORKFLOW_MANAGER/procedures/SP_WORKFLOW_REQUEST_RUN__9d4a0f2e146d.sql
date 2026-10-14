@@ -1,0 +1,118 @@
+-- Source: KUMO_ADMIN.WORKFLOW_MANAGER.SP_WORKFLOW_REQUEST_RUN(VARCHAR, VARCHAR, VARCHAR, NUMBER, VARCHAR)
+-- Refresh: python snowflake/export_ddl.py
+USE DATABASE "KUMO_ADMIN";
+USE SCHEMA "KUMO_ADMIN"."WORKFLOW_MANAGER";
+
+CREATE OR REPLACE PROCEDURE KUMO_ADMIN.WORKFLOW_MANAGER.SP_WORKFLOW_REQUEST_RUN("P_WORKFLOW_ID" VARCHAR, "P_TRIGGER_SOURCE" VARCHAR, "P_CHAIN_ID" VARCHAR, "P_CHAIN_DEPTH" NUMBER(38,0), "P_PARENT_RUN_ID" VARCHAR)
+RETURNS VARCHAR
+LANGUAGE SQL
+EXECUTE AS OWNER
+AS '
+DECLARE
+  V_RUN_ID         STRING DEFAULT UUID_STRING();
+  V_QUEUE_ID       STRING DEFAULT UUID_STRING();
+
+  V_CHAIN_ID       STRING;
+  V_CHAIN_DEPTH    NUMBER;
+
+  V_TRIGGER_SOURCE STRING;
+BEGIN
+  --------------------------------------------------------------------
+  -- Normalize inputs into variables (avoid expressions in VALUES)
+  --------------------------------------------------------------------
+  V_TRIGGER_SOURCE := COALESCE(NULLIF(TRIM(:P_TRIGGER_SOURCE), ''''), ''UNKNOWN'');
+
+  V_CHAIN_ID := COALESCE(NULLIF(TRIM(:P_CHAIN_ID), ''''), V_RUN_ID);
+  V_CHAIN_DEPTH := COALESCE(:P_CHAIN_DEPTH, 0);
+
+  --------------------------------------------------------------------
+  -- 1) Insert into HISTORY (as QUEUED)
+  --------------------------------------------------------------------
+  INSERT INTO KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOW_HISTORY (
+      RUN_ID,
+      WORKFLOW_ID,
+      STATUS,
+      REQUESTED_AT,
+      REQUESTED_BY,
+      TRIGGER_SOURCE,
+      CHAIN_ID,
+      CHAIN_DEPTH,
+      PARENT_RUN_ID,
+      UPDATED_AT
+  )
+  VALUES (
+      :V_RUN_ID,
+      :P_WORKFLOW_ID,
+      ''QUEUED'',
+      SYSDATE(),
+      CURRENT_USER(),
+      :V_TRIGGER_SOURCE,
+      :V_CHAIN_ID,
+      :V_CHAIN_DEPTH,
+      :P_PARENT_RUN_ID,
+      SYSDATE()
+  );
+
+  --------------------------------------------------------------------
+  -- 2) Insert into RUN_QUEUE (as QUEUED)
+  --------------------------------------------------------------------
+  INSERT INTO KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOW_RUN_QUEUE (
+      QUEUE_ID,
+      WORKFLOW_ID,
+      RUN_ID,
+      STATUS,
+      REQUESTED_AT,
+      REQUESTED_BY
+  )
+  VALUES (
+      :V_QUEUE_ID,
+      :P_WORKFLOW_ID,
+      :V_RUN_ID,
+      ''QUEUED'',
+      SYSDATE(),
+      CURRENT_USER()
+  );
+
+  --------------------------------------------------------------------
+  -- KUMO_EXTERNAL_RUN_LOCK_TRACKING_V1
+  -- Register runs from dependency rules, schedules, and external SQL.
+  --------------------------------------------------------------------
+  MERGE INTO KUMO_ADMIN.WORKFLOW_MANAGER.APP_WORKFLOW_RUN_LOCKS t
+  USING (
+    SELECT
+      UUID_STRING() AS LOCK_ID,
+      :P_WORKFLOW_ID AS WORKFLOW_ID,
+      COALESCE(w.WORKFLOW_NAME, :P_WORKFLOW_ID) AS WORKFLOW_NAME,
+      :V_RUN_ID AS RUN_ID,
+      CURRENT_USER() AS REQUESTED_BY
+    FROM KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOWS w
+    WHERE w.WORKFLOW_ID = :P_WORKFLOW_ID
+  ) s
+  ON t.WORKFLOW_ID = s.WORKFLOW_ID
+     AND t.RELEASED_AT IS NULL
+     AND t.LOCK_EXPIRES_AT >= CURRENT_TIMESTAMP()
+  WHEN MATCHED THEN UPDATE SET
+    RUN_ID = s.RUN_ID,
+    STATUS = ''QUEUED'',
+    WORKFLOW_NAME = s.WORKFLOW_NAME,
+    REQUESTED_BY = s.REQUESTED_BY,
+    REQUESTED_BY_USER = s.REQUESTED_BY,
+    LAST_SEEN_AT = CURRENT_TIMESTAMP(),
+    LOCK_EXPIRES_AT = DATEADD(''minute'', 360, CURRENT_TIMESTAMP()),
+    MESSAGE = ''Queued through SP_WORKFLOW_REQUEST_RUN'',
+    UPDATED_AT = CURRENT_TIMESTAMP()
+  WHEN NOT MATCHED THEN INSERT (
+    LOCK_ID, WORKFLOW_ID, WORKFLOW_NAME, RUN_ID, STATUS,
+    REQUESTED_BY, REQUESTED_BY_USER, REQUESTED_BY_ROLE, SESSION_MODE,
+    REQUESTED_AT, LAST_SEEN_AT, LOCK_EXPIRES_AT, MESSAGE, UPDATED_AT
+  ) VALUES (
+    s.LOCK_ID, s.WORKFLOW_ID, s.WORKFLOW_NAME, s.RUN_ID, ''QUEUED'',
+    s.REQUESTED_BY, s.REQUESTED_BY, CURRENT_ROLE(), ''SNOWFLAKE_SQL'',
+    CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP(),
+    DATEADD(''minute'', 360, CURRENT_TIMESTAMP()),
+    ''Queued through SP_WORKFLOW_REQUEST_RUN'', CURRENT_TIMESTAMP()
+  );
+
+  RETURN V_RUN_ID;
+END;
+';
