@@ -37,7 +37,7 @@ BEGIN
 
         v_tbl := rec.TABLE_NAME;
         v_fmt := SUBSTRING(v_tbl, 9);
-        v_pattern := ''.*'' || v_fmt || ''[^/]*$'';
+        v_pattern := ''^(?!.*(?i:deleted_)).*'' || v_fmt || ''[^/]*$'';
         v_copy_ok := FALSE;
         v_audit_rows := 0;
 

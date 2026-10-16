@@ -127,7 +127,7 @@ BEGIN
      DLVY_PKG_YEAR VARCHAR, DLVY_PKG_YEAR_SEQ_NO VARCHAR);
 
     -- 7. List files
-    V_LIST_PATTERN := ''.*'' || V_LIM_FORMAT || ''[^/]*$'';
+    V_LIST_PATTERN := ''^(?!.*(?i:deleted_)).*'' || V_LIM_FORMAT || ''[^/]*$'';
     V_LIST_SQL := ''LIST '' || V_STAGE_REF || '' PATTERN = '''''' || V_LIST_PATTERN || '''''''';
     EXECUTE IMMEDIATE :V_LIST_SQL;
     V_LIST_QUERY_ID := SQLID;
