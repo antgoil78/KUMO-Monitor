@@ -8,6 +8,7 @@ import History from './pages/History.jsx'
 import Notifications from './pages/Notifications.jsx'
 import FileIngestion, { FileIngestionDetail } from './pages/FileIngestion.jsx'
 import LimReload from './pages/LimReload.jsx'
+import BatchControl from './pages/BatchControl.jsx'
 import DagView from './pages/DagView.jsx'
 import ExecutionLog from './pages/ExecutionLog.jsx'
 import Admin from './pages/Admin.jsx'
@@ -26,6 +27,7 @@ const pages = {
   fileIngestion: FileIngestion,
   fileIngestionDetail: FileIngestionDetail,
   limReload: LimReload,
+  batchControl: BatchControl,
   dag: DagView,
   executionLog: ExecutionLog,
   admin: Admin,

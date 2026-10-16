@@ -14,6 +14,7 @@ const navItems = [
   ] },
   { key: 'lim', label: 'LIM', icon: '⇩', children: [
     { key: 'fileIngestion', label: 'Ingestion', icon: '⇩' },
+    { key: 'batchControl', label: 'Batch Control', icon: '▤' },
     { key: 'limReload', label: 'Load / Reload', icon: '↻' }
   ] },
   { key: 'notifications', label: 'Notifications', icon: '✉' },

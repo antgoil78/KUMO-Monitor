@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 from notification_admin import notification_admin_bp
 from file_ingestion import file_ingestion_bp
+from batch_control import batch_control_bp
 
 load_dotenv()
 
@@ -31,6 +32,7 @@ CORS(app)
 
 app.register_blueprint(notification_admin_bp)
 app.register_blueprint(file_ingestion_bp)
+app.register_blueprint(batch_control_bp)
 
 
 logging.basicConfig(level=logging.INFO)
