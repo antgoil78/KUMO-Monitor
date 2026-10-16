@@ -26,3 +26,17 @@
 .batch-control-pagination > div { display: flex; align-items: center; gap: 12px; }
 .batch-control-pagination.top { border-bottom: 1px solid var(--line-soft); }
 .batch-control-table .batch-control-empty { padding: 40px 16px; text-align: center; color: var(--muted); }
+.batch-control-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.batch-control-group-row { cursor: pointer; }
+.batch-control-group-row.expanded { background: rgba(0,117,255,.09); }
+.batch-control-expand-heading { width: 38px; }
+.batch-control-table .batch-control-expand-cell { padding: 8px; width: 38px; }
+.batch-control-expand { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--line-soft); border-radius: 4px; color: #7fb9ff; background: transparent; cursor: pointer; }
+.batch-control-table .batch-control-detail-row > td { padding: 0; white-space: normal; }
+.batch-control-file-details { min-width: 0; contain: inline-size; padding: 18px; background: #10131b; border-left: 3px solid #0075ff; }
+.batch-control-detail-heading { margin-bottom: 16px; }
+.batch-control-detail-heading > div { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.batch-control-detail-heading strong { color: #fff; font-size: 13px; }
+.batch-control-detail-heading span { color: var(--muted); font-size: 12px; }
+.batch-control-file-details .batch-control-table-scroll { max-width: 100%; }
+.batch-control-files-table { background: #191c24; }

@@ -109,6 +109,53 @@ class BatchControlTests(unittest.TestCase):
         self.assertEqual(response.get_json()["source"], "mock")
         self.connection.assert_not_called()
 
+    def test_summary_uses_requested_grouping_and_stable_default_order(self):
+        self.cursor.fetchall.return_value = [{
+            "LIM": "CUAR000", "FILES": 3, "RECS": Decimal("1450"),
+            "GROUP_KEY": "a" * 64, "PROCESSED_FL": True, "DELETED_FL": False,
+        }]
+        response = self.client.get("/api/lim/batch-control/groups")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["rows"][0]["RECS"], 1450)
+        self.assertEqual(len(response.get_json()["columns"]), 8)
+        for call in self.cursor.execute.call_args_list:
+            self.assertIn("SUBSTR(DW_FILE_NM, 4, 7) AS LIM", call.args[0])
+            self.assertIn("COUNT(*) AS FILES, SUM(NO_OF_RECS) AS RECS", call.args[0])
+            self.assertIn("GROUP BY ALL", call.args[0])
+        self.assertIn('ORDER BY "READY_TO_LOAD_DTTM" DESC NULLS LAST, "LIM" ASC NULLS LAST, "PROCESSED_DTTM" DESC NULLS LAST', self.cursor.execute.call_args.args[0])
+
+    def test_detail_filters_both_count_and_rows_by_exact_group_identity(self):
+        key = "a" * 64
+        response = self.client.get("/api/lim/batch-control", query_string={"groupKey": key, "search": "CUAR"})
+        self.assertEqual(response.status_code, 200)
+        for call in self.cursor.execute.call_args_list:
+            self.assertEqual(call.args[1]["group_key"], key)
+            self.assertIn(batches.GROUP_KEY_SQL + " = %(group_key)s", call.args[0])
+            self.assertNotIn(key, call.args[0])
+        # Raw nanoseconds and all nullable grouping fields participate in the
+        # shared identity, so sibling groups cannot leak into expanded files.
+        for field in ("READY_TO_LOAD_DTTM", "DW_VER_CTRL", "PROCESSED_DTTM", "PROCESSED_FL", "DELETED_FL"):
+            self.assertIn(field, batches.GROUP_KEY_SQL)
+        self.assertIn("FF9", batches.GROUP_KEY_SQL)
+
+    def test_summary_sort_and_search_are_validated_independently_of_file_columns(self):
+        for column in ("FILES", "RECS", "LIM"):
+            response = self.client.get("/api/lim/batch-control/groups", query_string={"sortBy": column, "sortDirection": "desc", "search": "Yes"})
+            self.assertEqual(response.status_code, 200)
+            sql, params = self.cursor.execute.call_args.args
+            self.assertIn(f'ORDER BY "{column}" DESC NULLS LAST', sql)
+            self.assertEqual(params["search"], "Yes")
+            self.assertIn('IFF("PROCESSED_FL", \'Yes\', \'No\')', sql)
+        self.connection.reset_mock()
+        for path in (
+            "/api/lim/batch-control/groups?sortBy=DW_FILE_NM",
+            "/api/lim/batch-control/groups?sortBy=FILES;DROP",
+            "/api/lim/batch-control?groupKey=invalid",
+            "/api/lim/batch-control/groups?groupKey=" + "a" * 64,
+        ):
+            self.assertEqual(self.client.get(path).status_code, 400)
+        self.connection.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

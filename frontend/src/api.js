@@ -47,6 +47,7 @@ let sessionRequest = null
 
 export const api = {
   batchControl: params => requestJson(`/api/lim/batch-control?${new URLSearchParams(params)}`, { timeoutMs: 120000 }),
+  batchControlGroups: params => requestJson(`/api/lim/batch-control/groups?${new URLSearchParams(params)}`, { timeoutMs: 120000 }),
   health: () => requestJson('/api/health'),
   activity: () => requestJson('/api/activity', { timeoutMs: 5000 }),
   adminActivityLog: (limit = 500) => requestJson(`/api/admin/activity-log?limit=${limit}`, { timeoutMs: 5000 }),
