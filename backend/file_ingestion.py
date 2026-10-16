@@ -1078,6 +1078,7 @@ def file_ingestion_reload():
                 "STATUS": "SUCCESS", "LOAD_MODE": effective_mode, "LIM_FORMAT": lim_format,
                 "FROM_DLVY_END_DATE": from_date, "TO_DLVY_END_DATE": to_date,
                 "FILES_SELECTED": 0, "RAW_ROWS_DELETED": 0, "COPY_COMMANDS_EXECUTED": 0,
+                "LIM_BATCH_CTRL_DELETED": 0,
                 },
             }
             with _reload_jobs_lock:

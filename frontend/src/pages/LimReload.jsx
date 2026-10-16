@@ -7,13 +7,14 @@ import './LimReload.css'
 const modes = [
   { value: 'NORMAL', label: 'New load', description: 'Load matching files that Snowflake has not already loaded.' },
   { value: 'PARTIAL_RELOAD', label: 'Partial reload', description: 'Clean and force reload files in a delivery end-date range.' },
-  { value: 'FULL_RELOAD', label: 'Full reload', description: 'Clone affected SDL tables and rebuild RAW from staged files. SDL is rebuilt from RAW when the SDL job next executes.' }
+  { value: 'FULL_RELOAD', label: 'Full reload', description: 'Clear all batch-control records for the subject, clone affected SDL tables and rebuild RAW from staged files. SDL is rebuilt on its next job run.' }
 ]
 
 const resultLabels = {
   STATUS: 'Status', LOAD_MODE: 'Load mode', LIM_FORMAT: 'LIM format', FROM_DLVY_END_DATE: 'From date',
   TO_DLVY_END_DATE: 'To date', FILES_SELECTED: 'Files selected', RAW_ROWS_DELETED: 'RAW rows deleted',
   SET_READY_LOG_DELETED: 'Ready log deleted',
+  LIM_BATCH_CTRL_DELETED: 'Batch control rows deleted',
   TMP_SET_READY_LOG_DELETED: 'Temporary log deleted', PKG_CONTROL_ROWS_RESET: 'Package controls reset',
   COPY_COMMANDS_EXECUTED: 'Copy commands', SDL_TABLES_CLONED: 'SDL tables cloned',
   SDL_CLONES_CREATED: 'SDL clones created', SDL_TABLES_DROPPED: 'SDL tables dropped'
@@ -37,6 +38,7 @@ export default function LimReload() {
   const usesDateRange = !isFull && hasDateRange
   const effectiveFullReload = isReload && !usesDateRange
   const selectedMode = modes.find(mode => mode.value === form.mode)
+  const batchControlImpact = `All LIM_BATCH_CTRL records for ${form.limFormat || 'the selected subject area'} will be deleted across all dates and processing statuses. Batch tracking will be rebuilt as files are registered again.`
 
   useEffect(() => {
     let cancelled = false
@@ -73,7 +75,7 @@ export default function LimReload() {
     return ''
   }, [form, isFull, isReload, hasDateRange, subjectsLoading])
 
-  function patch(field, value) { setForm(previous => ({ ...previous, [field]: value })) }
+  function patch(field, value) { setForm(previous => ({ ...previous, [field]: value, ...(['limFormat', 'fromDate', 'toDate'].includes(field) ? { confirmed: false } : {}) })) }
   function chooseMode(mode) {
     setForm(previous => ({ ...previous, mode, confirmed: false, resetPackageCheck: mode !== 'NORMAL' }))
     setFullConfirmOpen(false)
@@ -105,7 +107,7 @@ export default function LimReload() {
   function submit(event) {
     event.preventDefault()
     if (validation || running) return
-    if (isFull) {
+    if (effectiveFullReload) {
       setFullConfirmOpen(true)
       return
     }
@@ -125,13 +127,13 @@ export default function LimReload() {
           <fieldset className="reload-section mode-fieldset"><legend>Operation</legend><div className="reload-mode-grid">{modes.map(mode => <label key={mode.value} className={`reload-mode ${form.mode === mode.value ? 'selected' : ''} ${mode.value === 'FULL_RELOAD' ? 'danger' : ''}`}><input type="radio" name="mode" checked={form.mode === mode.value} onChange={() => chooseMode(mode.value)} /><strong>{mode.label}</strong><span>{mode.description}</span></label>)}</div></fieldset>
           {!isFull && <div className="reload-section"><span className="reload-label">Delivery end-date range <em>optional</em></span><div className="reload-date-grid"><label>From<input type="date" value={form.fromDate} onChange={event => patch('fromDate', event.target.value)} /></label><label>To<input type="date" value={form.toDate} onChange={event => patch('toDate', event.target.value)} /></label></div><small>Leave both blank to pass NULL dates. For a reload, this performs a full reload of the selected subject area. Dates refer to DLVY_END_DATE in the filename.</small></div>}
           <div className="reload-section reload-options"><label><input type="checkbox" checked={form.resetPackageCheck} onChange={event => patch('resetPackageCheck', event.target.checked)} /><span><strong>Reset package sequence control</strong><small>Clear package year and sequence values for active rows in this subject area.</small></span></label><label><input type="checkbox" checked={form.setReadyToLoad} onChange={event => patch('setReadyToLoad', event.target.checked)} /><span><strong>Set Ready to Load</strong><small>Set DW_READY_TO_LOAD_FL to TRUE and bypass the normal KUMO Monitor readiness flow.</small></span></label></div>
-          {isReload && <label className={`reload-confirm ${isFull ? 'danger' : ''}`}><input type="checkbox" checked={form.confirmed} onChange={event => patch('confirmed', event.target.checked)} /><span><strong>{isFull ? 'Acknowledge full reload impact' : 'Confirm reload'}</strong><small>{isFull ? `Affected SDL tables are cloned for recovery before they are dropped. RAW_LIM_${form.limFormat || '<SUBJECT>'} and related metadata are then cleared and all staged files are reloaded. SDL tables are rebuilt from RAW when the SDL job is executed next time.` : 'Existing RAW rows and related metadata in the selected date range will be deleted before files are reloaded.'}</small></span></label>}
+          {isReload && <label className={`reload-confirm ${effectiveFullReload ? 'danger' : ''}`}><input type="checkbox" checked={form.confirmed} onChange={event => patch('confirmed', event.target.checked)} /><span><strong>{effectiveFullReload ? 'Acknowledge full reload impact' : 'Confirm reload'}</strong><small>{effectiveFullReload ? `Affected SDL tables are cloned for recovery before they are dropped. RAW_LIM_${form.limFormat || '<SUBJECT>'} and related metadata are then cleared and all staged files are reloaded. ${batchControlImpact} SDL tables are rebuilt from RAW when the SDL job is executed next time.` : 'Existing RAW rows and related metadata in the selected date range will be deleted before files are reloaded.'}</small></span></label>}
           {validation && <div className="reload-validation">{validation}</div>}{error && <div className="alert error">{error}</div>}
           <button className={`button primary reload-submit ${running ? 'running' : ''} ${effectiveFullReload ? 'danger' : ''}`} type="submit" disabled={Boolean(validation) || running} aria-live="polite">{running ? <><span className="reload-spinner" aria-hidden="true" /><span>Running procedure<span className="running-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span></span><small>{elapsedSeconds}s</small></> : effectiveFullReload ? 'Full reload' : selectedMode.label}</button>
           {running && <div className="reload-running-note" role="status"><span className="reload-running-pulse" /><span><strong>Snowflake is processing the request</strong><small>Keep this page open. Results will appear automatically when the procedure completes.</small></span></div>}
         </div>
         <aside className="reload-side">
-          <div className="reload-card reload-summary"><span className="modal-eyebrow">Execution summary</span><h2>{effectiveFullReload ? 'Full reload' : selectedMode.label}</h2><p>{effectiveFullReload ? 'Affected SDL tables are cloned first and RAW is rebuilt from all staged files. SDL tables are rebuilt from RAW when the SDL job is executed next time.' : selectedMode.description}</p><dl><div><dt>Format</dt><dd>{form.limFormat || '—'}</dd></div><div><dt>Date scope</dt><dd>{usesDateRange ? `${form.fromDate} → ${form.toDate}` : 'NULL → all files'}</dd></div><div><dt>Force reload</dt><dd>{isReload ? 'Yes' : 'No'}</dd></div>{effectiveFullReload && <div><dt>SDL recovery clone</dt><dd>Created before drop</dd></div>}<div><dt>Reset sequence</dt><dd>{form.resetPackageCheck ? 'Yes' : 'No'}</dd></div><div><dt>Ready to load</dt><dd>{form.setReadyToLoad ? 'Yes' : 'No'}</dd></div></dl></div>
+          <div className="reload-card reload-summary"><span className="modal-eyebrow">Execution summary</span><h2>{effectiveFullReload ? 'Full reload' : selectedMode.label}</h2><p>{effectiveFullReload ? `Affected SDL tables are cloned first and RAW is rebuilt from all staged files. ${batchControlImpact} SDL tables are rebuilt from RAW when the SDL job is executed next time.` : selectedMode.description}</p><dl><div><dt>Format</dt><dd>{form.limFormat || '—'}</dd></div><div><dt>Date scope</dt><dd>{usesDateRange ? `${form.fromDate} → ${form.toDate}` : 'NULL → all files'}</dd></div><div><dt>Force reload</dt><dd>{isReload ? 'Yes' : 'No'}</dd></div>{effectiveFullReload && <div><dt>SDL recovery clone</dt><dd>Created before drop</dd></div>}{effectiveFullReload && <div><dt>Batch control</dt><dd>Clear all {form.limFormat} records</dd></div>}<div><dt>Reset sequence</dt><dd>{form.resetPackageCheck ? 'Yes' : 'No'}</dd></div><div><dt>Ready to load</dt><dd>{form.setReadyToLoad ? 'Yes' : 'No'}</dd></div></dl></div>
           {result && <div className="reload-card reload-result"><span className="modal-eyebrow">Procedure result</span><h2 className={result.STATUS === 'SUCCESS' ? 'success-text' : ''}>{result.STATUS || 'Completed'}</h2><div className="reload-result-grid">{Object.entries(result).map(([key, value]) => <div key={key}><span>{resultLabels[key] || key.replaceAll('_', ' ')}</span><strong>{value === null || value === '' ? '—' : String(value)}</strong></div>)}</div></div>}
         </aside>
       </form>
@@ -143,6 +145,7 @@ export default function LimReload() {
             <h2 id="full-reload-confirm-title">Full reload {form.limFormat}</h2>
             <p>This operation changes both RAW and SDL data. Confirm only when the subject area is ready for a complete rebuild.</p>
             <ol className="reload-confirm-steps">
+              <li><strong>Clear batch control</strong><span>{batchControlImpact}</span></li>
               <li><strong>Clone SDL tables</strong><span>A recovery copy of the affected SDL tables is created before destructive work begins.</span></li>
               <li><strong>Drop affected SDL tables</strong><span>The existing SDL tables that are loaded from this RAW subject area are removed.</span></li>
               <li><strong>Rebuild RAW</strong><span>RAW_LIM_{form.limFormat} and related metadata are cleared and all staged files are loaded again.</span></li>
