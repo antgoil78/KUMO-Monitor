@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useRuntimeConfig } from '../RuntimeConfig.jsx'
 import { createPortal } from 'react-dom'
 import { fileIngestionApi } from '../fileIngestionApi.js'
 import PageHeader from '../components/PageHeader.jsx'
@@ -398,7 +399,8 @@ function previousSequence(value) {
   return Number.isFinite(number) && number > 0 ? String(number - 1).padStart(text.length, '0') : text
 }
 
-function resolutionFor(error, file) {
+function resolutionFor(error, file, context) {
+  if (!context) return { title: 'Environment configuration unavailable', description: 'Reload the page to retrieve the environment configuration before generating SQL.', sql: '' }
   const reason = String(error?.REASON || '').toUpperCase()
   const isMissing = reason.includes('MISSING') || file?.RECEIVED_FL === false
   const isSequence = reason.includes('INVALID_SEQUENCE') || file?.IS_VALID_SEQUENCE === false
@@ -407,7 +409,7 @@ function resolutionFor(error, file) {
   if (isMissing && file) {
     const expectedFile = sqlString(file.FILE_NAME)
     const controlFile = sqlString(file.CONTROL_FILE_NAME)
-    const rawTable = /^[A-Z0-9_$.]+$/i.test(file.RAW_TABLE || '') ? file.RAW_TABLE : 'KUMO_TST.RAW_LIM.RAW_LIM_CUAR'
+    const rawTable = /^[A-Z0-9_$.]+$/i.test(file.RAW_TABLE || '') ? file.RAW_TABLE : `${context.rawLimNamespace}.RAW_LIM_CUAR`
     const subject = sqlString(file.DLVY_SUBJECT_AREA_ID || 'CUAR')
     return {
       title: 'Remove the file from the control-file expectation',
@@ -420,7 +422,7 @@ SET control_file = '${controlFile}';
 SELECT FILE_NAME, CONTROL_FILE_NAME, DLVY_SOURCE_ID, DLVY_PKG_ID,
        DLVY_PKG_YEAR, DLVY_PKG_YEAR_SEQ_NO, DLVY_END_DATE,
        EXPECTED_BY_CONTROL_FL, RECEIVED_FL, RUN_DTTM
-FROM KUMO_TST.RAW_LIM.RAW_LIM_META
+FROM ${context.rawLimMetaTable}
 WHERE FILE_NAME = $expected_file
 ORDER BY RUN_DTTM DESC;
 
@@ -461,7 +463,7 @@ WHERE EXPECTED_FILE = $expected_file;
 --       ), 'YYYYMMDD') = $expected_file;
 
 -- 4. Rebuild metadata and rerun the READY workflow afterward
--- CALL KUMO_ADMIN.WORKFLOW_MANAGER.SP_RAW_LIM_META_REFRESH('${subject}');`
+-- CALL ${context.engineNamespace}.SP_RAW_LIM_META_REFRESH('${subject}'${context.environment ? `, '${context.limDatabase}'` : ''});`
     }
   }
 
@@ -477,13 +479,13 @@ WHERE EXPECTED_FILE = $expected_file;
       title: 'Correct the expected package sequence',
       description: `The received sequence ${receivedSequence} cannot follow the configured sequence ${configuredSequence || '—'}. Review the gap, then update the stored sequence to ${nextExpectedBase} so ${receivedSequence} becomes the next expected package.`,
       warning: 'Review whether the missing sequence is intentionally skipped before running this update.',
-      sql: `-- Review the current configured sequence\nSELECT PKG_GROUP_NAME, SOURCE_ID, DLVY_PKG_YEAR, DLVY_PKG_YEAR_SEQ_NO, UPDATED_AT\nFROM KUMO_ADMIN.WORKFLOW_MANAGER.RAW_LIM_PKG_GROUP_SOURCE\nWHERE PKG_GROUP_NAME = '${group}'\n  AND UPPER(SOURCE_ID) = '${source}';\n\n-- Advance the stored sequence immediately before the received package\nUPDATE KUMO_ADMIN.WORKFLOW_MANAGER.RAW_LIM_PKG_GROUP_SOURCE\nSET DLVY_PKG_YEAR = '${receivedYear}',\n    DLVY_PKG_YEAR_SEQ_NO = '${nextExpectedBase}',\n    UPDATED_AT = CURRENT_TIMESTAMP()\nWHERE PKG_GROUP_NAME = '${group}'\n  AND UPPER(SOURCE_ID) = '${source}'\n  AND DLVY_PKG_YEAR = '${configuredYear}'\n  AND DLVY_PKG_YEAR_SEQ_NO = '${configuredSequence}';`
+      sql: `-- Review the current configured sequence\nSELECT PKG_GROUP_NAME, SOURCE_ID, DLVY_PKG_YEAR, DLVY_PKG_YEAR_SEQ_NO, UPDATED_AT\nFROM ${context.rawLimPkgGroupSourceTable}\nWHERE PKG_GROUP_NAME = '${group}'\n  AND UPPER(SOURCE_ID) = '${source}';\n\n-- Advance the stored sequence immediately before the received package\nUPDATE ${context.rawLimPkgGroupSourceTable}\nSET DLVY_PKG_YEAR = '${receivedYear}',\n    DLVY_PKG_YEAR_SEQ_NO = '${nextExpectedBase}',\n    UPDATED_AT = CURRENT_TIMESTAMP()\nWHERE PKG_GROUP_NAME = '${group}'\n  AND UPPER(SOURCE_ID) = '${source}'\n  AND DLVY_PKG_YEAR = '${configuredYear}'\n  AND DLVY_PKG_YEAR_SEQ_NO = '${configuredSequence}';`
     }
   }
 
   if (isRowcount && file) {
     const fileName = sqlString(file.FILE_NAME)
-    const rawTable = /^[A-Z0-9_$.]+$/i.test(file.RAW_TABLE || '') ? file.RAW_TABLE : 'KUMO_TST.RAW_LIM.RAW_LIM_CACT'
+    const rawTable = /^[A-Z0-9_$.]+$/i.test(file.RAW_TABLE || '') ? file.RAW_TABLE : `${context.rawLimNamespace}.RAW_LIM_CACT`
     return {
       title: 'Investigate the row-count mismatch',
       description: `The control metadata expects ${formatValue(file.EXPECTED_ROWS)} rows, while RAW contains ${formatValue(file.ACTUAL_ROWS)}. Run these read-only statements in a Snowflake worksheet to inspect the discrepancy.`,
@@ -495,7 +497,7 @@ WHERE EXPECTED_FILE = $expected_file;
 
 -- 1. Expected and detected row counts from LIM metadata
 SELECT FILE_NAME, EXPECTED_ROWS, DATA_ROWS, ACTUAL_ROWS, ROWCOUNT_STATUS
-FROM KUMO_TST.RAW_LIM.RAW_LIM_META
+FROM ${context.rawLimMetaTable}
 WHERE FILE_NAME = $file_name
 QUALIFY RUN_DTTM = MAX(RUN_DTTM) OVER (PARTITION BY FILE_NAME);
 
@@ -580,7 +582,7 @@ ORDER BY DUPLICATE_NUMBER;
 -- WHERE target.DW_FILE_NM = duplicates.DW_FILE_NM;
 
 -- 8. Refresh metadata after removal, then rerun the READY workflow
--- CALL KUMO_ADMIN.WORKFLOW_MANAGER.SP_RAW_LIM_META_REFRESH('${sqlString(file.DLVY_SUBJECT_AREA_ID)}');`
+-- CALL ${context.engineNamespace}.SP_RAW_LIM_META_REFRESH('${sqlString(file.DLVY_SUBJECT_AREA_ID)}'${context.environment ? `, '${context.limDatabase}'` : ''});`
     }
   }
 
@@ -589,7 +591,8 @@ ORDER BY DUPLICATE_NUMBER;
 
 function SuggestedResolution({ error, file, onClose }) {
   const [copied, setCopied] = useState(false)
-  const resolution = resolutionFor(error, file)
+  const context = useRuntimeConfig()
+  const resolution = resolutionFor(error, file, context)
   async function copySql() {
     await navigator.clipboard.writeText(resolution.sql)
     setCopied(true)

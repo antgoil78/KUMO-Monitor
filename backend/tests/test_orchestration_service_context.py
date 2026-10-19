@@ -30,6 +30,15 @@ class OrchestrationServiceContextTests(unittest.TestCase):
             patch.object(config, "USE_MOCK", False),
             patch.object(application, "_renew_activity_lease"),
         ]
+        # Run every read and write against DEV to detect remaining TST literals.
+        for name, table in (
+            ("T_ORCHESTRATION_WORKFLOW", "WORKFLOW"),
+            ("T_ORCHESTRATION_JOB", "JOB"),
+            ("T_ORCHESTRATION_WORKFLOW_JOB", "WORKFLOW_JOB"),
+            ("T_ORCHESTRATION_DEPENDENCY", "WORKFLOW_DEPENDENCY"),
+        ):
+            patches.append(patch.object(config, name, f"KUMO_DEV.MONITOR_META.{table}"))
+        patches.append(patch.object(config, "ORCHESTRATION_NAMESPACE", "KUMO_DEV.MONITOR_META"))
         for patcher in patches:
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -45,7 +54,7 @@ class OrchestrationServiceContextTests(unittest.TestCase):
         sql = self.statements[-1]
         if sql.startswith("SELECT COUNT(*) AS CNT"):
             # Existing IDs are valid; names and assignments are available.
-            count = 0 if "UPPER(" in sql or "FROM KUMO_TST.MONITOR_APP.WORKFLOW_JOB" in sql else 1
+            count = 0 if "UPPER(" in sql or "FROM KUMO_DEV.MONITOR_META.WORKFLOW_JOB" in sql else 1
             return [{"CNT": count}]
         return []
 
@@ -61,13 +70,16 @@ class OrchestrationServiceContextTests(unittest.TestCase):
             self.assertEqual(call.kwargs["token"], "service-token")
             self.assertEqual(call.kwargs["role"], "SERVICE_OWNER")
         self.assertFalse(sf.caller_token_present())
+        self.assertTrue(any("KUMO_DEV.MONITOR_META." in sql for sql in self.statements))
+        self.assertFalse(any("KUMO_TST." in sql or "KUMO_ADMIN." in sql for sql in self.statements))
         return response
 
     def test_catalog_and_flow_use_service_credentials_with_browser_caller(self):
         for path in ("/api/orchestration/catalog", "/api/orchestration/flow", "/api/workflow-flow"):
             with self.subTest(path=path):
                 self.connect.reset_mock()
-                self.request("GET", path)
+                response = self.request("GET", path)
+                self.assertEqual(response.get_json()["source"], "KUMO_DEV.MONITOR_META")
                 # All related reads share one service connection.
                 self.assertEqual(self.connect.call_count, 1)
 
@@ -101,7 +113,7 @@ class OrchestrationServiceContextTests(unittest.TestCase):
         original_query_rows = self.query_rows
 
         def unknown_job():
-            if self.statements[-1].startswith("SELECT COUNT(*) AS CNT FROM KUMO_TST.MONITOR_APP.JOB"):
+            if self.statements[-1].startswith("SELECT COUNT(*) AS CNT FROM KUMO_DEV.MONITOR_META.JOB"):
                 return [{"CNT": 0}]
             return original_query_rows()
 

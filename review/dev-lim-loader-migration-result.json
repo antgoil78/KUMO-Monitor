@@ -1,0 +1,18 @@
+{
+  "created": [
+    "KUMO_DEV.MONITOR_META.RAW_LOAD_RESULTS",
+    "KUMO_DEV.MONITOR_META.LOAD_RAW_LIM_FROM_STAGE(VARCHAR, DATE, DATE, BOOLEAN, BOOLEAN, BOOLEAN, VARCHAR)"
+  ],
+  "skipped": [],
+  "source_definitions_unchanged": true,
+  "loader_called": false,
+  "table_rows_copied": false,
+  "workflow_dep_rule_changed": false,
+  "tasks": [
+    {
+      "schema_name": "MONITOR_APP",
+      "name": "TASK_WF_MASTER_DISPATCHER",
+      "state": "suspended"
+    }
+  ]
+}

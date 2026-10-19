@@ -1,0 +1,29 @@
+.environment-indicator {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 9px;
+  white-space: nowrap;
+}
+
+.environment-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: .06em;
+}
+
+.environment-badge--dev { background: #facc15; border-color: #eab308; color: #342b08; }
+.environment-badge--test { background: #22c55e; border-color: #16a34a; color: #052e16; }
+.environment-badge--uat { background: #2563eb; border-color: #1d4ed8; color: #fff; }
+.environment-badge--prod { background: #dc2626; border-color: #b91c1c; color: #fff; }
+.environment-badge--unknown { background: #374151; border-color: #4b5563; color: #f3f4f6; }
+

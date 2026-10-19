@@ -196,6 +196,7 @@ BEGIN
        ON tgt.DW_TABLE_NM = files.DW_TABLE_NM
       AND tgt.DW_FILE_NM = files.DW_FILE_NM
       AND tgt.DW_SRC_SYST = files.DW_SRC_SYST
+      /*
     WHEN MATCHED THEN UPDATE SET
         READY_TO_LOAD_DTTM = SYSDATE(),
         DW_VER_CTRL = null,
@@ -204,6 +205,7 @@ BEGIN
         DW_BATCH_ID = null,
         PROCESSED_FL = false,
         DELETED_FL = false
+        */
     WHEN NOT MATCHED THEN INSERT (
         READY_TO_LOAD_DTTM,
         DW_TABLE_NM, DW_FILE_NM, DW_SRC_SYST,

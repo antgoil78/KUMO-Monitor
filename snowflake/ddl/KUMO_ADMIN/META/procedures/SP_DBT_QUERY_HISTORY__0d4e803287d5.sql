@@ -3,7 +3,7 @@
 USE DATABASE "KUMO_ADMIN";
 USE SCHEMA "KUMO_ADMIN"."META";
 
-CREATE OR REPLACE PROCEDURE KUMO_ADMIN.META.SP_DBT_QUERY_HISTORY("RUN_ID" VARCHAR DEFAULT null, "DBT_DB" VARCHAR DEFAULT CURRENT_DATABASE(), "LOG_TO_TABLE" VARCHAR DEFAULT null)
+CREATE OR REPLACE PROCEDURE KUMO_ADMIN.META.SP_DBT_QUERY_HISTORY("RUN_ID" VARCHAR, "DBT_DB" VARCHAR DEFAULT CURRENT_DATABASE(), "LOG_TO_TABLE" VARCHAR DEFAULT null)
 RETURNS TABLE ("RUN_ID" VARCHAR(36), "MODEL_NAME" VARCHAR, "DATABASE_NAME" VARCHAR, "USER_NAME" VARCHAR, "WAREHOUSE_NAME" VARCHAR, "START_TIME" TIMESTAMP_NTZ(9), "LATEST_CHANGE" TIMESTAMP_NTZ(9), "ELAPSED_S" NUMBER(38,0), "STATUS" VARCHAR, "LATEST_SQL" VARCHAR, "SQL" VARCHAR, "PARSED_JSON" VARIANT, "ERROR_MESSAGE" VARCHAR)
 LANGUAGE SQL
 EXECUTE AS CALLER
@@ -15,11 +15,8 @@ AS 'declare
 begin
     v_meta_rl := :dbt_db || ''.META.RUN_LOG'';
     
-    if (:run_id is not null) then
-        effective_run_id := (:run_id);
-    else
-        select max_by(run_id,log_dttm) into :effective_run_id from IDENTIFIER(:v_meta_rl);
-    end if;
+    effective_run_id := (:run_id);
+    
 
     v_sql := ''
     with 
@@ -39,7 +36,6 @@ begin
         FROM TABLE(INFORMATION_SCHEMA.QUERY_HISTORY_BY_USER(USER_NAME => current_user(), END_TIME_RANGE_START => CURRENT_TIMESTAMP() - INTERVAL ''''1 day'''', RESULT_LIMIT => 10000 ))
         WHERE 1=1  
         and run_id = '''''' || :effective_run_id || ''''''
-        /*and EXECUTION_STATUS like ''''FAILED%''''*/
         and database_name = current_database()
         and query_type not in (''''SHOW'''',''''COMMIT'''',''''BEGIN'''',''''DESCRIBE''''))
     ,agg as (

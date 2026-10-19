@@ -163,6 +163,7 @@ def verify_dependency_rules(workflow_id):
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]*\.[A-Za-z_][A-Za-z0-9_$]*\.[A-Za-z_][A-Za-z0-9_$]*", procedure):
         raise RuntimeError("KUMO_RULE_VERIFY_PROCEDURE must be a three-part Snowflake procedure name")
     database, schema, _ = procedure.split(".")
+    database_argument = ", %(database)s" if config.ENVIRONMENT else ""
     with sf.connection(use_warehouse=True, include_context=True, force_service=True) as conn:
         cur = conn.cursor(DictCursor)
         try:
@@ -170,8 +171,8 @@ def verify_dependency_rules(workflow_id):
             cur.execute(f"USE SCHEMA {schema}")
             rows = normalize_rows(_fetch_with_cursor(
                 cur,
-                f"CALL {procedure}(NULL, %(workflow_id)s)",
-                {"workflow_id": workflow_id},
+                f"CALL {procedure}(NULL, %(workflow_id)s{database_argument})",
+                {"workflow_id": workflow_id, "database": database},
             ))
         finally:
             cur.close()
@@ -451,7 +452,7 @@ def cleanup_workflow_run_locks():
               ERROR_ONLY => TRUE,
               RESULT_LIMIT => 10000
             )) th
-            JOIN {config.DB}.{config.SCHEMA}.WORKFLOW_TMP_TASKS tmp
+            JOIN {config.T_WORKFLOW_TMP_TASKS} tmp
               ON UPPER(th.NAME) = UPPER(tmp.TASK_NAME)
             JOIN {config.T_HISTORY} h
               ON h.RUN_ID = tmp.RUN_ID
@@ -1649,7 +1650,7 @@ def create_or_replace_sf_task(workflow_id, warehouse=None):
       CALL {config.DB}.{config.SCHEMA}.SP_WORKFLOW_REQUEST_RUN('{sql_escape(workflow_id)}', 'SCHEDULED', NULL, 0, NULL)
     """
     _execute(ddl)
-    _execute(f"ALTER TASK {scheduler_fqn} {'RESUME' if workflow_enabled else 'SUSPEND'}")
+    _execute(f"ALTER TASK {scheduler_fqn} {'RESUME' if workflow_enabled and config.AUTO_RESUME_TASKS else 'SUSPEND'}")
 
 
 def _ensure_json_array_str(value):
@@ -1956,7 +1957,7 @@ def get_workflow_detail(workflow_id):
 
             email_group_rows = fetch(
                 cur,
-                f"SELECT GROUP_NAME FROM {config.DB}.{config.SCHEMA}.EMAIL_GROUPS ORDER BY GROUP_NAME",
+                f"SELECT GROUP_NAME FROM {config.T_EMAIL_GROUPS} ORDER BY GROUP_NAME",
             )
         finally:
             cur.close()

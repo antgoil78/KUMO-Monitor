@@ -354,7 +354,7 @@ function OrchestrationCatalog({ section }) {
       subtitle={workflowSection ? 'Workflow containers, triggers and ordered job assignments in the new orchestration model.' : 'Reusable executable jobs and the workflows that currently use them.'}
       actions={<div className="page-header-actions"><button className="button" type="button" onClick={load} disabled={loading}>↻ Refresh</button></div>}
     />
-    <div className="orchestration-context"><span>New orchestration model</span><strong>KUMO_TST.MONITOR_APP</strong><small>Configuration only · Snowflake tasks are not created yet</small></div>
+    <div className="orchestration-context"><span>New orchestration model</span><strong>{catalog?.source || 'Loading catalog…'}</strong><small>Configuration only · Snowflake tasks are not created yet</small></div>
     {error && <div className="alert error">{error}</div>}
     {loading && !catalog && <LoadingState>Loading orchestration catalog…</LoadingState>}
     {catalog && workflowSection && <WorkflowCatalogTable workflows={catalog.workflows} onEdit={record => openEditor(record)} onCreate={() => openEditor()} />}

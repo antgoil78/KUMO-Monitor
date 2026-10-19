@@ -1,0 +1,352 @@
+{
+  "validated_at": "2026-10-19T12:15:53+02:00",
+  "workbook": "kumo-monitor-object-review_updated.xlsx",
+  "workbook_sha256": "e2e52b114f5e0b52381edf5b16d08ecbf10e72ee7f50bcc7c876609c61386380",
+  "created_total": 34,
+  "created_by_type": {
+    "TABLE": 20,
+    "PROCEDURE": 11,
+    "STAGE": 1,
+    "STREAM": 1,
+    "TASK": 1
+  },
+  "checks": {
+    "planned_objects_exist": 34,
+    "pre_existing_dev_objects_preserved": 387,
+    "database_local_procedure_bodies_verified": 11,
+    "copied_source_definitions_unchanged": 33,
+    "new_tables_empty": 20,
+    "all_dev_tasks_suspended": true,
+    "dev_task_count": 1,
+    "stage_same_external_location": true,
+    "stage_credentials_preserved_without_exporting_them": true,
+    "existing_file_format_preserved": true
+  },
+  "reused_pre_existing": [
+    "KUMO_DEV.META.LIM_BATCH_CTRL",
+    "KUMO_DEV.META.WORKFLOW_STATUS",
+    "KUMO_DEV.META.KUMO_LIM",
+    "KUMO_DEV.META.MODEL_STATUS"
+  ],
+  "unresolved": [
+    "META.WORKFLOW_DEP_RULE was not approved for creation in the workbook."
+  ],
+  "snapshot_refresh_existing_source_definition_differences": [
+    "KUMO_ADMIN.WORKFLOW_MANAGER.SP_RAW_LIM_SET_READY",
+    "KUMO_ADMIN.META.SP_PURGE_LIM_BATCH",
+    "KUMO_TST.META.LIM_BATCH_CTRL"
+  ],
+  "snapshot_refresh_additional_source_objects": [
+    "KUMO_TST.META.X_LIM_BATCH_CTRL",
+    "KUMO_TST.META.X_X_LIM_BATCH_CTRL"
+  ],
+  "source_difference_note": "The exporter captured these differences from the older saved snapshot. This migration issued no mutation against the source databases.",
+  "created_objects": [
+    [
+      "KUMO_DEV",
+      "META",
+      "STAGE",
+      "AZURE_LIM_STAGE",
+      "",
+      "CREATED",
+      "KUMO_TST.META.AZURE_LIM_STAGE"
+    ],
+    [
+      "KUMO_DEV",
+      "META",
+      "TABLE",
+      "_TMP_SET_READY_LOG",
+      "",
+      "CREATED",
+      "KUMO_TST.RAW_LIM._TMP_SET_READY_LOG"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_APP",
+      "PROCEDURE",
+      "SP_DBT_COMPLETE",
+      "(VARCHAR, BOOLEAN, VARCHAR)",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.SP_DBT_COMPLETE(VARCHAR, BOOLEAN, VARCHAR)"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_APP",
+      "PROCEDURE",
+      "SP_RAW_LIM_META_REFRESH",
+      "(VARCHAR, VARCHAR)",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.SP_RAW_LIM_META_REFRESH(VARCHAR)"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_APP",
+      "PROCEDURE",
+      "SP_RULE_BASED_WORKFLOW_REQUEST_RUN",
+      "(VARCHAR, VARCHAR, VARCHAR)",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.SP_RULE_BASED_WORKFLOW_REQUEST_RUN(VARCHAR, VARCHAR)"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_APP",
+      "PROCEDURE",
+      "SP_RUN_WORKFLOW",
+      "(VARCHAR)",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.SP_RUN_WORKFLOW(VARCHAR)"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_APP",
+      "PROCEDURE",
+      "SP_RUN_WORKFLOW",
+      "(VARCHAR, VARCHAR)",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.SP_RUN_WORKFLOW(VARCHAR, VARCHAR)"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_APP",
+      "PROCEDURE",
+      "SP_SEND_NOTIFICATION",
+      "(VARCHAR, VARCHAR, BOOLEAN, VARCHAR)",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.SP_SEND_NOTIFICATION(VARCHAR, VARCHAR, BOOLEAN, VARCHAR)"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_APP",
+      "PROCEDURE",
+      "SP_SEND_WORKFLOW_EMAIL",
+      "(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP_NTZ, NUMBER, VARIANT)",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.SP_SEND_WORKFLOW_EMAIL(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP_NTZ, NUMBER, VARIANT)"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_APP",
+      "PROCEDURE",
+      "SP_SQL_COMPLETE",
+      "(VARCHAR, BOOLEAN, VARCHAR)",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.SP_SQL_COMPLETE(VARCHAR, BOOLEAN, VARCHAR)"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_APP",
+      "PROCEDURE",
+      "SP_WORKFLOW_DISPATCH",
+      "(VARCHAR)",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.SP_WORKFLOW_DISPATCH(VARCHAR)"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_APP",
+      "PROCEDURE",
+      "SP_WORKFLOW_DISPATCH",
+      "(VARCHAR, VARCHAR)",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.SP_WORKFLOW_DISPATCH(VARCHAR, VARCHAR)"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_APP",
+      "PROCEDURE",
+      "SP_WORKFLOW_REQUEST_RUN",
+      "(VARCHAR, VARCHAR, VARCHAR, NUMBER, VARCHAR)",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.SP_WORKFLOW_REQUEST_RUN(VARCHAR, VARCHAR, VARCHAR, NUMBER, VARCHAR)"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_APP",
+      "TASK",
+      "TASK_WF_MASTER_DISPATCHER",
+      "",
+      "SUSPENDED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.TASK_WF_MASTER_DISPATCHER"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "STREAM",
+      "WORKFLOW_EXECUTION_QUEUE_STREAM",
+      "",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOW_EXECUTION_QUEUE_STREAM"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "APPLICATION_PARAMETERS",
+      "",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.APPLICATION_PARAMETERS"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "APP_USER_INTERACTIONS",
+      "",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.APP_USER_INTERACTIONS"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "APP_USER_SESSIONS",
+      "",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.APP_USER_SESSIONS"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "APP_WORKFLOW_RUN_LOCKS",
+      "",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.APP_WORKFLOW_RUN_LOCKS"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "EMAIL_GROUPS",
+      "",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.EMAIL_GROUPS"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "JOB",
+      "",
+      "CREATED",
+      "KUMO_TST.MONITOR_APP.JOB"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "RAW_LIM_META",
+      "",
+      "CREATED",
+      "KUMO_TST.RAW_LIM.RAW_LIM_META"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "RAW_LIM_PKG_GROUP_SOURCE",
+      "",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.RAW_LIM_PKG_GROUP_SOURCE"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "WORKFLOW",
+      "",
+      "CREATED",
+      "KUMO_TST.MONITOR_APP.WORKFLOW"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "WORKFLOWS",
+      "",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOWS"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "WORKFLOW_DEPENDENCY",
+      "",
+      "CREATED",
+      "KUMO_TST.MONITOR_APP.WORKFLOW_DEPENDENCY"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "WORKFLOW_HISTORY",
+      "",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOW_HISTORY"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "WORKFLOW_JOB",
+      "",
+      "CREATED",
+      "KUMO_TST.MONITOR_APP.WORKFLOW_JOB"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "WORKFLOW_NOTIFICATIONS",
+      "",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOW_NOTIFICATIONS"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "WORKFLOW_RUN_LOGS",
+      "",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOW_RUN_LOGS"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "WORKFLOW_RUN_QUEUE",
+      "",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOW_RUN_QUEUE"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "WORKFLOW_TASKS",
+      "",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOW_TASKS"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "WORKFLOW_TMP_TASKS",
+      "",
+      "CREATED",
+      "KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOW_TMP_TASKS"
+    ],
+    [
+      "KUMO_DEV",
+      "MONITOR_META",
+      "TABLE",
+      "_SET_READY_LOG",
+      "",
+      "CREATED",
+      "KUMO_TST.RAW_LIM._SET_READY_LOG"
+    ]
+  ]
+}

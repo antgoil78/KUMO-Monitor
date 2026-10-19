@@ -1,0 +1,21 @@
+spec:
+  containers:
+    - name: kumo-monitor
+      image: ${IMAGE}
+      env:
+        KUMO_ENV: "${ENVIRONMENT}"
+        KUMO_DEPLOYMENT_ENV: "${DEPLOYMENT_ENVIRONMENT}"
+        SNOWFLAKE_WAREHOUSE: "${QUERY_WAREHOUSE}"
+        KUMO_TASK_WAREHOUSE: "${TASK_WAREHOUSE}"
+        KUMO_LIM_ROLE: "${OWNER_ROLE}"
+        KUMO_AUTO_RESUME_TASKS: "false"
+      readinessProbe:
+        port: 5000
+        path: /api/health
+  endpoints:
+    - name: monitor
+      port: 5000
+      public: true
+capabilities:
+  securityContext:
+    executeAsCaller: true
