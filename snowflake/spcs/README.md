@@ -44,6 +44,37 @@ for user identity; application reads/writes continue to use the service owner.
 Keep passwords out of the spec: the app uses the Snowflake-provided service
 OAuth token.
 
+## DEV worksheet scripts
+
+[`create_dev_service.sql`](create_dev_service.sql) creates
+`KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE` in `KUMO_SHARED_MONITOR_POOL`.
+[`alter_dev_service.sql`](alter_dev_service.sql) updates that same DEV service
+for subsequent deployments. Both pin the verified published version
+`build-215-1-022ffedd2bf2`; replace the image tag with the selected published
+version when deploying another build. These are prepared scripts, not an
+automatic deployment, and have not been executed.
+
+First run [`prepare_dev_service.sql`](prepare_dev_service.sql). It uses
+`ACCOUNTADMIN` for the one-time compute pool `USAGE` and public endpoint grants
+to `KUMO_ADMIN`, then resumes the shared pool. Check `DESCRIBE COMPUTE POOL`
+and wait for `IDLE` or `ACTIVE` before running the create script. The create
+script uses `KUMO_ADMIN` to create and own the DEV service, using the existing
+DEV data access and shared repository ownership of that role. Resuming the pool
+provisions compute for the new service. The update script uses that same owner.
+Other application users need the appropriate service endpoint access.
+
+Both specifications set `KUMO_ENV=DEV`, disable automatic scheduler resume,
+preserve the supplied 7200-second statement/network timeouts, and use the
+`/api/health` readiness probe. The service location supplies its database and
+schema, so those environment variables do not need to be repeated. Image paths
+use `/database/schema/repository/image:tag`, without a registry hostname or
+Markdown link. Both scripts finish by showing service status and endpoints.
+
+`CREATE SERVICE IF NOT EXISTS` leaves an existing DEV service unchanged. Use
+the update script to apply a new specification. Neither script targets the
+existing `KUMO_ADMIN.KUMO_MONITOR.KUMO_MONITOR_SERVICE` instance. The update
+script does not move a service between compute pools.
+
 ## Shared runtime infrastructure
 
 The new DEV and TST services share these resources within their account:
