@@ -1,0 +1,95 @@
+{
+  "created": [
+    "KUMO_DEV.MONITOR_META.RAW_LIM_CONTROL_ARCHIVE",
+    "KUMO_DEV.MONITOR_APP.SP_RAW_LIM_SET_READY(VARCHAR, BOOLEAN, BOOLEAN, VARCHAR)",
+    "KUMO_DEV.MONITOR_APP.SP_CLEANUP_OLD_TMP_TASKS(FLOAT)",
+    "KUMO_DEV.MONITOR_APP.SP_LOAD_RAW_LIM_INCREMENTAL_PERSIST(VARCHAR)",
+    "KUMO_DEV.MONITOR_APP.SP_PURGE_LIM_BATCH(VARCHAR)"
+  ],
+  "skipped_existing_objects": [],
+  "configuration": [
+    {
+      "target": "KUMO_DEV.MONITOR_META.EMAIL_GROUPS",
+      "source_count": 1,
+      "selected": 1,
+      "inserted": 1,
+      "excluded_orphan_notifications": 0
+    },
+    {
+      "target": "KUMO_DEV.MONITOR_META.RAW_LIM_PKG_GROUP_SOURCE",
+      "source_count": 38,
+      "selected": 38,
+      "inserted": 38,
+      "excluded_orphan_notifications": 0
+    },
+    {
+      "target": "KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS",
+      "source_count": 3,
+      "selected": 3,
+      "inserted": 3,
+      "excluded_orphan_notifications": 0
+    },
+    {
+      "target": "KUMO_DEV.MONITOR_META.WORKFLOWS",
+      "source_count": 27,
+      "selected": 27,
+      "inserted": 27,
+      "excluded_orphan_notifications": 0
+    },
+    {
+      "target": "KUMO_DEV.MONITOR_META.WORKFLOW_TASKS",
+      "source_count": 27,
+      "selected": 27,
+      "inserted": 27,
+      "excluded_orphan_notifications": 0
+    },
+    {
+      "target": "KUMO_DEV.MONITOR_META.WORKFLOW_NOTIFICATIONS",
+      "source_count": 30,
+      "selected": 27,
+      "inserted": 27,
+      "excluded_orphan_notifications": 3
+    },
+    {
+      "target": "KUMO_DEV.MONITOR_META.JOB",
+      "source_count": 44,
+      "selected": 44,
+      "inserted": 44,
+      "excluded_orphan_notifications": 0
+    },
+    {
+      "target": "KUMO_DEV.MONITOR_META.WORKFLOW",
+      "source_count": 29,
+      "selected": 29,
+      "inserted": 29,
+      "excluded_orphan_notifications": 0
+    },
+    {
+      "target": "KUMO_DEV.MONITOR_META.WORKFLOW_JOB",
+      "source_count": 46,
+      "selected": 46,
+      "inserted": 46,
+      "excluded_orphan_notifications": 0
+    },
+    {
+      "target": "KUMO_DEV.MONITOR_META.WORKFLOW_DEPENDENCY",
+      "source_count": 26,
+      "selected": 26,
+      "inserted": 26,
+      "excluded_orphan_notifications": 0
+    }
+  ],
+  "dbt_project": "KUMO_DEV.DBT_APP.KUMO_DEV",
+  "dbt_target": "kumo_DEV",
+  "tasks": [
+    {
+      "schema_name": "MONITOR_APP",
+      "name": "TASK_WF_MASTER_DISPATCHER",
+      "state": "suspended"
+    }
+  ],
+  "procedures_called": false,
+  "runtime_rows_copied": false,
+  "source_objects_written": false,
+  "workflow_dep_rule_changed": false
+}

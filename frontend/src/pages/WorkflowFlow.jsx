@@ -241,7 +241,7 @@ export default function WorkflowFlow() {
 
   return (
     <section className="page workflow-flow-page">
-      <PageHeader breadcrumb="Orchestration / Flow" title="Flow" subtitle="Live workflow and job relationships from KUMO_TST.MONITOR_APP." actions={<button className="button" type="button" onClick={load} disabled={loading}>↻ Refresh</button>} />
+      <PageHeader breadcrumb="Orchestration / Flow" title="Flow" subtitle={`Live workflow and job relationships from ${graph?.source || 'the configured orchestration catalog'}.`} actions={<button className="button" type="button" onClick={load} disabled={loading}>↻ Refresh</button>} />
       {error && <div className="alert error">{error}</div>}
       {loading && !graph && <LoadingState>Loading workflow graph…</LoadingState>}
       {graph && <>
@@ -263,7 +263,7 @@ export default function WorkflowFlow() {
             <Background color="rgba(154, 156, 165, 0.18)" gap={24} size={1} />
             <MiniMap pannable zoomable nodeColor={node => node.type === 'workflow' ? '#4299ff' : '#444750'} maskColor="rgba(24, 26, 32, 0.72)" />
             <Controls showInteractive={false} />
-          </ReactFlow> : <div className="soft-empty">No workflows were found in KUMO_TST.MONITOR_APP.</div>}
+          </ReactFlow> : <div className="soft-empty">No workflows were found in {graph?.source || 'the configured orchestration catalog'}.</div>}
         </div>
         <p className="workflow-flow-hint">Click a workflow card to focus its relationships. Use +/− to expand or collapse its jobs. Workflow boxes can be moved freely.</p>
       </>}

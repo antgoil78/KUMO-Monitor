@@ -11,7 +11,7 @@ from utils import normalize_rows
 
 
 batch_control_bp = Blueprint("batch_control", __name__)
-TABLE = "KUMO_TST.META.LIM_BATCH_CTRL"
+TABLE = config.LIM_BATCH_CTRL_TABLE
 COLUMNS = [
     {"key": key, "label": label, "type": kind}
     for key, label, kind in (

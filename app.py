@@ -119,7 +119,7 @@ def workflow_detail(workflow_id):
             "description": "Mock workflow",
             "dbtCommand": "dbt build --select tag:daily" if workflow["workflowType"] == "DBT" else "",
             "sqlCommand": "select 1" if workflow["workflowType"] == "SQL" else "",
-            "dbtProjectFqn": "KUMO_TST.META.DBT_PROJECT",
+            "dbtProjectFqn": config.DBT_PROJECT_FQN,
             "dbtTarget": "prod",
             "scheduleCron": workflow["scheduleCron"],
             "scheduleTimezone": workflow["scheduleTimezone"],

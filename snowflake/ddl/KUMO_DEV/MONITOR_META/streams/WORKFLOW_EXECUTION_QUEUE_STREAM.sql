@@ -1,0 +1,6 @@
+-- Source: KUMO_DEV.MONITOR_META.WORKFLOW_EXECUTION_QUEUE_STREAM
+-- Refresh: python snowflake/export_ddl.py
+USE DATABASE "KUMO_DEV";
+USE SCHEMA "KUMO_DEV"."MONITOR_META";
+
+create or replace stream KUMO_DEV.MONITOR_META.WORKFLOW_EXECUTION_QUEUE_STREAM on table WORKFLOW_RUN_QUEUE append_only = true;

@@ -6,7 +6,6 @@ when a user opens a detail dialog.
 """
 
 import json
-import os
 import re
 import threading
 import time
@@ -23,16 +22,16 @@ from utils import normalize_rows
 
 file_ingestion_bp = Blueprint("file_ingestion", __name__)
 
-ADMIN_PKG_GROUP_SOURCE = f"{config.DB}.{config.SCHEMA}.RAW_LIM_PKG_GROUP_SOURCE"
-RAW_LIM_META_TABLE = "KUMO_TST.RAW_LIM.RAW_LIM_META"
-SET_READY_LATEST_TABLE = "KUMO_TST.RAW_LIM._TMP_SET_READY_LOG"
-SET_READY_HISTORY_TABLE = "KUMO_TST.RAW_LIM._SET_READY_LOG"
+ADMIN_PKG_GROUP_SOURCE = config.T_RAW_LIM_PKG_GROUP_SOURCE
+RAW_LIM_META_TABLE = config.RAW_LIM_META_TABLE
+SET_READY_LATEST_TABLE = config.SET_READY_LATEST_TABLE
+SET_READY_HISTORY_TABLE = config.SET_READY_HISTORY_TABLE
 SUBJECT_AREA_COLUMN = "SUBJECT_AREA"
 DEFAULT_HISTORY_DAYS = 30
 MAX_HISTORY_DAYS = 365
-LIM_DATABASE = os.getenv("KUMO_LIM_DATABASE", "KUMO_TST")
-LIM_ROLE = os.getenv("KUMO_LIM_ROLE", "KUMO_ADMIN")
-LIM_STAGE = os.getenv("KUMO_LIM_STAGE", "KUMO_TST.META.AZURE_LIM_STAGE")
+LIM_DATABASE = config.LIM_DATABASE
+LIM_ROLE = config.LIM_ROLE
+LIM_STAGE = config.LIM_STAGE
 LIM_FORMAT_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,49}$")
 FQN_PATTERN = re.compile(r"^[A-Z][A-Z0-9_$]{0,254}(?:\.[A-Z][A-Z0-9_$]{0,254}){0,2}$")
 LIM_HEADER_FIELDS = (
@@ -115,15 +114,16 @@ def _run_reload_job(app, job_id, params):
                 try:
                     cur.execute(f"USE ROLE {role}")
                     cur.execute(f"USE DATABASE {database}")
+                    database_argument = ",\n                          P_DATABASE => %(database)s" if config.ENVIRONMENT else ""
                     cur.execute(
                         f"""
-                        CALL {database}.META.LOAD_RAW_LIM_FROM_STAGE(
+                        CALL {config.LIM_LOAD_PROCEDURE}(
                           P_LIM_FORMAT => %(lim_format)s,
                           P_FROM_DLVY_END_DATE => %(from_date)s::DATE,
                           P_TO_DLVY_END_DATE => %(to_date)s::DATE,
                           P_RELOAD => %(reload)s,
                           P_RESET_DLVY_PKG_CHECK => %(reset)s,
-                          P_SET_READY_TO_LOAD => %(ready)s
+                          P_SET_READY_TO_LOAD => %(ready)s{database_argument}
                         )
                         """,
                         params,

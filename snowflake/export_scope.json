@@ -5,12 +5,27 @@
     "KUMO_TST.META",
     "KUMO_TST.RAW_LIM",
     "KUMO_TST.MONITOR_APP",
-    "KUMO_TST.MONITOR_META"
+    "KUMO_TST.MONITOR_META",
+    "KUMO_DEV.MONITOR_APP",
+    "KUMO_DEV.MONITOR_META",
+    "KUMO_DEV.META"
   ],
-  "object_types": ["TABLE", "SEQUENCE", "FILE_FORMAT", "STREAM", "FUNCTION", "VIEW", "PROCEDURE", "TASK"],
+  "object_types": [
+    "TABLE",
+    "SEQUENCE",
+    "FILE_FORMAT",
+    "STREAM",
+    "FUNCTION",
+    "VIEW",
+    "PROCEDURE",
+    "TASK"
+  ],
   "exclude_task_patterns": [
     "^TMP_WF_",
     "^TASK_WF_[0-9A-F]{8}(?:_SCHEDULER)?$"
   ],
-  "keep_tasks": ["KUMO_ADMIN.WORKFLOW_MANAGER.TASK_WF_MASTER_DISPATCHER"]
+  "keep_tasks": [
+    "KUMO_ADMIN.WORKFLOW_MANAGER.TASK_WF_MASTER_DISPATCHER",
+    "KUMO_DEV.MONITOR_APP.TASK_WF_MASTER_DISPATCHER"
+  ]
 }

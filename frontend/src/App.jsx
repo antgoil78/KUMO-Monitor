@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import Sidebar from './components/Sidebar.jsx'
+import EnvironmentBadge from './components/EnvironmentBadge.jsx'
 import { api, createKumoEventSource } from './api.js'
 import Dashboard from './pages/Dashboard.jsx'
 import Monitor from './pages/Monitor.jsx'
@@ -17,6 +18,7 @@ import Dependencies from './pages/Dependencies.jsx'
 import EnvironmentSettings from './pages/EnvironmentSettings.jsx'
 import About from './pages/About.jsx'
 import WorkflowFlow from './pages/WorkflowFlow.jsx'
+import { RuntimeConfigContext } from './RuntimeConfig.jsx'
 import { JobCatalog, WorkflowCatalog } from './pages/OrchestrationCatalog.jsx'
 
 const pages = {
@@ -58,6 +60,7 @@ export default function App() {
   const [snowflakeStatus, setSnowflakeStatus] = useState(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('kumoSidebarCollapsed') === 'true')
   const Page = pages[page] || Dashboard
+  const serviceEnvironment = buildInfo?.deploymentEnvironment ?? buildInfo?.environment
 
   // Keep one presence connection open for the lifetime of the application,
   // including pages that do not otherwise consume realtime status events.
@@ -147,6 +150,7 @@ export default function App() {
         {astelPreview && (
           <div className="astel-topbar">
             <button type="button" className="astel-collapse" aria-label="Collapse sidebar">«</button>
+            <EnvironmentBadge environment={serviceEnvironment} />
             <label className="astel-search"><span>⌕</span><input placeholder="Search workflows, runs and settings" /></label>
             <div className="astel-top-actions">
               <button type="button" aria-label="Theme">☼</button>
@@ -158,6 +162,7 @@ export default function App() {
         {coronaPreview && (
           <div className="corona-topbar">
             <button type="button" className="corona-menu" aria-label={sidebarCollapsed ? 'Expand side menu' : 'Collapse side menu'} title={sidebarCollapsed ? 'Expand side menu' : 'Collapse side menu'} aria-expanded={!sidebarCollapsed} onClick={toggleSidebar}>☰</button>
+            <EnvironmentBadge environment={serviceEnvironment} />
             <div className="corona-top-actions">
               <span className={`corona-connection ${realtimeConnected ? 'connected' : 'disconnected'}`} title="Live server-to-browser event stream"><i /> Realtime {realtimeConnected ? 'connected' : 'reconnecting'}</span>
               <span className={`corona-connection ${snowflakeStatus?.ok ? 'connected' : 'disconnected'}`} title={snowflakeStatus?.error || `Snowflake ${snowflakeStatus?.mode || 'connection'}`}><i /> Snowflake {snowflakeStatus?.ok ? 'connected' : 'unavailable'}</span>
@@ -169,9 +174,11 @@ export default function App() {
             </div>
           </div>
         )}
-        {identityReady
-          ? <Page {...pageContext} onNavigate={navigate} buildInfo={buildInfo} />
-          : <div className="loading-state">Resolving Snowflake user…</div>}
+        <RuntimeConfigContext.Provider value={buildInfo?.objectContext || null}>
+          {identityReady
+            ? <Page {...pageContext} onNavigate={navigate} buildInfo={buildInfo} />
+            : <div className="loading-state">Resolving Snowflake user…</div>}
+        </RuntimeConfigContext.Provider>
       </main>
     </div>
   )

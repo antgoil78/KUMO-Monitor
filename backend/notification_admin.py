@@ -16,7 +16,7 @@ from utils import normalize_rows
 
 notification_admin_bp = Blueprint("notification_admin", __name__)
 
-EMAIL_GROUPS_TABLE = f"{config.DB}.{config.SCHEMA}.EMAIL_GROUPS"
+EMAIL_GROUPS_TABLE = config.T_EMAIL_GROUPS
 
 # Useful for local UI development when KUMO_USE_MOCK=true.
 _MOCK_GROUPS = []

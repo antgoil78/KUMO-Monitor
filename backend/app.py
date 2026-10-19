@@ -12,11 +12,11 @@ from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 from dotenv import load_dotenv
 
+load_dotenv()
+
 from notification_admin import notification_admin_bp
 from file_ingestion import file_ingestion_bp
 from batch_control import batch_control_bp
-
-load_dotenv()
 
 import config
 import kumo_repository as repo
@@ -1425,6 +1425,19 @@ def _health_snapshot():
         "refreshSeconds": _runtime_refresh_settings()["refreshSeconds"],
         "db": config.DB,
         "schema": config.SCHEMA,
+        "environment": config.ENVIRONMENT or None,
+        "deploymentEnvironment": config.DEPLOYMENT_ENVIRONMENT or None,
+        "objectContext": {
+            "environment": config.ENVIRONMENT or None,
+            "engineNamespace": config.APP_NAMESPACE,
+            "metadataNamespace": config.METADATA_NAMESPACE,
+            "orchestrationNamespace": config.ORCHESTRATION_NAMESPACE,
+            "limDatabase": config.LIM_DATABASE,
+            "limRole": config.LIM_ROLE,
+            "rawLimNamespace": f"{config.LIM_DATABASE}.RAW_LIM",
+            "rawLimMetaTable": config.RAW_LIM_META_TABLE,
+            "rawLimPkgGroupSourceTable": config.T_RAW_LIM_PKG_GROUP_SOURCE,
+        },
         "processMemory": _process_memory_snapshot(),
         "backendCaches": _backend_cache_snapshot(),
     }
@@ -1556,16 +1569,16 @@ def workflow_flow():
         return jsonify({"ok": True, "source": "mock", "workflows": [], "jobs": [], "dependencies": []})
     try:
         with sf.connection_scope(force_service=True):
-            workflows = sf.query_service("""
+            workflows = sf.query_service(f"""
                 SELECT
                     WORKFLOW_ID,
                     WORKFLOW_NAME,
                     EXTERNAL_TRIGGERS
-                FROM KUMO_TST.MONITOR_APP.WORKFLOW
+                FROM {config.T_ORCHESTRATION_WORKFLOW}
                 WHERE IS_ENABLED
                 ORDER BY WORKFLOW_NAME
             """)
-            jobs = sf.query_service("""
+            jobs = sf.query_service(f"""
                 SELECT
                     WJ.WORKFLOW_ID,
                     WJ.PARENT_JOB_ID,
@@ -1578,28 +1591,28 @@ def workflow_flow():
                     J.ON_ERROR_COMMAND_LINE,
                     WJ.MIN_STATUS_LEVEL,
                     WJ.DEPENDENCY_TYPE
-                FROM KUMO_TST.MONITOR_APP.WORKFLOW_JOB WJ
-                JOIN KUMO_TST.MONITOR_APP.JOB J
+                FROM {config.T_ORCHESTRATION_WORKFLOW_JOB} WJ
+                JOIN {config.T_ORCHESTRATION_JOB} J
                   ON J.JOB_ID = WJ.JOB_ID
-                JOIN KUMO_TST.MONITOR_APP.WORKFLOW W
+                JOIN {config.T_ORCHESTRATION_WORKFLOW} W
                   ON W.WORKFLOW_ID = WJ.WORKFLOW_ID
                 WHERE WJ.IS_ENABLED AND J.IS_ENABLED AND W.IS_ENABLED
                 ORDER BY WJ.WORKFLOW_ID, WJ.JOB_SEQUENCE
             """)
-            dependencies = sf.query_service("""
+            dependencies = sf.query_service(f"""
                 SELECT
                     WORKFLOW_DEPENDENCY_ID AS DEPENDENCY_ID,
                     PARENT_WORKFLOW_ID,
                     CHILD_WORKFLOW_ID,
                     MIN_STATUS_LEVEL,
                     DEPENDENCY_TYPE
-                FROM KUMO_TST.MONITOR_APP.WORKFLOW_DEPENDENCY
+                FROM {config.T_ORCHESTRATION_DEPENDENCY}
                 WHERE IS_ENABLED
                 ORDER BY PARENT_WORKFLOW_ID, CHILD_WORKFLOW_ID
             """)
         return jsonify({
             "ok": True,
-            "source": "KUMO_TST.MONITOR_APP",
+            "source": config.ORCHESTRATION_NAMESPACE,
             "workflows": workflows,
             "jobs": jobs,
             "dependencies": dependencies,
@@ -1616,25 +1629,25 @@ def orchestration_catalog():
         return jsonify({"ok": True, "source": "mock", "workflows": [], "jobs": [], "assignments": []})
     try:
         with sf.connection_scope(force_service=True):
-            workflows = sf.query_service("""
+            workflows = sf.query_service(f"""
                 SELECT
                     W.*,
                     (SELECT COUNT(*)
-                       FROM KUMO_TST.MONITOR_APP.WORKFLOW_JOB WJ
+                       FROM {config.T_ORCHESTRATION_WORKFLOW_JOB} WJ
                       WHERE WJ.WORKFLOW_ID = W.WORKFLOW_ID) AS JOB_COUNT
-                FROM KUMO_TST.MONITOR_APP.WORKFLOW W
+                FROM {config.T_ORCHESTRATION_WORKFLOW} W
                 ORDER BY W.WORKFLOW_NAME
             """)
-            jobs = sf.query_service("""
+            jobs = sf.query_service(f"""
                 SELECT
                     J.*,
                     (SELECT COUNT(*)
-                       FROM KUMO_TST.MONITOR_APP.WORKFLOW_JOB WJ
+                       FROM {config.T_ORCHESTRATION_WORKFLOW_JOB} WJ
                       WHERE WJ.JOB_ID = J.JOB_ID) AS WORKFLOW_COUNT
-                FROM KUMO_TST.MONITOR_APP.JOB J
+                FROM {config.T_ORCHESTRATION_JOB} J
                 ORDER BY J.JOB_NAME
             """)
-            assignments = sf.query_service("""
+            assignments = sf.query_service(f"""
                 SELECT
                     WJ.WORKFLOW_JOB_ID,
                     WJ.WORKFLOW_ID,
@@ -1646,16 +1659,16 @@ def orchestration_catalog():
                     WJ.MIN_STATUS_LEVEL,
                     WJ.DEPENDENCY_TYPE,
                     WJ.IS_ENABLED
-                FROM KUMO_TST.MONITOR_APP.WORKFLOW_JOB WJ
-                JOIN KUMO_TST.MONITOR_APP.WORKFLOW W
+                FROM {config.T_ORCHESTRATION_WORKFLOW_JOB} WJ
+                JOIN {config.T_ORCHESTRATION_WORKFLOW} W
                   ON W.WORKFLOW_ID = WJ.WORKFLOW_ID
-                JOIN KUMO_TST.MONITOR_APP.JOB J
+                JOIN {config.T_ORCHESTRATION_JOB} J
                   ON J.JOB_ID = WJ.JOB_ID
                 ORDER BY W.WORKFLOW_NAME, WJ.JOB_SEQUENCE
             """)
         return jsonify({
             "ok": True,
-            "source": "KUMO_TST.MONITOR_APP",
+            "source": config.ORCHESTRATION_NAMESPACE,
             "workflows": workflows,
             "jobs": jobs,
             "assignments": assignments,
@@ -1730,25 +1743,25 @@ def _replace_orchestration_workflow_jobs(workflow_id, job_ids):
     if len(set(ordered_ids)) != len(ordered_ids):
         raise ValueError("A job can only be assigned once within a workflow")
     for job_id in ordered_ids:
-        exists = sf.query_one_service("SELECT COUNT(*) AS CNT FROM KUMO_TST.MONITOR_APP.JOB WHERE JOB_ID = %(job_id)s", {"job_id": job_id})
+        exists = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE JOB_ID = %(job_id)s", {"job_id": job_id})
         if int(exists.get("CNT") or 0) != 1:
             raise ValueError(f"Unknown job ID: {job_id}")
 
-    existing_rows = sf.query_service("""
+    existing_rows = sf.query_service(f"""
         SELECT JOB_ID
-        FROM KUMO_TST.MONITOR_APP.WORKFLOW_JOB
+        FROM {config.T_ORCHESTRATION_WORKFLOW_JOB}
         WHERE WORKFLOW_ID = %(workflow_id)s
     """, {"workflow_id": workflow_id})
     existing_ids = {str(row.get("JOB_ID")) for row in existing_rows}
     for job_id in existing_ids - set(ordered_ids):
-        sf.execute_service("""
-            DELETE FROM KUMO_TST.MONITOR_APP.WORKFLOW_JOB
+        sf.execute_service(f"""
+            DELETE FROM {config.T_ORCHESTRATION_WORKFLOW_JOB}
             WHERE WORKFLOW_ID = %(workflow_id)s AND JOB_ID = %(job_id)s
         """, {"workflow_id": workflow_id, "job_id": job_id})
     for sequence, job_id in enumerate(ordered_ids, start=1):
         if job_id in existing_ids:
-            sf.execute_service("""
-                UPDATE KUMO_TST.MONITOR_APP.WORKFLOW_JOB SET
+            sf.execute_service(f"""
+                UPDATE {config.T_ORCHESTRATION_WORKFLOW_JOB} SET
                     JOB_SEQUENCE = %(sequence)s,
                     IS_ENABLED = TRUE,
                     UPDATED_AT = CURRENT_TIMESTAMP(),
@@ -1756,8 +1769,8 @@ def _replace_orchestration_workflow_jobs(workflow_id, job_ids):
                 WHERE WORKFLOW_ID = %(workflow_id)s AND JOB_ID = %(job_id)s
             """, {"workflow_id": workflow_id, "job_id": job_id, "sequence": sequence})
         else:
-            sf.execute_service("""
-                INSERT INTO KUMO_TST.MONITOR_APP.WORKFLOW_JOB (
+            sf.execute_service(f"""
+                INSERT INTO {config.T_ORCHESTRATION_WORKFLOW_JOB} (
                     WORKFLOW_ID, JOB_ID, JOB_SEQUENCE, IS_ENABLED
                 ) VALUES (%(workflow_id)s, %(job_id)s, %(sequence)s, TRUE)
             """, {"workflow_id": workflow_id, "job_id": job_id, "sequence": sequence})
@@ -1770,13 +1783,13 @@ def create_orchestration_workflow():
         values = _orchestration_workflow_values(payload)
         workflow_id = str(uuid.uuid4())
         with sf.connection_scope(force_service=True):
-            duplicate = sf.query_one_service("SELECT COUNT(*) AS CNT FROM KUMO_TST.MONITOR_APP.WORKFLOW WHERE UPPER(WORKFLOW_NAME) = UPPER(%(name)s)", values)
+            duplicate = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_WORKFLOW} WHERE UPPER(WORKFLOW_NAME) = UPPER(%(name)s)", values)
             if int(duplicate.get("CNT") or 0):
                 raise ValueError("A workflow with this name already exists")
             sf.execute_service("BEGIN")
             try:
-                sf.execute_service("""
-                    INSERT INTO KUMO_TST.MONITOR_APP.WORKFLOW (
+                sf.execute_service(f"""
+                    INSERT INTO {config.T_ORCHESTRATION_WORKFLOW} (
                         WORKFLOW_ID, WORKFLOW_NAME, WORKFLOW_GROUP, DESCRIPTION,
                         SCHEDULE, SCHEDULE_TIMEZONE, IS_SCHEDULE_ENABLED,
                         ALLOW_MANUAL_TRIGGER, ALLOW_EXTERNAL_TRIGGER, IS_ENABLED,
@@ -1809,16 +1822,16 @@ def update_orchestration_workflow(workflow_id):
     try:
         values = _orchestration_workflow_values(payload)
         with sf.connection_scope(force_service=True):
-            exists = sf.query_one_service("SELECT COUNT(*) AS CNT FROM KUMO_TST.MONITOR_APP.WORKFLOW WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
+            exists = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_WORKFLOW} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
             if int(exists.get("CNT") or 0) != 1:
                 return _json_error("Workflow not found", 404)
-            duplicate = sf.query_one_service("SELECT COUNT(*) AS CNT FROM KUMO_TST.MONITOR_APP.WORKFLOW WHERE UPPER(WORKFLOW_NAME) = UPPER(%(name)s) AND WORKFLOW_ID <> %(workflow_id)s", {**values, "workflow_id": workflow_id})
+            duplicate = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_WORKFLOW} WHERE UPPER(WORKFLOW_NAME) = UPPER(%(name)s) AND WORKFLOW_ID <> %(workflow_id)s", {**values, "workflow_id": workflow_id})
             if int(duplicate.get("CNT") or 0):
                 raise ValueError("A workflow with this name already exists")
             sf.execute_service("BEGIN")
             try:
-                sf.execute_service("""
-                    UPDATE KUMO_TST.MONITOR_APP.WORKFLOW SET
+                sf.execute_service(f"""
+                    UPDATE {config.T_ORCHESTRATION_WORKFLOW} SET
                         WORKFLOW_NAME = %(name)s,
                         WORKFLOW_GROUP = %(group)s,
                         DESCRIPTION = %(description)s,
@@ -1852,17 +1865,17 @@ def update_orchestration_workflow(workflow_id):
 def delete_orchestration_workflow(workflow_id):
     try:
         with sf.connection_scope(force_service=True):
-            exists = sf.query_one_service("SELECT COUNT(*) AS CNT FROM KUMO_TST.MONITOR_APP.WORKFLOW WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
+            exists = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_WORKFLOW} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
             if int(exists.get("CNT") or 0) != 1:
                 return _json_error("Workflow not found", 404)
-            assigned = sf.query_one_service("SELECT COUNT(*) AS CNT FROM KUMO_TST.MONITOR_APP.WORKFLOW_JOB WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
+            assigned = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_WORKFLOW_JOB} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
             assigned_count = int(assigned.get("CNT") or 0)
             if assigned_count:
                 return _json_error(f"This workflow cannot be deleted because it contains {assigned_count} job{'s' if assigned_count != 1 else ''}", 409)
             sf.execute_service("BEGIN")
             try:
-                sf.execute_service("DELETE FROM KUMO_TST.MONITOR_APP.WORKFLOW_DEPENDENCY WHERE PARENT_WORKFLOW_ID = %(workflow_id)s OR CHILD_WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
-                sf.execute_service("DELETE FROM KUMO_TST.MONITOR_APP.WORKFLOW WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
+                sf.execute_service(f"DELETE FROM {config.T_ORCHESTRATION_DEPENDENCY} WHERE PARENT_WORKFLOW_ID = %(workflow_id)s OR CHILD_WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
+                sf.execute_service(f"DELETE FROM {config.T_ORCHESTRATION_WORKFLOW} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
                 sf.execute_service("COMMIT")
             except Exception:
                 sf.execute_service("ROLLBACK")
@@ -1877,12 +1890,12 @@ def create_orchestration_job():
     payload = request.get_json(silent=True) or {}
     try:
         values = _orchestration_job_values(payload)
-        duplicate = sf.query_one_service("SELECT COUNT(*) AS CNT FROM KUMO_TST.MONITOR_APP.JOB WHERE UPPER(JOB_NAME) = UPPER(%(name)s)", values)
+        duplicate = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE UPPER(JOB_NAME) = UPPER(%(name)s)", values)
         if int(duplicate.get("CNT") or 0):
             raise ValueError("A job with this name already exists")
         job_id = str(uuid.uuid4())
-        sf.execute_service("""
-            INSERT INTO KUMO_TST.MONITOR_APP.JOB (
+        sf.execute_service(f"""
+            INSERT INTO {config.T_ORCHESTRATION_JOB} (
                 JOB_ID, JOB_NAME, DESCRIPTION, JOB_TYPE, JOB_LAYER, COMMAND_LINE,
                 SQL_COMMAND, DBT_COMMAND, DBT_TARGET, DBT_WORKSPACE,
                 DBT_PROJECT_FQN, TIMEOUT_SECONDS, IS_ENABLED
@@ -1904,14 +1917,14 @@ def update_orchestration_job(job_id):
     payload = request.get_json(silent=True) or {}
     try:
         values = _orchestration_job_values(payload)
-        exists = sf.query_one_service("SELECT COUNT(*) AS CNT FROM KUMO_TST.MONITOR_APP.JOB WHERE JOB_ID = %(job_id)s", {"job_id": job_id})
+        exists = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE JOB_ID = %(job_id)s", {"job_id": job_id})
         if int(exists.get("CNT") or 0) != 1:
             return _json_error("Job not found", 404)
-        duplicate = sf.query_one_service("SELECT COUNT(*) AS CNT FROM KUMO_TST.MONITOR_APP.JOB WHERE UPPER(JOB_NAME) = UPPER(%(name)s) AND JOB_ID <> %(job_id)s", {**values, "job_id": job_id})
+        duplicate = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE UPPER(JOB_NAME) = UPPER(%(name)s) AND JOB_ID <> %(job_id)s", {**values, "job_id": job_id})
         if int(duplicate.get("CNT") or 0):
             raise ValueError("A job with this name already exists")
-        sf.execute_service("""
-            UPDATE KUMO_TST.MONITOR_APP.JOB SET
+        sf.execute_service(f"""
+            UPDATE {config.T_ORCHESTRATION_JOB} SET
                 JOB_NAME = %(name)s,
                 DESCRIPTION = %(description)s,
                 JOB_TYPE = %(job_type)s,
@@ -1938,18 +1951,18 @@ def update_orchestration_job(job_id):
 def delete_orchestration_job(job_id):
     try:
         with sf.connection_scope(force_service=True):
-            exists = sf.query_one_service("SELECT COUNT(*) AS CNT FROM KUMO_TST.MONITOR_APP.JOB WHERE JOB_ID = %(job_id)s", {"job_id": job_id})
+            exists = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE JOB_ID = %(job_id)s", {"job_id": job_id})
             if int(exists.get("CNT") or 0) != 1:
                 return _json_error("Job not found", 404)
-            assigned = sf.query_one_service("""
+            assigned = sf.query_one_service(f"""
                 SELECT COUNT(*) AS CNT
-                FROM KUMO_TST.MONITOR_APP.WORKFLOW_JOB
+                FROM {config.T_ORCHESTRATION_WORKFLOW_JOB}
                 WHERE JOB_ID = %(job_id)s OR PARENT_JOB_ID = %(job_id)s
             """, {"job_id": job_id})
             assigned_count = int(assigned.get("CNT") or 0)
             if assigned_count:
                 return _json_error(f"This job cannot be deleted because it is used by {assigned_count} workflow assignment{'s' if assigned_count != 1 else ''}", 409)
-            sf.execute_service("DELETE FROM KUMO_TST.MONITOR_APP.JOB WHERE JOB_ID = %(job_id)s", {"job_id": job_id})
+            sf.execute_service(f"DELETE FROM {config.T_ORCHESTRATION_JOB} WHERE JOB_ID = %(job_id)s", {"job_id": job_id})
         return jsonify({"ok": True, "jobId": job_id, "deleted": True})
     except Exception as exc:
         return _json_error(exc, 500)
@@ -2485,7 +2498,7 @@ def workflow_detail(workflow_id):
             "description": "Mock workflow",
             "dbtCommand": "dbt build --select tag:daily" if workflow["workflowType"] == "DBT" else "",
             "sqlCommand": "select 1" if workflow["workflowType"] == "SQL" else "",
-            "dbtProjectFqn": "KUMO_TST.META.DBT_PROJECT",
+            "dbtProjectFqn": config.DBT_PROJECT_FQN,
             "dbtTarget": "prod",
             "scheduleCron": workflow["scheduleCron"],
             "scheduleTimezone": workflow["scheduleTimezone"],
