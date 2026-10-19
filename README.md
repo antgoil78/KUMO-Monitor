@@ -87,10 +87,11 @@ DEV definitions and workflow configuration have been copied: 27 engine
 workflows, 29 catalog workflows and 44 jobs, plus their dependent configuration.
 Executable references use DEV, including `KUMO_DEV.DBT_APP.KUMO_DEV` and its
 `kumo_DEV` target. Copied schedules are disabled and the dispatcher is suspended.
-Grants and full execution validation remain; `META.WORKFLOW_DEP_RULE` is
-intentionally not created yet. No DEV SPCS service has been deployed. TST
-provisioning remains a later step. The shared image repository and suspended
-compute pool have been created using
+Workflow execution validation remains; `META.WORKFLOW_DEP_RULE` is intentionally
+not created yet. The DEV SPCS service has been deployed as
+`KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE`, owned by `KUMO_ADMIN`, using image
+`build-215-1-022ffedd2bf2`. TST provisioning remains a later step.
+The shared image repository and compute pool have been created using
 [create_shared_infrastructure.sql](snowflake/spcs/create_shared_infrastructure.sql).
 The reviewed migrations and
 saved definitions are documented in [snowflake/README.md](snowflake/README.md).

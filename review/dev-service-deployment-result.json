@@ -1,0 +1,62 @@
+{
+  "service": "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE",
+  "owner_role": "KUMO_ADMIN",
+  "compute_pool": "KUMO_SHARED_MONITOR_POOL",
+  "image": "/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-215-1-022ffedd2bf2",
+  "image_digest": "sha256:7906cd02bbfd1b8e820af0945dfe88776ac248d94ed8b9e1c8df02bbac1cc7c0",
+  "scripts_executed": [
+    "prepare_dev_service.sql",
+    "create_dev_service.sql"
+  ],
+  "alter_script_not_needed": "CREATE used the same specification and query warehouse",
+  "status": [
+    {
+      "status": "READY",
+      "message": "Running",
+      "containerName": "monitor",
+      "instanceId": "0",
+      "serviceName": "KUMO_MONITOR_SERVICE",
+      "image": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-215-1-022ffedd2bf2",
+      "restartCount": 0,
+      "startTime": "2026-10-19T14:17:18Z"
+    }
+  ],
+  "endpoints": [
+    {
+      "name": "kumo-monitor-dev-ui",
+      "port": 5000,
+      "port_range": null,
+      "protocol": "HTTP",
+      "is_public": "true",
+      "ingress_url": "mnztue-vymkbmw-ov24823.snowflakecomputing.app"
+    }
+  ],
+  "service_details": [
+    {
+      "name": "KUMO_MONITOR_SERVICE",
+      "database_name": "KUMO_DEV",
+      "schema_name": "MONITOR_APP",
+      "owner": "KUMO_ADMIN",
+      "compute_pool": "KUMO_SHARED_MONITOR_POOL",
+      "status": "RUNNING"
+    }
+  ],
+  "admin_service_unchanged": true,
+  "dev_tasks": [
+    {
+      "schema_name": "MONITOR_APP",
+      "name": "TASK_WF_MASTER_DISPATCHER",
+      "state": "suspended"
+    }
+  ],
+  "workflow_procedures_called": false,
+  "endpoint_verification": {
+    "url": "https://mnztue-vymkbmw-ov24823.snowflakecomputing.app",
+    "unauthenticated_http_status": 302,
+    "snowflake_sign_in_redirect": true,
+    "container_health_probe_http_status": 200,
+    "automated_authenticated_http_status": 500,
+    "automated_authenticated_response_origin": "Snowflake ingress; request did not reach application",
+    "browser_sign_in_verification": "pending"
+  }
+}

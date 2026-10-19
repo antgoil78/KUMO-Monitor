@@ -51,8 +51,18 @@ OAuth token.
 [`alter_dev_service.sql`](alter_dev_service.sql) updates that same DEV service
 for subsequent deployments. Both pin the verified published version
 `build-215-1-022ffedd2bf2`; replace the image tag with the selected published
-version when deploying another build. These are prepared scripts, not an
-automatic deployment, and have not been executed.
+version when deploying another build. Setup and creation were executed on
+19 October 2026; the DEV service is running with `KUMO_ADMIN` as owner. The
+update script was not needed because creation applied the same specification
+and query warehouse. The deployment receipt is recorded in
+[`dev-service-deployment-result.json`](../../review/dev-service-deployment-result.json).
+These scripts are not executed automatically by CI.
+
+DEV endpoint: <https://mnztue-vymkbmw-ov24823.snowflakecomputing.app>. The
+container reports `READY` and its health probe returns HTTP 200. The public URL
+redirects to Snowflake sign-in. Automated authenticated verification received
+HTTP 500 from Snowflake ingress before reaching the application; signed-in
+browser verification is pending.
 
 First run [`prepare_dev_service.sql`](prepare_dev_service.sql). It uses
 `ACCOUNTADMIN` for the one-time compute pool `USAGE` and public endpoint grants
@@ -95,8 +105,9 @@ the shared schema, image repository and pool. It was applied on 19 October 2026:
 pool because `KUMO_ADMIN` lacked the account-level `CREATE COMPUTE POOL` privilege.
 The script preserves existing objects and creates the pool initially suspended with
 automatic resume disabled, using the same `CPU_X64_XS`, one-node sizing as the
-current monitor pool. Explicitly resume it when deploying the new services.
-The existing service and `MONITOR_COMPUTE_POOL` are unchanged.
+current monitor pool. The shared pool was resumed for the DEV deployment.
+The existing ADMIN service
+and `MONITOR_COMPUTE_POOL` are unchanged.
 
 The service renderer defaults to `KUMO_SHARED_MONITOR_POOL`; `--compute-pool`
 can select another provisioned pool. CI publishes to
@@ -130,7 +141,8 @@ procedure-generated execution tasks retain their separate lifecycle.
 
 Current readiness: DEV definitions and workflow/job configuration have been
 copied, with executable references directed to DEV and copied schedules disabled.
-Grants and execution validation remain. `META.WORKFLOW_DEP_RULE` is intentionally absent.
+DEV service owner grants and deployment are in place; application user access
+and workflow execution validation remain. `META.WORKFLOW_DEP_RULE` is intentionally absent.
 The renderer does not create any of these prerequisites or shared resources.
 
 References:
