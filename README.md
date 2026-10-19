@@ -89,18 +89,30 @@ Executable references use DEV, including `KUMO_DEV.DBT_APP.KUMO_DEV` and its
 `kumo_DEV` target. Copied schedules are disabled and the dispatcher is suspended.
 Grants and full execution validation remain; `META.WORKFLOW_DEP_RULE` is
 intentionally not created yet. No DEV SPCS service has been deployed. TST
-provisioning and shared infrastructure creation are later steps; their setup SQL is prepared in
+provisioning remains a later step. The shared image repository and suspended
+compute pool have been created using
 [create_shared_infrastructure.sql](snowflake/spcs/create_shared_infrastructure.sql).
 The reviewed migrations and
 saved definitions are documented in [snowflake/README.md](snowflake/README.md).
 
-CI accepts GitHub repository variables `KUMO_IMAGE_URI` (complete tagged image
-URI) and `SNOWFLAKE_REGISTRY` (registry hostname). The default image destination
-is now `<registry>/kumo_shared/monitor_app/monitor_repository/kumo-monitor:latest`.
-The shared repository must be provisioned before publishing. Update an existing
-`KUMO_IMAGE_URI` repository variable if it still points at the old repository.
-Use a separate branch image tag for DEV validation before changing the running
-service's image. UAT/PROD will use repositories and pools in their own accounts.
+CI publishes a separate image for every build and rerun, tagged
+`build-<run-number>-<attempt>-<12-character-commit>`, for example
+`build-123-1-a1b2c3d4e5f6`. It does not push a moving `latest` tag. The version
+is also baked into the image for the sidebar and `/api/health`. The Actions
+summary shows both the complete Docker image URI and the SPCS image path.
+
+The default repository is
+`<registry>/kumo_shared/monitor_app/monitor_repository/kumo-monitor`.
+Optional GitHub repository variables `KUMO_IMAGE_REPOSITORY` (that full path
+without a tag) and `SNOWFLAKE_REGISTRY` (registry hostname) can override it.
+The older `KUMO_IMAGE_URI` variable remains a fallback: its repository is reused,
+but any old tag is replaced with the generated version. The registry hostname
+must match the repository path. These variables are not needed with the defaults.
+
+Choose an exact published version in each service specification. DEV can run
+a newer build while TST keeps an earlier build; promote the same image tag to
+TST after verification. Publishing alone does not update any service. UAT/PROD
+will use repositories and pools in their own accounts.
 
 ## Local Docker run
 
@@ -123,8 +135,8 @@ Docker build args or commit them to Git.
 ### Image version
 
 The image tag and the version displayed in the sidebar use
-`KUMO_IMAGE_VERSION`. It defaults to `latest`, so the existing workflow keeps
-working. To build and run a versioned image:
+`KUMO_IMAGE_VERSION`. CI sets it to the generated build tag. Local Docker builds
+default to `latest`; to build and run a specific local version:
 
 ```bash
 KUMO_IMAGE_VERSION=1.2.0 docker compose up --build -d

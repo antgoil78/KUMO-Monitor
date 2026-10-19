@@ -24,7 +24,7 @@ from this branch (the resource names below are examples):
 
 ```bash
 KUMO_ENV=DEV python snowflake/spcs/render_service.py \
-  --image /kumo_shared/monitor_app/monitor_repository/kumo-monitor:environment-refs \
+  --image /kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-123-1-a1b2c3d4e5f6 \
   --compute-pool KUMO_SHARED_MONITOR_POOL \
   --query-warehouse KUMO_ELT_GEN_1 \
   --owner-role KUMO_MONITOR_DEV_OWNER \
@@ -58,21 +58,34 @@ cannot be placed inside a database. The pool's shared prefix identifies its
 purpose. Each service remains in its own environment's `MONITOR_APP` schema,
 with separate application configuration and grants.
 
-[`create_shared_infrastructure.sql`](create_shared_infrastructure.sql) prepares
-the missing shared schema, image repository and pool. It has not been applied.
-It preserves existing objects and creates the pool initially suspended with
+[`create_shared_infrastructure.sql`](create_shared_infrastructure.sql) creates
+the shared schema, image repository and pool. It was applied on 19 October 2026:
+`KUMO_ADMIN` created the schema and repository, and `ACCOUNTADMIN` created the
+pool because `KUMO_ADMIN` lacked the account-level `CREATE COMPUTE POOL` privilege.
+The script preserves existing objects and creates the pool initially suspended with
 automatic resume disabled, using the same `CPU_X64_XS`, one-node sizing as the
 current monitor pool. Explicitly resume it when deploying the new services.
 The existing service and `MONITOR_COMPUTE_POOL` are unchanged.
 
 The service renderer defaults to `KUMO_SHARED_MONITOR_POOL`; `--compute-pool`
-can select another provisioned pool. CI's default push destination is now
-`<registry>/kumo_shared/monitor_app/monitor_repository/kumo-monitor:latest`.
-Provision the repository and grant the publisher write access and service
-owners read access before publishing/deploying. An existing GitHub repository
-variable `KUMO_IMAGE_URI` overrides that default and must also be updated if
-it still points at the old repository. Use a separate branch image tag for DEV
-verification; no image has been pushed by these changes.
+can select another provisioned pool. CI publishes to
+`<registry>/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-<run-number>-<attempt>-<12-character-commit>`.
+Each build and rerun gets its own tag, and no `latest` alias is pushed. The same
+version is baked into the image so the application displays the deployed tag.
+The Actions summary provides the exact SPCS image path to use with `--image`.
+The example above uses a placeholder build tag; replace it with a published one.
+
+DEV and TST can select different tags in their service specifications, or promote
+the exact DEV image to TST after verification. Publishing a new image does not
+change existing services. Keep `KUMO_ENV=DEV` or `TST` in each service regardless
+of the image version. For an existing service, update its container `image` in
+the service specification; the renderer above prepares only new services.
+
+The repository is provisioned. Grant any additional publisher roles write access
+and service owners read access before publishing/deploying. To change the CI
+destination, set `KUMO_IMAGE_REPOSITORY` to the full repository/image URI without
+a tag and set `SNOWFLAKE_REGISTRY` to its hostname. Legacy `KUMO_IMAGE_URI`
+remains a fallback, but any supplied tag is replaced by the generated version.
 
 UAT and PROD will need their own image repositories and compute pools in their
 respective Snowflake accounts. Publish the image to each account's repository
