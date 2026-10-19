@@ -57,6 +57,8 @@
     "container_health_probe_http_status": 200,
     "automated_authenticated_http_status": 500,
     "automated_authenticated_response_origin": "Snowflake ingress; request did not reach application",
-    "browser_sign_in_verification": "pending"
+    "browser_sign_in_verification": "confirmed_by_user",
+    "browser_verification_result": "The DEV monitor loads",
+    "workflow_execution_verified": false
   }
 }

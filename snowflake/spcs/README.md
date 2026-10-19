@@ -60,9 +60,10 @@ These scripts are not executed automatically by CI.
 
 DEV endpoint: <https://mnztue-vymkbmw-ov24823.snowflakecomputing.app>. The
 container reports `READY` and its health probe returns HTTP 200. The public URL
-redirects to Snowflake sign-in. Automated authenticated verification received
-HTTP 500 from Snowflake ingress before reaching the application; signed-in
-browser verification is pending.
+redirects to Snowflake sign-in, and the user confirmed that the DEV monitor loads
+in the browser. Automated session-token verification separately received HTTP
+500 from Snowflake ingress before reaching the application; that check did not
+verify API responses or workflow execution.
 
 First run [`prepare_dev_service.sql`](prepare_dev_service.sql). It uses
 `ACCOUNTADMIN` for the one-time compute pool `USAGE` and public endpoint grants
