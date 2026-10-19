@@ -1,5 +1,6 @@
 name: Build and Push KUMO Monitor Container
 
+# Deployment verification: each main push publishes a fresh versioned image.
 on:
   push:
     branches:
