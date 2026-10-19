@@ -11,8 +11,8 @@ permissions:
 
 env:
   SNOWFLAKE_REGISTRY: ${{ vars.SNOWFLAKE_REGISTRY || 'vymkbmw-ov24823.registry.snowflakecomputing.com' }}
-  IMAGE_URI: ${{ vars.KUMO_IMAGE_URI || format('{0}/kumo_shared/monitor_app/monitor_repository/kumo-monitor:latest', vars.SNOWFLAKE_REGISTRY || 'vymkbmw-ov24823.registry.snowflakecomputing.com') }}
-  LOCAL_IMAGE_NAME: kumo-monitor:latest
+  KUMO_IMAGE_REPOSITORY: ${{ vars.KUMO_IMAGE_REPOSITORY }}
+  LEGACY_IMAGE_URI: ${{ vars.KUMO_IMAGE_URI }}
 
 jobs:
   build-and-push:
@@ -22,6 +22,28 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Prepare versioned image
+        shell: bash
+        run: |
+          image_repository="${KUMO_IMAGE_REPOSITORY:-${LEGACY_IMAGE_URI:-${SNOWFLAKE_REGISTRY}/kumo_shared/monitor_app/monitor_repository/kumo-monitor}}"
+          # Keep existing repository overrides, but always generate a fresh tag.
+          if [[ "${image_repository##*/}" == *:* ]]; then
+            image_repository="${image_repository%:*}"
+          fi
+          if [[ ! "$image_repository" =~ ^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9_.-]+/[a-z0-9_.-]+/[a-z0-9_.-]+/[a-z0-9_.-]+$ ]]; then
+            echo "::error::Image repository must be registry/database/schema/repository/image without a digest."
+            exit 1
+          fi
+          if [[ "${image_repository%%/*}" != "$SNOWFLAKE_REGISTRY" ]]; then
+            echo "::error::Image repository hostname must match SNOWFLAKE_REGISTRY."
+            exit 1
+          fi
+          image_version="build-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA:0:12}"
+          printf '%s\n' \
+            "IMAGE_VERSION=${image_version}" \
+            "IMAGE_URI=${image_repository}:${image_version}" \
+            "SPCS_IMAGE_PATH=/${image_repository#*/}:${image_version}" >> "$GITHUB_ENV"
 
       - name: Show repository structure
         run: |
@@ -80,18 +102,25 @@ jobs:
         run: |
           docker build \
             --progress=plain \
-            --build-arg "GIT_SHA=${{ github.sha }}" \
-            -t "${LOCAL_IMAGE_NAME}" .
-
-      - name: Tag Docker image
-        run: |
-          docker tag "${LOCAL_IMAGE_NAME}" "${IMAGE_URI}"
+            --build-arg "GIT_SHA=${GITHUB_SHA}" \
+            --build-arg "IMAGE_VERSION=${IMAGE_VERSION}" \
+            -t "${IMAGE_URI}" .
 
       - name: Push Docker image to Snowflake
         run: |
           docker push "${IMAGE_URI}"
 
-      - name: Print pushed image
+      - name: Summarize published version
         run: |
-          echo "Pushed image:"
-          echo "${IMAGE_URI}"
+          echo "Published image: ${IMAGE_URI}"
+          {
+            echo "### Published KUMO Monitor image"
+            echo
+            echo "- Version: \`${IMAGE_VERSION}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Docker image: \`${IMAGE_URI}\`"
+            echo "- SPCS image path: \`${SPCS_IMAGE_PATH}\`"
+            echo
+            echo "Use the SPCS image path in the selected DEV or TST service specification."
+            echo "Existing services keep their selected version until their specification is updated."
+          } >> "$GITHUB_STEP_SUMMARY"
