@@ -1,5 +1,5 @@
 {
-  "exported_at": "2026-10-19T14:01:42+02:00",
+  "exported_at": "2026-10-20T15:04:23+02:00",
   "source": {
     "ACCOUNT_NAME": "OV24823",
     "ROLE_NAME": "KUMO_ADMIN"
@@ -18,13 +18,13 @@
   "counts": {
     "FILE_FORMAT": 4,
     "FUNCTION": 1,
-    "PROCEDURE": 55,
+    "PROCEDURE": 58,
     "STREAM": 3,
     "TABLE": 127,
     "TASK": 2,
     "VIEW": 1
   },
-  "excluded_generated_task_count": 33,
+  "excluded_generated_task_count": 39,
   "objects": [
     {
       "type": "TABLE",
@@ -338,8 +338,8 @@
     {
       "type": "PROCEDURE",
       "name": "KUMO_ADMIN.META.SP_CHECK_VERSIONING",
-      "file": "ddl/KUMO_ADMIN/META/procedures/SP_CHECK_VERSIONING__c203e74ecf77.sql",
-      "signature": "(VARCHAR, VARCHAR)"
+      "file": "ddl/KUMO_ADMIN/META/procedures/SP_CHECK_VERSIONING__0d4e803287d5.sql",
+      "signature": "(VARCHAR, VARCHAR, VARCHAR)"
     },
     {
       "type": "PROCEDURE",
@@ -877,7 +877,7 @@
       "type": "TASK",
       "name": "KUMO_DEV.MONITOR_APP.TASK_WF_MASTER_DISPATCHER",
       "file": "ddl/KUMO_DEV/MONITOR_APP/tasks/TASK_WF_MASTER_DISPATCHER.sql",
-      "source_state": "suspended",
+      "source_state": "started",
       "predecessors": []
     },
     {
@@ -1050,6 +1050,24 @@
       "type": "FILE_FORMAT",
       "name": "KUMO_DEV.META.KUMO_LIM",
       "file": "ddl/KUMO_DEV/META/file_formats/KUMO_LIM.sql"
+    },
+    {
+      "type": "PROCEDURE",
+      "name": "KUMO_DEV.META.SP_DBT_QUERY_HISTORY",
+      "file": "ddl/KUMO_DEV/META/procedures/SP_DBT_QUERY_HISTORY__0d4e803287d5.sql",
+      "signature": "(VARCHAR, VARCHAR, VARCHAR)"
+    },
+    {
+      "type": "PROCEDURE",
+      "name": "KUMO_DEV.META.SP_PURGE_LIM_BATCH",
+      "file": "ddl/KUMO_DEV/META/procedures/SP_PURGE_LIM_BATCH__a0a986b618dc.sql",
+      "signature": "(VARCHAR)"
+    },
+    {
+      "type": "PROCEDURE",
+      "name": "KUMO_DEV.META.SP_REMOVE_DUPLICATES",
+      "file": "ddl/KUMO_DEV/META/procedures/SP_REMOVE_DUPLICATES__0d4e803287d5.sql",
+      "signature": "(VARCHAR, VARCHAR, VARCHAR)"
     }
   ],
   "restore_order": [
@@ -1211,7 +1229,7 @@
     "ddl/KUMO_ADMIN/WORKFLOW_MANAGER/procedures/X_SP_WORKFLOW_REQUEST_RUN_2ARG__c203e74ecf77.sql",
     "ddl/KUMO_ADMIN/WORKFLOW_MANAGER/procedures/X_SP_WORKFLOW_SCHEDULE_TICK__a0a986b618dc.sql",
     "ddl/KUMO_ADMIN/WORKFLOW_MANAGER/procedures/X_SP_WORKFLOW_TASK_ENTRY__a0a986b618dc.sql",
-    "ddl/KUMO_ADMIN/META/procedures/SP_CHECK_VERSIONING__c203e74ecf77.sql",
+    "ddl/KUMO_ADMIN/META/procedures/SP_CHECK_VERSIONING__0d4e803287d5.sql",
     "ddl/KUMO_ADMIN/META/procedures/SP_DBT_QUERY_HISTORY__0d4e803287d5.sql",
     "ddl/KUMO_ADMIN/META/procedures/SP_FILESTATUS_RAW_LIM__c203e74ecf77.sql",
     "ddl/KUMO_ADMIN/META/procedures/SP_FIX_VERSIONING__f510c6c3a4dd.sql",
@@ -1245,6 +1263,9 @@
     "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_WORKFLOW_DISPATCH__c203e74ecf77.sql",
     "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_WORKFLOW_REQUEST_RUN__9d4a0f2e146d.sql",
     "ddl/KUMO_DEV/MONITOR_META/procedures/LOAD_RAW_LIM_FROM_STAGE__06532d90d921.sql",
+    "ddl/KUMO_DEV/META/procedures/SP_DBT_QUERY_HISTORY__0d4e803287d5.sql",
+    "ddl/KUMO_DEV/META/procedures/SP_PURGE_LIM_BATCH__a0a986b618dc.sql",
+    "ddl/KUMO_DEV/META/procedures/SP_REMOVE_DUPLICATES__0d4e803287d5.sql",
     "ddl/KUMO_ADMIN/WORKFLOW_MANAGER/tasks/TASK_WF_MASTER_DISPATCHER.sql",
     "ddl/KUMO_DEV/MONITOR_APP/tasks/TASK_WF_MASTER_DISPATCHER.sql"
   ]

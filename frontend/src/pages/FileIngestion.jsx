@@ -165,6 +165,7 @@ function OverviewRow({ row, rawRow = {}, showRaw = false, source = false, expand
 }
 
 function DetailMetrics({ type, metrics = {} }) {
+  const context = useRuntimeConfig()
   if (type === 'raw') {
     return (
       <div className="lim-detail-metrics five">
@@ -183,7 +184,7 @@ function DetailMetrics({ type, metrics = {} }) {
         <Metric label="Rows" value={metrics.rows || 0} />
         <Metric label="Ready" value={metrics.updated || 0} tone="success" />
         <Metric label="Attention" value={metrics.attention || 0} tone={metrics.attention ? 'failed' : ''} />
-        <Metric label="Rows updated" value={metrics.rowsUpdated || 0} />
+        <Metric label={context?.limReadinessSource === 'BATCH_CONTROL' ? 'Payload rows accepted' : 'Rows updated'} value={metrics.rowsUpdated || 0} />
       </div>
     )
   }
@@ -239,13 +240,14 @@ function RawTable({ rows }) {
 }
 
 function LogTable({ rows }) {
+  const context = useRuntimeConfig()
   return (
     <div className="lim-table-scroll lim-detail-scroll">
       <table className="lim-table lim-detail-table">
         <thead>
           <tr>
             <th>Control date</th><th>Group</th><th>End date</th><th>Source</th><th>Pkg ID</th>
-            <th>Year</th><th>Seq</th><th>Status</th><th>Rows updated</th><th>Reason</th>
+            <th>Year</th><th>Seq</th><th>Status</th><th>{context?.limReadinessSource === 'BATCH_CONTROL' ? 'Payload rows accepted' : 'Rows updated'}</th><th>Reason</th>
           </tr>
         </thead>
         <tbody>

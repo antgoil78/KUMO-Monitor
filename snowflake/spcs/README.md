@@ -1,5 +1,13 @@
 # Environment selection in SPCS
 
+App releases go through Git and
+[`deploy-image.yml`](../../.github/workflows/deploy-image.yml). Push to `main`
+to trigger it automatically, or use its manual dispatch to publish a feature
+branch. The workflow builds and publishes the versioned container image. It
+does not execute `ALTER SERVICE`; updating the running service is a separate
+promotion step. Use the GitHub Actions path for releases unless a direct service
+update is explicitly requested.
+
 Set `KUMO_ENV` to `DEV` or `TST` at deployment time. The container receives it
 under `spec.containers[].env`; the backend derives its database and object
 locations from this selector. The frontend receives the same context from
@@ -49,13 +57,18 @@ OAuth token.
 [`create_dev_service.sql`](create_dev_service.sql) creates
 `KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE` in `KUMO_SHARED_MONITOR_POOL`.
 [`alter_dev_service.sql`](alter_dev_service.sql) updates that same DEV service
-for subsequent deployments. Both pin the verified published version
-`build-215-1-022ffedd2bf2`; replace the image tag with the selected published
-version when deploying another build. Setup and creation were executed on
-19 October 2026; the DEV service is running with `KUMO_ADMIN` as owner. The
-update script was not needed because creation applied the same specification
-and query warehouse. The deployment receipt is recorded in
-[`dev-service-deployment-result.json`](../../review/dev-service-deployment-result.json).
+for subsequent deployments. The create script records the initial published
+version `build-215-1-022ffedd2bf2`. The update script now records the DEV readiness
+release `dev-readiness-20261020-134830-1bb36d43`, deployed on 20 October 2026, with its
+matching image digest. Change both tag and digest together when selecting another
+build: a stale digest can keep the previous image running despite a new tag.
+The update preserves existing environment settings, endpoint configuration and
+resources. Setup and creation were executed on 19 October 2026; the DEV service
+is running with `KUMO_ADMIN` as owner. The initial deployment receipt is recorded
+in [`dev-service-deployment-result.json`](../../review/dev-service-deployment-result.json),
+and the readiness updates are recorded in
+[`dev-lim-readiness-service-deployment.json`](../../review/dev-lim-readiness-service-deployment.json)
+and [`dev-spcs-app-release.json`](../../review/dev-spcs-app-release.json).
 These scripts are not executed automatically by CI.
 
 DEV endpoint: <https://mnztue-vymkbmw-ov24823.snowflakecomputing.app>. The
@@ -63,7 +76,23 @@ container reports `READY` and its health probe returns HTTP 200. The public URL
 redirects to Snowflake sign-in, and the user confirmed that the DEV monitor loads
 in the browser. Automated session-token verification separately received HTTP
 500 from Snowflake ingress before reaching the application; that check did not
-verify API responses or workflow execution.
+verify browser authentication. The latest release also runs HTTP checks from a
+temporary SPCS job against the monitor's internal endpoint. These checks exercise
+the deployed React bundle, DEV/BATCH_CONTROL context, live Snowflake reads,
+PAAR accepted/blocked boundaries, history, and invalid reload requests. Results
+are recorded in the release receipt above. They submit no valid load or workflow
+request. The one-off test job is removed after collecting its results.
+
+The smoke payload is
+[`dev_spcs_readiness_smoke.py`](../checks/dev_spcs_readiness_smoke.py). Supply
+`KUMO_SMOKE_BASE_URL=http://<service-dns-name>:5000` and
+`KUMO_SMOKE_IMAGE_VERSION=<published-tag>` to a job using the published image.
+Set `KUMO_SMOKE_HISTORY_ROWS` to the live PAAR row count in
+`KUMO_DEV.MONITOR_META._SET_READY_LOG` over the last 30 days, and execute the
+payload with Python. An empty archive is valid when only the current run exists.
+Its PAAR count and date assertions describe
+the verified 20 October dataset; review them before reusing it after another
+load. It emits a single `SPCS_SMOKE_RESULT` JSON record with aggregate results.
 
 First run [`prepare_dev_service.sql`](prepare_dev_service.sql). It uses
 `ACCOUNTADMIN` for the one-time compute pool `USAGE` and public endpoint grants
@@ -142,8 +171,10 @@ procedure-generated execution tasks retain their separate lifecycle.
 
 Current readiness: DEV definitions and workflow/job configuration have been
 copied, with executable references directed to DEV and copied schedules disabled.
-DEV service owner grants and deployment are in place; application user access
-and workflow execution validation remain. `META.WORKFLOW_DEP_RULE` is intentionally absent.
+DEV service owner grants and deployment are in place. The PAAR readiness and
+SDL/EDV workflow completed successfully on 20 October; its table verification is
+recorded in [`paar-dev-load-verification.json`](../../review/paar-dev-load-verification.json).
+Automated browser authentication remains unverified. `META.WORKFLOW_DEP_RULE` is intentionally absent.
 The renderer does not create any of these prerequisites or shared resources.
 
 References:

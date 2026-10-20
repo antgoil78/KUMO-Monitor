@@ -17,6 +17,7 @@ from snowflake.connector import DictCursor
 
 import config
 import snowflake_client as sf
+import lim_readiness
 from utils import normalize_rows
 
 
@@ -502,6 +503,9 @@ def _load_raw_table_readiness(cur, catalog):
 
     branches = []
     for subject in subjects:
+        if config.LIM_READINESS_SOURCE == "BATCH_CONTROL":
+            branches.append(f"SELECT * FROM ({lim_readiness.raw_file_readiness_sql(subject)})")
+            continue
         branches.append(
             f"""
             SELECT '{subject}' AS SUBJECT_AREA,
@@ -686,6 +690,10 @@ def _load_overview(history_days):
 
 
 def _load_raw_detail(group_name):
+    if config.LIM_READINESS_SOURCE == "BATCH_CONTROL":
+        return normalize_rows(sf.query_service(
+            lim_readiness.metadata_detail_sql(), params={"group_name": group_name},
+        ))
     meta_rows = sf.query_service(
         f"""
         SELECT RAW_TABLE,

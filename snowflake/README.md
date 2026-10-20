@@ -4,6 +4,71 @@ This directory stores the current live definitions needed by KUMO Monitor and
 its workflow/LIM backend. It complements the incremental patches in
 `backend/migrations/` with complete SQL definitions for a future account move.
 
+The DEV readiness investigation and implementation contract are recorded in
+[`dev-lim-readiness-plan.json`](../review/dev-lim-readiness-plan.json).
+[`checks/dev_lim_readiness.sql`](checks/dev_lim_readiness.sql) contains the
+read-only catalog/count checks and eight synthetic state cases used during
+preparation. It does not call loaders or workflows or change task state.
+The investigation found populated DEV RAW/batch-control tables and started
+tasks, while the monitor's validation/history tables were empty. The subsequent
+DEV implementation is described below. Full definitions describe the live
+deployed objects; investigation observations and deployment receipts are kept
+separately.
+
+## DEV readiness without RAW flags
+
+The DEV RAW subject tables contain six columns; neither `DW_READY_TO_LOAD_FL`
+nor `DW_BATCH_ID` is required there. Readiness registration uses the existing
+`KUMO_DEV.META.LIM_BATCH_CTRL` key `(DW_TABLE_NM, DW_FILE_NM, DW_SRC_SYST)`.
+Ordinary validation inserts missing nonempty payload files without resetting
+existing batch IDs, processing times or processed/deleted flags. dbt continues
+to own processing state and `DW_BATCH_ID` in batch control.
+
+Valid empty payloads are accepted through the existing current/history delivery
+logs and never enter the dbt queue. Control files are archived by exact filename
+only after the control and all its expected payload deliveries pass. The archive
+retains its optional compatibility columns using derived values. Registration,
+archiving/deletion, success logs, metadata display flags and sequence advancement
+commit together. A refresh replaces the current subject metadata snapshot, so
+an empty refresh cannot leave an old candidate set available for validation.
+
+[`apply_dev_lim_readiness.py`](../backend/migrations/apply_dev_lim_readiness.py)
+prepares the incremental SQL by default. `--apply` replaces only the three DEV
+readiness/loading procedures, preserves grants, verifies their bodies and runs
+the DDL exporter. Each updated procedure rejects a database argument other than
+`KUMO_DEV`. The migration never invokes a production loader or workflow, edits
+existing batch records or changes task state.
+
+```bash
+python backend/migrations/apply_dev_lim_readiness.py
+python backend/migrations/apply_dev_lim_readiness.py --apply
+```
+
+The loader's explicit ready bypass registers selected nonempty payloads instead
+of updating RAW flags. Explicit partial reload clears batch-control and archived
+control records only for selected files; full reload clears them for the subject.
+The existing sequence-reset option and SDL rebuild behavior remain in effect.
+Keep sequence reset enabled when replaying older deliveries through normal
+validation. The loader returns `FILES_REGISTERED` and `CONTROL_ARCHIVE_DELETED`;
+the legacy `READY_ROWS_UPDATED` result is zero because no RAW flags are changed.
+
+The DEV monitor derives status from batch registration and successful empty-file
+delivery history, retaining `DW_READY_TO_LOAD_FL` in metadata/API responses.
+`ROWS_UPDATED` reports payload data rows accepted for a delivery, and the DEV UI
+labels that count accordingly. TST and the unset-environment path retain their
+existing queries and semantics.
+
+The explicit live checks in
+[`live_dev_lim_readiness.py`](../backend/tests/live_dev_lim_readiness.py) and
+[`live_dev_lim_readiness_queries.py`](../backend/tests/live_dev_lim_readiness_queries.py)
+create disposable DEV schemas containing only synthetic fixtures, then remove
+them. They do not call production loaders or workflows. Results are recorded in
+[`dev-lim-readiness-live-tests.json`](../review/dev-lim-readiness-live-tests.json)
+and [`dev-lim-readiness-query-tests.json`](../review/dev-lim-readiness-query-tests.json).
+Deployment receipts identify the three updated procedures and the DEV service
+image. The current DEV service update SQL is
+[`spcs/alter_dev_service.sql`](spcs/alter_dev_service.sql).
+
 **Whenever an object is changed in Snowflake, always update its SQL definition
 in Git in the same change.** After a direct Snowsight edit, refresh this snapshot,
 review the diff and commit it. For changes deployed from Git, keep the full

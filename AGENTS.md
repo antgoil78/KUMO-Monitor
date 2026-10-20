@@ -13,3 +13,10 @@ See `snowflake/README.md` for export and migration instructions.
 Do not save generated workflow schedulers or temporary workflow run tasks as
 persistent task definitions. Preserve the master dispatcher and other static
 engine tasks. Never commit credentials or table contents with the DDL snapshot.
+
+# App releases
+
+Route app releases through Git and the existing GitHub Actions workflow in
+`.github/workflows/deploy-image.yml`. Push the changes and use that workflow
+to build and publish the image. Do not publish images or update the SPCS service
+directly unless the user explicitly requests that deployment path.

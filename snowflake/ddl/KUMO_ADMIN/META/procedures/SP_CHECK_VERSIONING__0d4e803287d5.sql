@@ -1,9 +1,9 @@
--- Source: KUMO_ADMIN.META.SP_CHECK_VERSIONING(VARCHAR, VARCHAR)
+-- Source: KUMO_ADMIN.META.SP_CHECK_VERSIONING(VARCHAR, VARCHAR, VARCHAR)
 -- Refresh: python snowflake/export_ddl.py
 USE DATABASE "KUMO_ADMIN";
 USE SCHEMA "KUMO_ADMIN"."META";
 
-CREATE OR REPLACE PROCEDURE KUMO_ADMIN.META.SP_CHECK_VERSIONING("TABLE_NAME" VARCHAR DEFAULT null, "DBT_DB" VARCHAR DEFAULT CURRENT_DATABASE())
+CREATE OR REPLACE PROCEDURE KUMO_ADMIN.META.SP_CHECK_VERSIONING("DBT_DB" VARCHAR DEFAULT CURRENT_DATABASE(), "TABLE_SCHEMA" VARCHAR DEFAULT null, "TABLE_NAME" VARCHAR DEFAULT null)
 RETURNS TABLE ("TABLE_NAME" VARCHAR, "KEY_COLUMNS" VARCHAR, "INCORRECT_RECORDS" NUMBER(38,0), "SAMPLE_KEYS" VARCHAR)
 LANGUAGE SQL
 EXECUTE AS CALLER
@@ -24,11 +24,26 @@ DECLARE
     v_surrogate_key VARCHAR;
     v_count         INTEGER;
     v_samples       VARCHAR;
+    v_type_filter   VARCHAR;
+    invalid_table_schema EXCEPTION (-20001, ''Invalid table_schema. Allowed values: SDL, EDV or NULL'');
     res RESULTSET;
     cur CURSOR FOR
         SELECT TABLE_NAME, OBJECT_TYPE, BUSINESS_KEY, SURROGATE_KEY
           FROM _check_versioning_keys;
 BEGIN
+    -- Resolve the object types to check from the optional table_schema parameter:
+    -- SDL -> sdltable, EDV -> satellite/linksatellite, NULL -> all three; anything else fails
+    CASE
+        WHEN (:table_schema IS NULL) THEN
+            v_type_filter := ''''''sdltable'''', ''''satellite'''', ''''linksatellite'''''';
+        WHEN (UPPER(TRIM(:table_schema)) = ''SDL'') THEN
+            v_type_filter := ''''''sdltable'''''';
+        WHEN (UPPER(TRIM(:table_schema)) = ''EDV'') THEN
+            v_type_filter := ''''''satellite'''', ''''linksatellite'''''';
+        ELSE
+            RAISE invalid_table_schema;
+    END CASE;
+
     -- Create a temporary table to collect validation results across all tables
     CREATE OR REPLACE TEMPORARY TABLE _check_versioning_result (
         TABLE_NAME        VARCHAR,
@@ -38,13 +53,13 @@ BEGIN
     );
 
     -- Load the list of tables to check from the META.UNIQUE_KEY metadata table,
-    -- filtered to versioned object types (sdltable, satellite, linksatellite)
+    -- filtered to the versioned object types resolved from table_schema
     -- and optionally filtered to a single table if the table_name parameter is provided
     EXECUTE IMMEDIATE
         ''CREATE OR REPLACE TEMPORARY TABLE _check_versioning_keys AS
          SELECT TABLE_NAME, OBJECT_TYPE, BUSINESS_KEY, SURROGATE_KEY
            FROM '' || v_meta_uk || ''
-          WHERE LOWER(OBJECT_TYPE) IN (''''sdltable'''', ''''satellite'''', ''''linksatellite'''')''
+          WHERE LOWER(OBJECT_TYPE) IN ('' || v_type_filter || '')''
           || CASE WHEN :table_name IS NOT NULL THEN '' AND UPPER(TRIM(TABLE_NAME)) = '''''' || UPPER(TRIM(:table_name)) || '''''''' ELSE '''' END;
 
     -- Iterate over each table to validate its versioning columns

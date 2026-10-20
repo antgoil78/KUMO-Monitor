@@ -1433,6 +1433,7 @@ def _health_snapshot():
             "metadataNamespace": config.METADATA_NAMESPACE,
             "orchestrationNamespace": config.ORCHESTRATION_NAMESPACE,
             "limDatabase": config.LIM_DATABASE,
+            "limReadinessSource": config.LIM_READINESS_SOURCE,
             "limRole": config.LIM_ROLE,
             "rawLimNamespace": f"{config.LIM_DATABASE}.RAW_LIM",
             "rawLimMetaTable": config.RAW_LIM_META_TABLE,

@@ -8,35 +8,39 @@ RETURNS VARCHAR
 LANGUAGE SQL
 EXECUTE AS CALLER
 AS '
+-- DEV_LIM_BATCH_READINESS_V1
 DECLARE
     V_DATABASE VARCHAR DEFAULT UPPER(TRIM(P_DATABASE));
     V_METADATA_TABLE VARCHAR;
     V_SOURCE_TABLE VARCHAR;
+    V_BATCH_CTRL VARCHAR;
+    V_LATEST_LOG VARCHAR;
+    V_HISTORY_LOG VARCHAR;
+    V_ARCHIVE VARCHAR;
+    V_TRANSACTION_STARTED BOOLEAN DEFAULT FALSE;
     E_INVALID_DATABASE EXCEPTION (-20002, ''Invalid database identifier'');
     V_RAW_TABLE VARCHAR;
     V_ROW_COUNT INTEGER;
     V_RUN_DTTM TIMESTAMP_NTZ;
 BEGIN
-  IF (V_DATABASE IS NULL OR NOT REGEXP_LIKE(V_DATABASE, ''^[A-Z_][A-Z0-9_$]*$'')) THEN
+  IF (V_DATABASE IS NULL OR V_DATABASE <> ''KUMO_DEV'') THEN
     RAISE E_INVALID_DATABASE;
   END IF;
     V_METADATA_TABLE := V_DATABASE || ''.MONITOR_META.RAW_LIM_META'';
     V_SOURCE_TABLE := V_DATABASE || ''.MONITOR_META.RAW_LIM_PKG_GROUP_SOURCE'';
+    V_BATCH_CTRL := V_DATABASE || ''.META.LIM_BATCH_CTRL'';
+    V_LATEST_LOG := V_DATABASE || ''.META._TMP_SET_READY_LOG'';
+    V_HISTORY_LOG := V_DATABASE || ''.MONITOR_META._SET_READY_LOG'';
+    V_ARCHIVE := V_DATABASE || ''.MONITOR_META.RAW_LIM_CONTROL_ARCHIVE'';
     V_RUN_DTTM := SYSDATE();
     V_RAW_TABLE := :V_DATABASE || ''.RAW_LIM.RAW_LIM_'' || UPPER(:DLVY_SUBJECT_AREA);
 
-    /*
-    DELETE FROM IDENTIFIER(:V_METADATA_TABLE)
-    WHERE RAW_TABLE = :V_RAW_TABLE
-      AND NOT (FILE_TYPE = ''CONTROL'' AND DW_READY_TO_LOAD_FL = TRUE)
-      AND CONTROL_FILE_NAME NOT IN (
-          SELECT FILE_NAME FROM IDENTIFIER(:V_METADATA_TABLE)
-          WHERE RAW_TABLE = :V_RAW_TABLE
-            AND FILE_TYPE = ''CONTROL''
-            AND DW_READY_TO_LOAD_FL = TRUE
-      );
-    */
-    
+    -- Replace the current subject snapshot, including a refresh with no candidates.
+    -- Readiness history, rather than old metadata snapshots, records acceptance.
+    BEGIN TRANSACTION;
+    V_TRANSACTION_STARTED := TRUE;
+    DELETE FROM IDENTIFIER(:V_METADATA_TABLE) WHERE RAW_TABLE = :V_RAW_TABLE;
+
     INSERT INTO IDENTIFIER(:V_METADATA_TABLE) (
         RAW_TABLE,
         ORIGINAL_FILE_NAME,
@@ -66,17 +70,36 @@ BEGIN
         ALL_SOURCES_FL,
         RUN_DTTM
     )
-    WITH raw_input AS (
+    WITH registered_files AS (
+        SELECT DISTINCT DW_FILE_NM, DW_SRC_SYST
+        FROM IDENTIFIER(:V_BATCH_CTRL)
+        WHERE UPPER(DW_TABLE_NM) IN (
+            ''RAW_LIM.RAW_LIM_'' || UPPER(:DLVY_SUBJECT_AREA), :V_RAW_TABLE)
+    ),
+    accepted_deliveries AS (
+        SELECT DISTINCT PKG_GROUP_NAME, DLVY_END_DATE, DLVY_SOURCE_ID,
+               DLVY_PKG_ID, DLVY_PKG_YEAR, DLVY_PKG_YEAR_SEQ_NO
+        FROM (
+            SELECT * FROM IDENTIFIER(:V_LATEST_LOG)
+            UNION ALL
+            SELECT * FROM IDENTIFIER(:V_HISTORY_LOG)
+        )
+        WHERE STATUS IN (''UPDATED'', ''PREVIOUSLY_LOADED'')
+    ),
+    raw_input AS (
         SELECT
             :V_RAW_TABLE AS RAW_TABLE,
             DW_FILE_NM::STRING AS ORIGINAL_FILE_NAME,
             REGEXP_SUBSTR(DW_FILE_NM::STRING, ''[^/]+$'') AS BASE_FILE_NAME,
             TRIM(DATA::STRING) AS DATA_T,
-            SUBSTR(TRIM(DATA::STRING), 1, 2) AS RECORD_TYPE,
-            IFNULL(DW_READY_TO_LOAD_FL, FALSE) AS DW_READY_TO_LOAD_FL
-        FROM IDENTIFIER(:V_RAW_TABLE)
-        WHERE NOT (SUBSTR(REGEXP_SUBSTR(DW_FILE_NM::STRING, ''[^/]+$''), 8, 3) = ''000''
-                   AND IFNULL(DW_READY_TO_LOAD_FL, FALSE) = TRUE)
+            SUBSTR(TRIM(DATA::STRING), 1, 2) AS RECORD_TYPE
+        FROM IDENTIFIER(:V_RAW_TABLE) raw
+        WHERE NOT EXISTS (
+            SELECT 1 FROM IDENTIFIER(:V_ARCHIVE) archived
+            WHERE archived.SUBJECT_AREA = UPPER(:DLVY_SUBJECT_AREA)
+              AND archived.DW_FILE_NM = raw.DW_FILE_NM
+              AND archived.DW_FILE_CHECK_SUM IS NOT DISTINCT FROM raw.DW_FILE_CHECK_SUM
+        )
     ),
     raw_rows AS (
         SELECT
@@ -97,8 +120,7 @@ BEGIN
                 SUBSTR(BASE_FILE_NAME, 1, 42)
             ) AS FILE_KEY,
             DATA_T,
-            RECORD_TYPE,
-            DW_READY_TO_LOAD_FL
+            RECORD_TYPE
         FROM raw_input
     ),
     physical_file_rows AS (
@@ -109,7 +131,6 @@ BEGIN
             FILE_KEY,
             DATA_T,
             RECORD_TYPE,
-            DW_READY_TO_LOAD_FL,
             SUBSTR(FILE_KEY, 1, 3)  AS DLVY_SOURCE_ID,
             SUBSTR(FILE_KEY, 4, 4)  AS DLVY_SUBJECT_AREA_ID,
             SUBSTR(FILE_KEY, 8, 3)  AS DLVY_LIM_OBJ_SEQ_NO,
@@ -143,7 +164,6 @@ BEGIN
             DLVY_PKG_YEAR,
             DLVY_PKG_YEAR_SEQ_NO,
             DLVY_END_DATE,
-            MAX(IFF(DW_READY_TO_LOAD_FL, 1, 0)) AS READY_TO_LOAD_ROW_EXISTS,
             COUNT(*) AS RAW_ROW_COUNT,
             SUM(IFF(RECORD_TYPE = ''00'', 1, 0)) AS HEADER_00_CNT,
             SUM(IFF(RECORD_TYPE = ''10'', 1, 0)) AS DATA_10_CNT,
@@ -157,6 +177,26 @@ BEGIN
             DLVY_LIM_OBJ_SEQ_NO, DLVY_LIM_OBJ_VER_NO,
             DLVY_PKG_ID, DLVY_PKG_YEAR, DLVY_PKG_YEAR_SEQ_NO,
             DLVY_END_DATE
+    ),
+    physical_file_readiness AS (
+        SELECT p.*,
+               IFF(b.DW_FILE_NM IS NOT NULL OR
+                   (p.DATA_10_CNT = 0 AND p.ACTUAL_ROWS = 0 AND p.EXPECTED_ROWS = 0
+                    AND p.FOOTER_99_CNT > 0 AND accepted.DLVY_SOURCE_ID IS NOT NULL),
+                   1, 0) AS READY_TO_LOAD_ROW_EXISTS
+        FROM physical_file_agg p
+        LEFT JOIN registered_files b
+          ON b.DW_FILE_NM = p.ORIGINAL_FILE_NAME AND b.DW_SRC_SYST = p.DLVY_SOURCE_ID
+        LEFT JOIN IDENTIFIER(:V_SOURCE_TABLE) mapping
+          ON mapping.ACTIVE_FL = TRUE AND mapping.SOURCE_ID = p.DLVY_SOURCE_ID
+         AND mapping.SUBJECT_AREA = p.DLVY_SUBJECT_AREA_ID AND mapping.PKG_ID = p.DLVY_PKG_ID
+        LEFT JOIN accepted_deliveries accepted
+          ON accepted.PKG_GROUP_NAME = mapping.PKG_GROUP_NAME
+         AND accepted.DLVY_SOURCE_ID = p.DLVY_SOURCE_ID
+         AND accepted.DLVY_PKG_ID = p.DLVY_PKG_ID
+         AND accepted.DLVY_PKG_YEAR = p.DLVY_PKG_YEAR
+         AND accepted.DLVY_PKG_YEAR_SEQ_NO = p.DLVY_PKG_YEAR_SEQ_NO
+         AND accepted.DLVY_END_DATE = p.DLVY_END_DATE
     ),
     physical_file_status AS (
         SELECT
@@ -205,7 +245,7 @@ BEGIN
                     THEN ''ROWCOUNT_MISMATCH''
                 ELSE ''ROWCOUNT_NOT_EVALUATED''
             END AS ROWCOUNT_STATUS
-        FROM physical_file_agg
+        FROM physical_file_readiness
     ),
     control_files AS (
         SELECT
@@ -511,6 +551,15 @@ BEGIN
     WHERE RAW_TABLE = :V_RAW_TABLE
     AND RUN_DTTM = :V_RUN_DTTM;
 
+    COMMIT;
+    V_TRANSACTION_STARTED := FALSE;
+
     RETURN ''SUCCESS: '' || :V_ROW_COUNT || '' rows loaded for '' || :V_RAW_TABLE;
+EXCEPTION
+    WHEN OTHER THEN
+        IF (V_TRANSACTION_STARTED) THEN
+            ROLLBACK;
+        END IF;
+        RAISE;
 END;
 ';

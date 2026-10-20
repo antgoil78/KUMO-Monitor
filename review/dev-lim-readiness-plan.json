@@ -1,0 +1,253 @@
+{
+  "environment": "KUMO_DEV",
+  "checked_on": "2026-10-20",
+  "status": "implemented_and_deployed_to_dev",
+  "deployment_performed": true,
+  "loaders_or_workflows_invoked": false,
+  "data_or_task_state_changed": false,
+  "scope": "DEV readiness changes only; preserve existing TST behavior in shared application code",
+  "verified_live": {
+    "raw_subject_tables": 40,
+    "remaining_raw_columns": [
+      "DW_FILE_NM",
+      "DW_FILE_DTTM",
+      "DW_FILE_CHECK_SUM",
+      "DW_FILE_ROW_NUMBER",
+      "DW_LOAD_DTTM",
+      "DATA"
+    ],
+    "removed_columns_absent_from_all_raw_subject_tables": true,
+    "batch_control_table": "KUMO_DEV.META.LIM_BATCH_CTRL",
+    "batch_control_primary_key": [
+      "DW_TABLE_NM",
+      "DW_FILE_NM",
+      "DW_SRC_SYST"
+    ],
+    "batch_control_files": 10069,
+    "processed_files": 10013,
+    "unprocessed_files": 56,
+    "deleted_files": 0,
+    "batch_control_contains_control_files": false,
+    "batch_control_file_names_have_paths": false,
+    "batch_control_table_names_use_schema_and_table": true,
+    "raw_row_counts_checked_directly": {
+      "RAW_LIM_CUAR": 160498434,
+      "RAW_LIM_PROD": 2999988,
+      "RAW_LIM_PAAR": 5094
+    },
+    "empty_monitor_tables_checked_directly": [
+      "KUMO_DEV.MONITOR_META.RAW_LIM_META",
+      "KUMO_DEV.MONITOR_META.RAW_LIM_CONTROL_ARCHIVE",
+      "KUMO_DEV.META._TMP_SET_READY_LOG",
+      "KUMO_DEV.MONITOR_META._SET_READY_LOG"
+    ],
+    "active_source_mappings": 38,
+    "active_source_mappings_with_sequence_watermarks": 38,
+    "duplicate_active_source_subject_package_mappings": 0,
+    "started_tasks_observed": 7,
+    "master_dispatcher_started": true,
+    "affected_procedure_snapshots_match_live_definitions": true,
+    "existing_dev_view_definitions_reference_removed_flag_or_batch_control": false,
+    "workflow_log_removed_flag_mentions": 2,
+    "workflow_log_batch_id_mentions": 1,
+    "paar_sample": {
+      "raw_payload_files": 1557,
+      "empty_payload_files": 1532,
+      "nonempty_payload_files": 25,
+      "unregistered_nonempty_payload_files": 0
+    }
+  },
+  "dbt_consumer_checked": {
+    "project": "KUMO_DEV.DBT_APP.KUMO_DEV",
+    "version": "live",
+    "files_inspected": {
+      "macros_sql_and_sqlx": 379,
+      "sdl_sql": 202
+    },
+    "batch_opener": "macros/LoadSQL/openLIMBatch.sql",
+    "processing_hook": "macros/generateVersionedTable.sql",
+    "behavior": [
+      "Join source records to batch control on DW_TABLE_NM, DW_FILE_NM and DW_SRC_SYST",
+      "Populate DW_VER_CTRL, DW_VLD_FM_DTTM and NO_OF_RECS from source records",
+      "Assign DW_BATCH_ID in batch control and select that batch for processing",
+      "Set PROCESSED_FL and PROCESSED_DTTM after successful loading",
+      "Expect empty files to be excluded from batch control"
+    ],
+    "removed_flag_occurrences": "Only attribute/checksum exclusion lists in the inspected SQL; no direct RAW flag reads found",
+    "decision": "Keep DW_BATCH_ID in LIM_BATCH_CTRL and preserve the consumer interface",
+    "dbt_executed_or_deployed": false,
+    "downloaded_source_saved_in_repository": false
+  },
+  "implementation_contract": {
+    "load_queue": "A registered nonempty payload with PROCESSED_FL=FALSE and DELETED_FL=FALSE",
+    "accepted_history": "Batch registration remains evidence of earlier acceptance after processing or purging; do not automatically requeue historical files",
+    "file_identity": "Match exact physical file name and source, and normalize table qualification within KUMO_DEV; do not use filename-prefix joins",
+    "empty_files": "Validate empty payloads normally, record successful delivery acceptance in existing readiness history, and exclude them from the dbt queue",
+    "historical_empty_files": "Preserve existing source/package watermarks. Readiness history is currently empty, so do not infer historical acceptance from batch-control absence or reset watermarks during cutover",
+    "delivery_completion": "Require every expected payload to be accepted; a MAX/any-file test cannot establish delivery completion",
+    "control_files": "Validate and archive controls using the exact accepted delivery/file set. Delete only controls successfully archived for that set",
+    "validation_rules": "Preserve receipt, row-count, source-completeness, sequence, override and earlier-failure blocking rules",
+    "reruns": "Use insert-only registration for ordinary validation; leave existing batch IDs, timestamps and processing flags intact",
+    "explicit_reload": "Define and implement a reset for the exact reloaded file set; coordinate it with existing SDL rebuild behavior and do not reset unrelated batches",
+    "atomicity": "Publish successful readiness logs, batch registration, control archival and sequence advancement consistently; success must not remain visible after a later registration/archive failure",
+    "compatibility": "Retain derived DW_READY_TO_LOAD_FL in monitor metadata/API and existing procedure signatures; remove physical RAW reads and writes of both dropped columns"
+  },
+  "planned_changes": [
+    {
+      "object": "KUMO_DEV.MONITOR_APP.SP_RAW_LIM_META_REFRESH(VARCHAR, VARCHAR)",
+      "definition": "snowflake/ddl/KUMO_DEV/MONITOR_APP/procedures/SP_RAW_LIM_META_REFRESH__c203e74ecf77.sql",
+      "changes": [
+        "Derive payload registration from file-level batch-control membership",
+        "Resolve accepted empty/control files through delivery completion history and archived controls",
+        "Retain the derived metadata flag and existing file-validation output",
+        "Exclude completed controls without reading a RAW readiness column"
+      ]
+    },
+    {
+      "object": "KUMO_DEV.MONITOR_APP.SP_RAW_LIM_SET_READY(VARCHAR, BOOLEAN, BOOLEAN, VARCHAR)",
+      "definition": "snowflake/ddl/KUMO_DEV/MONITOR_APP/procedures/SP_RAW_LIM_SET_READY__3b5f66d9f2b5.sql",
+      "changes": [
+        "Replace the any-ready delivery shortcut with complete expected-file acceptance",
+        "Remove payload/control RAW flag updates and the RAW flag filter from batch registration",
+        "Register validated nonempty payloads directly from the selected current metadata run",
+        "Archive controls without selecting raw.DW_BATCH_ID or raw.DW_READY_TO_LOAD_FL",
+        "Preserve archive compatibility using derived values for its existing optional columns",
+        "Scope archive/delete operations to the exact accepted current delivery set",
+        "Preserve empty-file completion, sequence tracking, rerun behavior and meaningful row/file metrics"
+      ]
+    },
+    {
+      "object": "KUMO_DEV.MONITOR_META.LOAD_RAW_LIM_FROM_STAGE(VARCHAR, DATE, DATE, BOOLEAN, BOOLEAN, BOOLEAN, VARCHAR)",
+      "definition": "snowflake/ddl/KUMO_DEV/MONITOR_META/procedures/LOAD_RAW_LIM_FROM_STAGE__06532d90d921.sql",
+      "changes": [
+        "Replace P_SET_READY_TO_LOAD RAW flag writes with explicit payload registration",
+        "Retain the explicit bypass behavior while excluding empty/control files from the dbt queue",
+        "Handle partial-reload batch-control state for selected files",
+        "Preserve full-reload scope and include registration/reset counts in the result"
+      ]
+    },
+    {
+      "files": [
+        "backend/file_ingestion.py",
+        "backend/config.py",
+        "frontend/src/pages/LimReload.jsx"
+      ],
+      "changes": [
+        "Use batch-control and delivery-completion readiness for DEV live RAW status/detail overlays",
+        "Keep the metadata/API flag as a derived compatibility field",
+        "Describe DEV bypass behavior as registration rather than setting a dropped RAW column",
+        "Keep TST and the unset-environment path on their current behavior"
+      ]
+    }
+  ],
+  "checks_run": {
+    "read_only_sql": "snowflake/checks/dev_lim_readiness.sql",
+    "audit_statements_succeeded": 10,
+    "removed_column_explain_checks_failed_as_expected": [
+      "DW_READY_TO_LOAD_FL",
+      "DW_BATCH_ID"
+    ],
+    "replacement_file_registration_lookup_compiles": true,
+    "synthetic_state_contract_cases_passed": 8,
+    "synthetic_cases": [
+      "new_file",
+      "queued",
+      "processed",
+      "purged",
+      "empty_unvalidated",
+      "empty_validated",
+      "partial_delivery",
+      "missing_required_file"
+    ],
+    "limitation": "These original SELECT fixtures checked the proposed state contract. Subsequent procedure and application test receipts are listed under implementation."
+  },
+  "implementation_validation_required": [
+    "Use isolated fixtures to exercise receipt/row-count failures, group completeness, sequence and earlier-date blocking",
+    "Verify mixed nonempty/empty deliveries and deliveries consisting entirely of valid empty payloads",
+    "Verify existing processed records are preserved, a partial delivery is not skipped, and repeated validation adds no duplicate batches or controls",
+    "Verify exact control archival/deletion and failure recovery before advancing source/package watermarks",
+    "Verify explicit partial/full reload behavior against existing processed batches and SDL rebuild behavior",
+    "Verify DEV UI/API readiness and preserve TST query behavior",
+    "Review the incremental migration and matching full definitions together",
+    "After an explicitly requested deployment, refresh definitions with python snowflake/export_ddl.py and review the Git diff; exclude generated workflow tasks"
+  ],
+  "load_provenance": {
+    "checked_on": "2026-10-20",
+    "source": "SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY and INFORMATION_SCHEMA.COPY_HISTORY",
+    "timezone": "Europe/Stockholm",
+    "conclusion": "Existing DEV RAW data was loaded by direct COPY INTO statements on 2026-10-16 under KENNETH.MATTSSON, using the TST external stage and file format with KUMO_DEV as the session database",
+    "raw_copy_statements": [
+      {
+        "table": "KUMO_DEV.RAW_LIM.RAW_LIM_CUAR",
+        "time": "2026-10-16T14:49:53+02:00",
+        "rows_inserted": 160498434,
+        "query_id": "01c7c4c1-010b-6f65-0004-a4f2074198e2"
+      },
+      {
+        "table": "KUMO_DEV.RAW_LIM.RAW_LIM_CURR",
+        "time": "2026-10-16T14:51:32+02:00",
+        "rows_inserted": 331243,
+        "query_id": "01c7c4c3-010b-6f65-0004-a4f207419a52"
+      },
+      {
+        "table": "KUMO_DEV.RAW_LIM.RAW_LIM_PAAR",
+        "time": "2026-10-16T14:51:47+02:00",
+        "rows_inserted": 5094,
+        "query_id": "01c7c4c3-010b-6f9d-0004-a4f20741e59a"
+      },
+      {
+        "table": "KUMO_DEV.RAW_LIM.RAW_LIM_PROD",
+        "time": "2026-10-16T15:00:35+02:00",
+        "rows_inserted": 3000131,
+        "query_id": "01c7c4cc-010b-6f65-0004-a4f207419fea"
+      },
+      {
+        "table": "KUMO_DEV.RAW_LIM.RAW_LIM_SEBK",
+        "time": "2026-10-16T15:01:02+02:00",
+        "rows_inserted": 404050,
+        "query_id": "01c7c4cd-010b-7194-0004-a4f20741f166"
+      },
+      {
+        "table": "KUMO_DEV.RAW_LIM.RAW_LIM_TPAC",
+        "time": "2026-10-16T15:01:14+02:00",
+        "rows_inserted": 12665,
+        "query_id": "01c7c4cd-010b-7194-0004-a4f20741f18a"
+      }
+    ],
+    "source_stage": "KUMO_TST.META.AZURE_LIM_STAGE",
+    "source_file_format": "KUMO_TST.META.KUMO_LIM",
+    "dev_and_tst_stage_urls_match": true,
+    "batch_registration": "Successful MERGE statements under KENNETH.MATTSSON on 2026-10-16 around 15:11 Stockholm time",
+    "dbt_execution": {
+      "project": "KUMO_DEV.DBT_APP.KUMO_DEV",
+      "user": "KENNETH.MATTSSON",
+      "time": "2026-10-16T15:15:58+02:00",
+      "query_id": "01c7c4db-010b-7194-0004-a4f207425222"
+    },
+    "cross_environment_checks": {
+      "dev_workflow_sql_or_dbt_target_points_to_tst": false,
+      "dev_job_sql_or_dbt_target_points_to_tst": false,
+      "dev_task_definitions_mention_tst": false,
+      "dev_view_definitions_mention_tst": false,
+      "dev_dbt_job_targets": "kumo_DEV / KUMO_DEV.DBT_APP.KUMO_DEV"
+    },
+    "limitation": "These checks establish the original load destination and inspect current configuration; they do not prove absence of every possible cross-environment access in the account"
+  },
+  "implementation": {
+    "procedures_receipt": "review/dev-lim-readiness-deployment.json",
+    "service_receipt": "review/dev-lim-readiness-service-deployment.json",
+    "unit_tests_passed": 65,
+    "isolated_procedure_checks_passed": 21,
+    "isolated_query_and_reload_checks_passed": 10,
+    "local_container_health_http_status": 200,
+    "ddl_export_refreshed": true,
+    "existing_batch_control_rows_unchanged": true,
+    "production_workflows_or_loaders_invoked": false,
+    "tst_runtime_modified": false,
+    "snapshot_also_captures_preexisting_live_drift": [
+      "KUMO_ADMIN.META.SP_CHECK_VERSIONING signature changed from two to three VARCHAR arguments before this deployment",
+      "Three already-existing KUMO_DEV.META procedures are now included in the snapshot",
+      "DEV master dispatcher was already started; task state was not changed by this deployment"
+    ]
+  }
+}

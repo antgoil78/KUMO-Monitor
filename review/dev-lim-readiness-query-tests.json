@@ -1,0 +1,17 @@
+{
+  "passed": [
+    "raw status uses exact registration",
+    "empty file requires acceptance history",
+    "valid empty file derives acceptance from history",
+    "empty file without footer remains unaccepted",
+    "detail status uses exact filename and current derived value",
+    "detail preserves empty-file acceptance",
+    "bypass registers selected nonempty payloads only",
+    "bypass rerun does not reopen processed records",
+    "partial reload resets only selected batch records",
+    "partial reload preserves unselected files"
+  ],
+  "schema_cleaned_up": true,
+  "production_data_changed": false,
+  "production_loader_called": false
+}

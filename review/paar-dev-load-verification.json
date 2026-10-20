@@ -1,0 +1,510 @@
+{
+  "verified_at_utc": "2026-10-20T13:42:11.686083+00:00",
+  "environment": "KUMO_DEV",
+  "read_only": true,
+  "workflows": [
+    {
+      "RUN_ID": "5fe4e37e-3371-4a08-8f4a-bdbcf4cd98d9",
+      "STATUS": "SUCCESS",
+      "START_TIME": "2026-10-20 13:24:59.518000",
+      "END_TIME": "2026-10-20 13:25:35.813000",
+      "PARENT_RUN_ID": null,
+      "DBT_ARGS": null
+    },
+    {
+      "RUN_ID": "ca55ffc3-6660-4488-8ef1-0e4012093c07",
+      "STATUS": "SUCCESS",
+      "START_TIME": "2026-10-20 13:25:55.702000",
+      "END_TIME": "2026-10-20 13:29:55.482000",
+      "PARENT_RUN_ID": "5fe4e37e-3371-4a08-8f4a-bdbcf4cd98d9",
+      "DBT_ARGS": "dbt build -s models/data/SDL/PAAR models/data/EDV/PAAR --vars '{\"runId\":\"ca55ffc3-6660-4488-8ef1-0e4012093c07\"}' --target kumo_DEV"
+    }
+  ],
+  "validation_outcome": [
+    {
+      "STATUS": "STOPPED",
+      "DELIVERIES": 1,
+      "FIRST_DATE": "2026-03-11",
+      "LAST_DATE": "2026-03-11",
+      "FIRST_SEQUENCE": "00049",
+      "LAST_SEQUENCE": "00049",
+      "DATA_ROWS": 0
+    },
+    {
+      "STATUS": "UPDATED",
+      "DELIVERIES": 23,
+      "FIRST_DATE": "2026-02-08",
+      "LAST_DATE": "2026-03-10",
+      "FIRST_SEQUENCE": "00026",
+      "LAST_SEQUENCE": "00048",
+      "DATA_ROWS": 29
+    },
+    {
+      "STATUS": "BLOCKED",
+      "DELIVERIES": 150,
+      "FIRST_DATE": "2026-03-15",
+      "LAST_DATE": "2026-10-18",
+      "FIRST_SEQUENCE": "00051",
+      "LAST_SEQUENCE": "00201",
+      "DATA_ROWS": 0
+    }
+  ],
+  "first_stop": {
+    "delivery_date": "2026-03-11",
+    "sequence": "2026/00049",
+    "log_reason": "ROWCOUNT_MISMATCH",
+    "metadata_status": "NO_FOOTER"
+  },
+  "later_sequence_gap": {
+    "delivery_date": "2026-03-15",
+    "actual_sequence": "2026/00051",
+    "expected_sequence": "2026/00050"
+  },
+  "sequence_watermark": [
+    {
+      "PKG_GROUP_NAME": "PKG_PAAR_1",
+      "SUBJECT_AREA": "PAAR",
+      "SOURCE_ID": "SMB",
+      "PKG_ID": "002",
+      "DLVY_PKG_YEAR": "2026",
+      "DLVY_PKG_YEAR_SEQ_NO": "00048"
+    }
+  ],
+  "raw": [
+    {
+      "RAW_ROWS": 4542,
+      "RAW_FILES": 1717
+    }
+  ],
+  "batch_control": [
+    {
+      "DW_TABLE_NM": "RAW_LIM.RAW_LIM_PAAR",
+      "DW_BATCH_ID": "ca55ffc3-6660-4488-8ef1-0e4012093c07_SDL_PAAR_003",
+      "PROCESSED_FL": true,
+      "DELETED_FL": false,
+      "FILES": 8,
+      "DATA_ROWS": 29,
+      "FIRST_FILE_DATE": "20260301",
+      "LAST_FILE_DATE": "20260310",
+      "AFTER_STOP": 0
+    }
+  ],
+  "sdl_tables": [
+    {
+      "TABLE_NAME": "SDL_PAAR_001",
+      "ROWS_TOTAL": 0,
+      "FILES": 0,
+      "MIN_DELIVERY_DATE": null,
+      "MAX_DELIVERY_DATE": null,
+      "ROWS_BEYOND_BOUNDARY": null
+    },
+    {
+      "TABLE_NAME": "SDL_PAAR_002",
+      "ROWS_TOTAL": 0,
+      "FILES": 0,
+      "MIN_DELIVERY_DATE": null,
+      "MAX_DELIVERY_DATE": null,
+      "ROWS_BEYOND_BOUNDARY": null
+    },
+    {
+      "TABLE_NAME": "SDL_PAAR_003",
+      "ROWS_TOTAL": 29,
+      "FILES": 8,
+      "MIN_DELIVERY_DATE": "2026-03-01",
+      "MAX_DELIVERY_DATE": "2026-03-10",
+      "ROWS_BEYOND_BOUNDARY": 0
+    },
+    {
+      "TABLE_NAME": "SDL_PAAR_004",
+      "ROWS_TOTAL": 0,
+      "FILES": 0,
+      "MIN_DELIVERY_DATE": null,
+      "MAX_DELIVERY_DATE": null,
+      "ROWS_BEYOND_BOUNDARY": null
+    },
+    {
+      "TABLE_NAME": "SDL_PAAR_005",
+      "ROWS_TOTAL": 0,
+      "FILES": 0,
+      "MIN_DELIVERY_DATE": null,
+      "MAX_DELIVERY_DATE": null,
+      "ROWS_BEYOND_BOUNDARY": null
+    },
+    {
+      "TABLE_NAME": "SDL_PAAR_006",
+      "ROWS_TOTAL": 0,
+      "FILES": 0,
+      "MIN_DELIVERY_DATE": null,
+      "MAX_DELIVERY_DATE": null,
+      "ROWS_BEYOND_BOUNDARY": null
+    },
+    {
+      "TABLE_NAME": "SDL_PAAR_007",
+      "ROWS_TOTAL": 0,
+      "FILES": 0,
+      "MIN_DELIVERY_DATE": null,
+      "MAX_DELIVERY_DATE": null,
+      "ROWS_BEYOND_BOUNDARY": null
+    },
+    {
+      "TABLE_NAME": "SDL_PAAR_008",
+      "ROWS_TOTAL": 0,
+      "FILES": 0,
+      "MIN_DELIVERY_DATE": null,
+      "MAX_DELIVERY_DATE": null,
+      "ROWS_BEYOND_BOUNDARY": null
+    },
+    {
+      "TABLE_NAME": "SDL_PAAR_009",
+      "ROWS_TOTAL": 0,
+      "FILES": 0,
+      "MIN_DELIVERY_DATE": null,
+      "MAX_DELIVERY_DATE": null,
+      "ROWS_BEYOND_BOUNDARY": null
+    },
+    {
+      "TABLE_NAME": "SDL_PAAR_010",
+      "ROWS_TOTAL": 0,
+      "FILES": 0,
+      "MIN_DELIVERY_DATE": null,
+      "MAX_DELIVERY_DATE": null,
+      "ROWS_BEYOND_BOUNDARY": null
+    }
+  ],
+  "sdl_batch_reconciliation": [
+    {
+      "SDL_ROWS": 29,
+      "SDL_ROWS_WITHOUT_BATCH": 0,
+      "SDL_ROWS_NOT_PROCESSED": 0,
+      "MATCHED_FILES": 8
+    }
+  ],
+  "sdl_file_row_reconciliation": [
+    {
+      "FILES_COMPARED": 8,
+      "MISMATCHED_FILES": 0
+    }
+  ],
+  "control_archive": [
+    {
+      "FILES": 23,
+      "ARCHIVED_LINES": 253,
+      "FIRST_DATE": "20260208",
+      "LAST_DATE": "20260310",
+      "LINES_AFTER_STOP": 0
+    }
+  ],
+  "edv_tables": [
+    {
+      "TABLE_NAME": "EDV__ARAC_ACCT__PAAR_PAAR$OWN_L",
+      "ROWS_TOTAL": 0,
+      "FIRST_LOAD": null,
+      "LAST_LOAD": null,
+      "ROWS_FROM_LATEST_RUN": null
+    },
+    {
+      "TABLE_NAME": "EDV__ARAC_ACCT__PAAR_PAAR$OWN_LS",
+      "ROWS_TOTAL": 0,
+      "FIRST_LOAD": null,
+      "LAST_LOAD": null,
+      "ROWS_FROM_LATEST_RUN": null
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PAAR$COMM_ADDR_S",
+      "ROWS_TOTAL": 18,
+      "FIRST_LOAD": "2026-10-19 12:38:09.618000",
+      "LAST_LOAD": "2026-10-19 12:38:09.618000",
+      "ROWS_FROM_LATEST_RUN": 0
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PAAR$LC_EVENT_S",
+      "ROWS_TOTAL": 1,
+      "FIRST_LOAD": "2026-10-19 12:37:51.119000",
+      "LAST_LOAD": "2026-10-19 12:37:51.119000",
+      "ROWS_FROM_LATEST_RUN": 0
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PAAR$LC_RISK_S",
+      "ROWS_TOTAL": 0,
+      "FIRST_LOAD": null,
+      "LAST_LOAD": null,
+      "ROWS_FROM_LATEST_RUN": null
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PAAR$LC_STATE_S",
+      "ROWS_TOTAL": 1,
+      "FIRST_LOAD": "2026-10-19 12:38:09.135000",
+      "LAST_LOAD": "2026-10-19 12:38:09.135000",
+      "ROWS_FROM_LATEST_RUN": 0
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PAAR_H",
+      "ROWS_TOTAL": 1,
+      "FIRST_LOAD": "2026-10-19 12:37:58.027000",
+      "LAST_LOAD": "2026-10-19 12:37:58.027000",
+      "ROWS_FROM_LATEST_RUN": 0
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PAAR_S",
+      "ROWS_TOTAL": 1,
+      "FIRST_LOAD": "2026-10-19 12:38:02.259000",
+      "LAST_LOAD": "2026-10-19 12:38:02.259000",
+      "ROWS_FROM_LATEST_RUN": 0
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PAAR__PAAR_PGAR_L",
+      "ROWS_TOTAL": 1,
+      "FIRST_LOAD": "2026-10-19 12:38:03.503000",
+      "LAST_LOAD": "2026-10-19 12:38:03.503000",
+      "ROWS_FROM_LATEST_RUN": 0
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PAAR__PAAR_PGAR_LS",
+      "ROWS_TOTAL": 1,
+      "FIRST_LOAD": "2026-10-19 12:38:09.114000",
+      "LAST_LOAD": "2026-10-19 12:38:09.114000",
+      "ROWS_FROM_LATEST_RUN": 0
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PGAR$COMM_ADDR_S",
+      "ROWS_TOTAL": 7,
+      "FIRST_LOAD": "2026-10-19 12:38:10.032000",
+      "LAST_LOAD": "2026-10-19 12:38:10.032000",
+      "ROWS_FROM_LATEST_RUN": 0
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PGAR$LC_EVENT_S",
+      "ROWS_TOTAL": 2,
+      "FIRST_LOAD": "2026-10-19 12:38:14.649000",
+      "LAST_LOAD": "2026-10-19 12:38:14.649000",
+      "ROWS_FROM_LATEST_RUN": 0
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PGAR$LC_STATE_S",
+      "ROWS_TOTAL": 2,
+      "FIRST_LOAD": "2026-10-19 12:38:12.229000",
+      "LAST_LOAD": "2026-10-19 12:38:12.229000",
+      "ROWS_FROM_LATEST_RUN": 0
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PGAR_H",
+      "ROWS_TOTAL": 2,
+      "FIRST_LOAD": "2026-10-19 12:37:49.651000",
+      "LAST_LOAD": "2026-10-19 12:37:49.651000",
+      "ROWS_FROM_LATEST_RUN": 0
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PGAR_S",
+      "ROWS_TOTAL": 2,
+      "FIRST_LOAD": "2026-10-19 12:37:56.471000",
+      "LAST_LOAD": "2026-10-19 12:37:56.471000",
+      "ROWS_FROM_LATEST_RUN": 0
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PGAR__PAAR_PGAR$MSTR_L",
+      "ROWS_TOTAL": 2,
+      "FIRST_LOAD": "2026-10-19 12:37:55.569000",
+      "LAST_LOAD": "2026-10-19 12:37:55.569000",
+      "ROWS_FROM_LATEST_RUN": 0
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PGAR__PAAR_PGAR$MSTR_LS",
+      "ROWS_TOTAL": 2,
+      "FIRST_LOAD": "2026-10-19 12:37:56.657000",
+      "LAST_LOAD": "2026-10-19 12:37:56.657000",
+      "ROWS_FROM_LATEST_RUN": 0
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PGAR__PAAR_PGAR$MTHR_L",
+      "ROWS_TOTAL": 0,
+      "FIRST_LOAD": null,
+      "LAST_LOAD": null,
+      "ROWS_FROM_LATEST_RUN": null
+    },
+    {
+      "TABLE_NAME": "EDV__PAAR_PGAR__PAAR_PGAR$MTHR_LS",
+      "ROWS_TOTAL": 0,
+      "FIRST_LOAD": null,
+      "LAST_LOAD": null,
+      "ROWS_FROM_LATEST_RUN": null
+    }
+  ],
+  "edv_write_statement_results": [
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PAAR$COMM_ADDR_S",
+      "result": [
+        {
+          "number of rows inserted": 0,
+          "number of rows updated": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PGAR$LC_EVENT_S",
+      "result": [
+        {
+          "number of rows inserted": 0,
+          "number of rows updated": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PAAR$LC_EVENT_S",
+      "result": [
+        {
+          "number of rows inserted": 0,
+          "number of rows updated": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PAAR_H",
+      "result": [
+        {
+          "number of rows inserted": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PGAR$LC_STATE_S",
+      "result": [
+        {
+          "number of rows inserted": 0,
+          "number of rows updated": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PAAR$LC_STATE_S",
+      "result": [
+        {
+          "number of rows inserted": 0,
+          "number of rows updated": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PAAR_S",
+      "result": [
+        {
+          "number of rows inserted": 0,
+          "number of rows updated": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PAAR__PAAR_PGAR_L",
+      "result": [
+        {
+          "number of rows inserted": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PAAR__PAAR_PGAR_LS",
+      "result": [
+        {
+          "number of rows inserted": 0,
+          "number of rows updated": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PGAR_H",
+      "result": [
+        {
+          "number of rows inserted": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PGAR__PAAR_PGAR$MSTR_L",
+      "result": [
+        {
+          "number of rows inserted": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PGAR_S",
+      "result": [
+        {
+          "number of rows inserted": 0,
+          "number of rows updated": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PGAR__PAAR_PGAR$MSTR_LS",
+      "result": [
+        {
+          "number of rows inserted": 0,
+          "number of rows updated": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PGAR__PAAR_PGAR$MTHR_L",
+      "result": [
+        {
+          "number of rows inserted": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PGAR__PAAR_PGAR$MTHR_LS",
+      "result": [
+        {
+          "number of rows inserted": 0,
+          "number of rows updated": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PGAR$COMM_ADDR_S",
+      "result": [
+        {
+          "number of rows inserted": 0,
+          "number of rows updated": 0
+        }
+      ]
+    },
+    {
+      "table": "KUMO_DEV.EDV.EDV__PAAR_PAAR$LC_RISK_S",
+      "result": [
+        {
+          "number of rows inserted": 0,
+          "number of rows updated": 0
+        }
+      ]
+    }
+  ],
+  "edv_inserted_rows": 0,
+  "edv_updated_rows": 0,
+  "dbt_test_warnings": [
+    {
+      "model_name": "EDV__PAAR_PAAR$COMM_ADDR_S",
+      "node_name": "parents_EDV__EDV__PAAR_PAAR$COMM_ADDR_S_",
+      "message": "Got 17 results, configured to warn if !=0",
+      "status": "warn"
+    },
+    {
+      "model_name": "EDV__PAAR_PGAR$COMM_ADDR_S",
+      "node_name": "parents_EDV__EDV__PAAR_PGAR$COMM_ADDR_S_",
+      "message": "Got 5 results, configured to warn if !=0",
+      "status": "warn"
+    }
+  ],
+  "compression_issue": {
+    "file_format": "KUMO_DEV.META.KUMO_LIM",
+    "compression": "NONE",
+    "encoding": "ISO88591",
+    "files_with_gzip_header_in_raw": 1510,
+    "first_compressed_delivery": "2026-03-11",
+    "header_signature_hex": "1f8b08",
+    "conclusion": "Gzip files were loaded without decompression; validation stopped before the sequence gap."
+  },
+  "limitations": [
+    "EDV contains rows from an earlier load on 2026-10-19; this verification attributes changes to the latest workflow rather than treating EDV as empty."
+  ]
+}

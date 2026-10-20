@@ -1,0 +1,28 @@
+{
+  "passed": [
+    "valid mixed delivery",
+    "only nonempty payload registered",
+    "exact control archived and removed",
+    "empty payload accepted in metadata",
+    "rerun accepts complete delivery",
+    "processed batch preserved",
+    "control archive idempotent",
+    "zero-candidate refresh removes stale snapshot",
+    "entirely empty delivery accepted",
+    "empty delivery creates no queue entries",
+    "empty delivery advances sequence",
+    "one registered file does not skip missing sibling",
+    "failed delivery preserves controls and sequence",
+    "row-count mismatch blocks registration",
+    "sequence gap blocks",
+    "explicit sequence override retained",
+    "missing group source blocks",
+    "explicit group override retained",
+    "disappearing payload raises",
+    "registration failure rolls back success log and sequence",
+    "archive failure rolls back registration"
+  ],
+  "schema_cleaned_up": true,
+  "production_data_changed": false,
+  "production_workflows_or_loaders_called": false
+}

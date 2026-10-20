@@ -1,0 +1,18 @@
+{
+  "updated": [
+    "KUMO_DEV.MONITOR_APP.SP_RAW_LIM_META_REFRESH(VARCHAR,VARCHAR)",
+    "KUMO_DEV.MONITOR_APP.SP_RAW_LIM_SET_READY(VARCHAR,BOOLEAN,BOOLEAN,VARCHAR)",
+    "KUMO_DEV.MONITOR_META.LOAD_RAW_LIM_FROM_STAGE(VARCHAR,DATE,DATE,BOOLEAN,BOOLEAN,BOOLEAN,VARCHAR)"
+  ],
+  "procedures_verified": [
+    "refresh",
+    "ready",
+    "loader"
+  ],
+  "existing_data_changed": false,
+  "workflow_or_loader_called": false,
+  "task_state_changed": false,
+  "batch_control_unchanged": true,
+  "batch_control_files": 10069,
+  "batch_control_fingerprint": -6894191760965801318
+}
