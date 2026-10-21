@@ -1,7 +1,7 @@
 """Replace DEV RAW readiness flags with batch registration and delivery history.
 
 The default invocation prepares SQL and checks live interfaces. --apply replaces
-only the three named DEV procedures, preserves grants, and refreshes full DDL.
+only the three named DEV procedures, preserves grants, and saves their DDL.
 It never runs a loader/workflow, changes existing batch rows, or alters tasks.
 """
 
@@ -12,7 +12,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from apply_dev_workbook_objects import ROOT, connect, procedure_parts, replace_once
+from migration_support import ROOT, connect, procedure_parts, replace_once
 
 
 MARKER = "DEV_LIM_BATCH_READINESS_V1"
@@ -229,7 +229,10 @@ def run(apply=False):
             }, indent=2) + "\n")
     finally:
         if changed:
-            subprocess.run([sys.executable, str(ROOT / "snowflake/export_ddl.py")], check=True, cwd=ROOT)
+            command = [sys.executable, str(ROOT / "snowflake/export_ddl.py")]
+            for signature in changed:
+                command.extend(["--object", "PROCEDURE", signature])
+            subprocess.run(command, check=True, cwd=ROOT)
 
 
 if __name__ == "__main__":

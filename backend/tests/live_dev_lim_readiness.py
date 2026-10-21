@@ -11,7 +11,7 @@ import sys
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "migrations"))
-from apply_dev_workbook_objects import connect, procedure_parts
+from migration_support import connect, procedure_parts
 import apply_dev_lim_readiness as migration
 
 

@@ -1,5 +1,10 @@
 # KUMO Monitor
 
+The maintained application is the current DEV/local Flask backend in `backend/`
+and React app in `frontend/`. TST will use this same code with environment
+configuration. Older application copies and completed legacy migration tools
+are available in Git history; do not maintain parallel versions.
+
 ## Local configuration
 
 Runtime secrets are loaded from `.env`. This file is ignored by Git and should
@@ -66,10 +71,9 @@ selected layout. `KUMO_SCHEMA` overrides the procedure/task schema,
 Database-qualified overrides must belong to the selected environment;
 conflicting settings stop startup with the setting name.
 
-With `KUMO_ENV` unset, the current split deployment remains supported during
-migration: engine/application tables in `KUMO_ADMIN.WORKFLOW_MANAGER`, catalog
-in `KUMO_TST.MONITOR_APP`, and data/progress in `KUMO_TST`. This temporary path
-can be removed after both replacement environments have been validated.
+Use `KUMO_ENV=DEV` for current local/DEV work and `KUMO_ENV=TST` after its
+app schemas and dependencies have been provisioned. The example configuration
+selects DEV. TST uses the same application source and image.
 
 Account, warehouses, roles and image location are deployment resources.
 SPCS uses Snowflake's service OAuth token; the service owner needs access to
@@ -104,8 +108,8 @@ not created yet. The DEV SPCS service has been deployed as
 `build-215-1-022ffedd2bf2`. TST provisioning remains a later step.
 The shared image repository and compute pool have been created using
 [create_shared_infrastructure.sql](snowflake/spcs/create_shared_infrastructure.sql).
-The reviewed migrations and
-saved definitions are documented in [snowflake/README.md](snowflake/README.md).
+The maintained DEV migrations and app definitions are documented in
+[snowflake/README.md](snowflake/README.md).
 
 CI publishes a separate image for every build and rerun, tagged
 `build-<run-number>-<attempt>-<12-character-commit>`, for example
@@ -228,10 +232,11 @@ The Vite dev server proxies `/api` to the Flask backend on port `5000`.
 
 1. Code and test locally using Docker or the split backend/frontend dev servers.
 2. Keep `.env` local only; commit `.env.example`, code, and docs.
-3. Push the repo to Git.
-4. Build and deploy the Snowflake container from the Git source.
+3. Push changes for review and merge to `main`.
+4. Let `.github/workflows/deploy-image.yml` build and publish the image on merge.
+   Routine work does not manually dispatch the workflow or update SPCS directly.
 
-## Snowflake definitions and account migration
+## Snowflake app definitions
 
 Current table, procedure and persistent task definitions are stored under
 [`snowflake/`](snowflake/README.md), together with supporting views, functions,
@@ -239,16 +244,16 @@ streams and file formats, an object inventory, a restore order and a repeatable
 export script. Generated
 workflow scheduler tasks and temporary workflow run tasks are excluded.
 
-**Whenever a Snowflake object is updated, always update its SQL definition in
-Git as part of the same change.** This also applies to edits made directly in
-Snowsight. Refresh the definitions with `python snowflake/export_ddl.py`, review
-the Git diff, and commit the changed SQL and any applicable migration script.
-Repository agents follow the same rule in [`AGENTS.md`](AGENTS.md).
+DDL copies are maintained only for DEV's `MONITOR_APP` and `MONITOR_META`.
+When we change an object's DDL, update that object's saved definition and any
+applicable migration. Routine app work and configuration-row changes do not
+require an export. Refresh both schemas only when explicitly requested; see
+[`snowflake/README.md`](snowflake/README.md) and [`AGENTS.md`](AGENTS.md).
 
 ## Orchestration access in SPCS
 
 The Workflow, Job and Flow pages read the selected environment's `MONITOR_META`
-schema (`KUMO_TST.MONITOR_APP` in the current split deployment). Local runs use
+schema. Local runs use
 the configured `SNOWFLAKE_ROLE`, while SPCS service connections use the role
 that owns the service. The Orchestration endpoints use service credentials,
 as the existing admin pages do, even when a browser caller token is present.
@@ -256,17 +261,10 @@ Users with access to the application can view and edit this shared catalog.
 Caller credentials continue to identify users for sessions and request logging;
 `CURRENT_USER()` in catalog table audit columns records the database service user.
 
-After creating the new schemas and tables, run
-[`backend/migrations/grant_monitor_orchestration_access.sql`](backend/migrations/grant_monitor_orchestration_access.sql)
-in a Snowflake worksheet as `SECURITYADMIN`, or another role authorized to
-manage existing and future grants in both schemas. Run its statements in order
-in the same session. It discovers the owner of
-`KUMO_ADMIN.KUMO_MONITOR.KUMO_MONITOR_SERVICE`, then grants database/schema
-`USAGE` and table `SELECT`, `INSERT`, `UPDATE` and `DELETE` in `MONITOR_APP` and
-`MONITOR_META`, including future tables. This grant script targets the existing
-deployment. Prepare grants for the new
-service owner and the DEV layout separately; the new catalog tables are in
-`KUMO_DEV.MONITOR_META`.
+When provisioning TST, grant its service owner access to that environment's
+database, `MONITOR_APP` procedures/tasks, and `MONITOR_META` tables, including
+the table reads/writes used by the catalog. Prepare grants for the selected
+environment rather than replaying the retired legacy grant migration.
 
 Deploy the updated backend image so these endpoints use the service role.
 In the service specification, leave `SNOWFLAKE_ROLE` unset to use the service

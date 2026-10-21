@@ -1,4 +1,4 @@
-"""Export live Snowflake definitions to Git; never execute exported DDL."""
+"""Save changed app objects, or explicitly refresh both app schemas."""
 
 import argparse
 from collections import Counter
@@ -64,6 +64,28 @@ def object_path(kind, schema, name, args=''):
     return Path('ddl') / Path(*schema.split('.')) / directory / filename
 
 
+def object_key(kind, name, args=''):
+    return kind, name.upper(), re.sub(r'\s+', '', args).upper()
+
+
+def requested_objects(items, scope):
+    requested = set()
+    for kind, identifier in items or []:
+        kind = kind.upper()
+        match = re.fullmatch(r'([A-Za-z_][A-Za-z0-9_$]*\.[A-Za-z_][A-Za-z0-9_$]*\.[A-Za-z_][A-Za-z0-9_$]*)(\(.*\))?', identifier)
+        if kind not in SHOW_TYPES or not match:
+            raise ValueError('Use an object type and database.schema.object name, with a signature for procedures/functions')
+        name, args = match.group(1).upper(), match.group(2) or ''
+        if name.rsplit('.', 1)[0] not in scope['schemas']:
+            raise ValueError('Object is outside the maintained app schemas: ' + name)
+        if bool(args) != (kind in ('FUNCTION', 'PROCEDURE')):
+            raise ValueError('Only procedures/functions require an argument signature: ' + name)
+        if kind == 'TASK' and excluded_task(name, scope):
+            raise ValueError('Generated workflow tasks are not saved: ' + name)
+        requested.add(object_key(kind, name, args))
+    return requested
+
+
 def table_order(objects, definitions):
     tables = {obj['name']: obj for obj in objects if obj['type'] == 'TABLE'}
     dependencies = {}
@@ -107,9 +129,15 @@ def build_restore(destination):
     print('Wrote restore bundle:', destination)
 
 
-def export(role=None):
-    load_dotenv(ROOT.parent / '.env')
+def export(role=None, items=None, refresh=False):
     scope = json.loads((ROOT / 'export_scope.json').read_text())
+    requested = requested_objects(items, scope)
+    if not requested and not refresh:
+        raise ValueError('Choose --object for changed objects or --refresh for an explicitly requested schema refresh')
+    if requested and refresh:
+        raise ValueError('Choose either --object or --refresh')
+    previous = json.loads((ROOT / 'manifest.json').read_text()) if (ROOT / 'manifest.json').exists() else {}
+    load_dotenv(ROOT.parent / '.env')
     kwargs = {
         'account': os.environ['SNOWFLAKE_ACCOUNT'],
         'user': os.environ['SNOWFLAKE_USER'],
@@ -136,7 +164,11 @@ def export(role=None):
                 bootstrap.append('CREATE DATABASE IF NOT EXISTS ' + quote(database) + ';')
             for schema in scope['schemas']:
                 bootstrap.append('CREATE SCHEMA IF NOT EXISTS ' + qualified(schema) + ';')
+                if requested and not any(key[1].rsplit('.', 1)[0] == schema for key in requested):
+                    continue
                 for kind in scope['object_types']:
+                    if requested and not any(key[0] == kind and key[1].rsplit('.', 1)[0] == schema for key in requested):
+                        continue
                     cur.execute('SHOW ' + SHOW_TYPES[kind] + ' IN SCHEMA ' + qualified(schema))
                     rows = cur.fetchall()
                     if len(rows) >= 10000:
@@ -152,6 +184,8 @@ def export(role=None):
                             excluded.append(name)
                             continue
                         args = signature(row['arguments']) if kind in ('FUNCTION', 'PROCEDURE') else ''
+                        if requested and object_key(kind, name, args) not in requested:
+                            continue
                         identifier = qualified(schema) + '.' + quote(row['name']) + args
                         cur.execute('SELECT GET_DDL(%s, %s, TRUE) AS DDL', (kind, identifier))
                         ddl = cur.fetchone()['DDL']
@@ -163,7 +197,7 @@ def export(role=None):
                         if path in definitions:
                             raise RuntimeError('Duplicate export path: ' + path)
                         header = ('-- Source: ' + name + args + '\n'
-                                  '-- Refresh: python snowflake/export_ddl.py\n'
+                                  '-- Refresh: python snowflake/export_ddl.py --object ' + kind + " '" + name + args + "'\n"
                                   'USE DATABASE ' + quote(schema.split('.')[0]) + ';\n'
                                   'USE SCHEMA ' + qualified(schema) + ';\n\n')
                         definitions[path] = header + ddl.rstrip().rstrip(';') + ';\n'
@@ -175,6 +209,18 @@ def export(role=None):
                             obj['predecessors'] = json.loads(row.get('predecessors') or '[]')
                         objects.append(obj)
                 print('Read definitions:', schema, flush=True)
+    if requested:
+        found = {object_key(obj['type'], obj['name'], obj.get('signature', '')) for obj in objects}
+        if found != requested:
+            raise RuntimeError('Requested objects were not found or visible: ' + repr(sorted(requested - found)))
+        # Preserve every untouched saved object, without querying it in Snowflake.
+        for obj in previous.get('objects', []):
+            key = object_key(obj['type'], obj['name'], obj.get('signature', ''))
+            if key not in requested and obj['name'].rsplit('.', 1)[0] in scope['schemas']:
+                objects.append(obj)
+                definitions[obj['file']] = (ROOT / obj['file']).read_text()
+        objects.sort(key=lambda obj: (scope['schemas'].index(obj['name'].rsplit('.', 1)[0]),
+                                     scope['object_types'].index(obj['type']), obj['name'], obj.get('signature', '')))
     definitions['00_databases_schemas.sql'] = '\n'.join(bootstrap) + '\n'
     ordered = ['00_databases_schemas.sql']
     ordered.extend(obj['file'] for obj in objects if obj['type'] == 'SEQUENCE')
@@ -188,15 +234,16 @@ def export(role=None):
         'exported_at': datetime.now(ZoneInfo('Europe/Stockholm')).isoformat(timespec='seconds'),
         'source': source, 'schemas': scope['schemas'],
         'counts': dict(sorted(Counter(obj['type'] for obj in objects).items())),
-        'excluded_generated_task_count': len(excluded),
         'objects': objects, 'restore_order': ordered,
     }
+    if not requested:
+        manifest['excluded_generated_task_count'] = len(excluded)
     # Gather everything successfully before changing the tracked snapshot.
-    previous = json.loads((ROOT / 'manifest.json').read_text()) if (ROOT / 'manifest.json').exists() else {}
     for filename, text in definitions.items():
         path = ROOT / filename
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        if not path.exists() or path.read_text() != text:
+            path.write_text(text)
     for obj in previous.get('objects', []):
         filename = obj['file']
         if filename not in definitions:
@@ -206,18 +253,27 @@ def export(role=None):
             path.unlink(missing_ok=True)
     (ROOT / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print('Exported:', json.dumps(manifest['counts']), flush=True)
-    print('Excluded generated workflow tasks:', len(excluded), flush=True)
+    if requested:
+        print('Refreshed changed objects:', len(requested), flush=True)
+    else:
+        print('Excluded generated workflow tasks:', len(excluded), flush=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--role', help='Snowflake role to use for reading definitions')
-    parser.add_argument('--build-restore', metavar='FILE', help='Build an offline SQL bundle from the saved snapshot')
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument('--object', dest='items', nargs=2, action='append', metavar=('TYPE', 'NAME'),
+                        help='Save only this changed object; repeat for multiple objects')
+    action.add_argument('--refresh', action='store_true', help='Explicitly refresh the two maintained app schemas')
+    action.add_argument('--build-restore', metavar='FILE', help='Build an offline SQL bundle from the saved app definitions')
     args = parser.parse_args()
     if args.build_restore:
         build_restore(args.build_restore)
+    elif args.items or args.refresh:
+        export(args.role, args.items, args.refresh)
     else:
-        export(args.role)
+        parser.print_help()
 
 
 if __name__ == '__main__':
