@@ -3,6 +3,7 @@ spec:
     - name: kumo-monitor
       image: ${IMAGE}
       env:
+        KUMO_ENVIRONMENT_TABLE: "${ENVIRONMENT_TABLE}"
         KUMO_ENV: "${ENVIRONMENT}"
         KUMO_DEPLOYMENT_ENV: "${DEPLOYMENT_ENVIRONMENT}"
         SNOWFLAKE_WAREHOUSE: "${QUERY_WAREHOUSE}"

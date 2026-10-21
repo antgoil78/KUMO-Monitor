@@ -8,30 +8,31 @@ does not execute `ALTER SERVICE`; updating the running service is a separate
 promotion step. Use the GitHub Actions path for releases unless a direct service
 update is explicitly requested.
 
-Set `KUMO_ENV` to `DEV` or `TST` at deployment time. The container receives it
-under `spec.containers[].env`; the backend derives its database and object
-locations from this selector. The frontend receives the same context from
-`/api/health`. Use the same built image for either environment.
+Set `KUMO_ENVIRONMENT_TABLE` to the full environment parameter table path in
+`spec.containers[].env`. This is required for a connected service. The backend
+loads its database and schemas from that table before importing repositories.
+The table can be in a different database/schema from the monitored objects.
+Use the same built image for every environment.
 
-The top bar identifies the service with yellow DEV, green TEST, blue UAT, or
-red PROD. `TST` is displayed as TEST. The template sets `KUMO_DEPLOYMENT_ENV`
-from the selector by default. Use `--deployment-env UAT` or `PROD` for the
-future deployments on their separate accounts. This label never changes
-database references or selects an account; `KUMO_ENV` remains the DEV/TST
-database selector. Those accounts' database layouts must be agreed separately.
+`KUMO_ENV=DEV` or `TST` selects the display label and mock defaults;
+`KUMO_DEPLOYMENT_ENV` can label a service DEV, TEST, UAT or PROD. These labels
+do not override database/schema parameters. `/api/health` exposes the bootstrap
+address and actual resolved namespaces. Restart after changing the address or
+routing parameters. Bind the engine to the same table with the
+[environment-routing migration](../README.md#app-and-engine-routing).
 
-The Snowflake service object also needs a database and schema. The renderer
-derives `KUMO_<environment>.MONITOR_APP.KUMO_MONITOR_SERVICE` from the same
-selector so the service location and container configuration agree.
-Snowflake supplies `SNOWFLAKE_DATABASE` and `SNOWFLAKE_SCHEMA` from that service
-location. These do not need to be set in the YAML. The application rejects a
-database override that conflicts with `KUMO_ENV`.
+The renderer defaults the service object to
+`KUMO_<environment>.MONITOR_APP.KUMO_MONITOR_SERVICE`; that deployment address
+is separate from application routing. Snowflake's `SNOWFLAKE_DATABASE` and
+`SNOWFLAKE_SCHEMA` values do not redirect the application away from its table.
+The renderer accepts `--environment-table` and includes it in the specification.
 
 Prepare SQL locally, substituting existing resource names and an image built
 from this branch (the resource names below are examples):
 
 ```bash
 KUMO_ENV=DEV python snowflake/spcs/render_service.py \
+  --environment-table KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS \
   --image /kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-123-1-a1b2c3d4e5f6 \
   --compute-pool KUMO_SHARED_MONITOR_POOL \
   --query-warehouse KUMO_ELT_GEN_1 \
@@ -106,7 +107,8 @@ DEV data access and shared repository ownership of that role. Resuming the pool
 provisions compute for the new service. The update script uses that same owner.
 Other application users need the appropriate service endpoint access.
 
-Both specifications set `KUMO_ENV=DEV`, disable automatic scheduler resume,
+Both specifications set `KUMO_ENV=DEV` and the full `KUMO_ENVIRONMENT_TABLE`
+bootstrap address, disable automatic scheduler resume,
 preserve the supplied 7200-second statement/network timeouts, and use the
 `/api/health` readiness probe. The service location supplies its database and
 schema, so those environment variables do not need to be repeated. Image paths

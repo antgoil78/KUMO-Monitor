@@ -14,16 +14,29 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import config
+import snowflake_client as sf
+
+# Hydrate routing before importing blueprints/repositories that build SQL.
+if not config.USE_MOCK and sf.is_configured():
+    if not os.getenv("KUMO_ENVIRONMENT_TABLE", "").strip():
+        raise ValueError("Set KUMO_ENVIRONMENT_TABLE to the full environment parameter table path")
+    config.apply_environment(sf.query(
+        f"SELECT PARAMETER_KEY, CASE WHEN IS_SECRET THEN NULL ELSE PARAMETER_VALUE END AS PARAMETER_VALUE, "
+        f"VALUE_TYPE, ACTIVE_FL, IS_SECRET FROM {config.PARAMETER_STORE} "
+        "WHERE INSTANCE_NAME = 'DEFAULT' AND PARAMETER_GROUP = 'ENVIRONMENT'",
+        force_service=True, include_context=False,
+    ))
+
 from notification_admin import notification_admin_bp
 from file_ingestion import file_ingestion_bp
 from batch_control import batch_control_bp
 
-import config
+from workflow_commands import DBT_PROJECT_TEMPLATE, DBT_TARGET_TEMPLATE, validate_definition
 import kumo_repository as repo
 from monitor_cache import monitor_cache
 from mock_data import MOCK_HISTORY, MOCK_MONITOR
 from realtime_events import realtime_broker
-import snowflake_client as sf
 from activity_log import activity_journal
 
 app = Flask(__name__, static_folder="static", static_url_path="")
@@ -1429,13 +1442,14 @@ def _health_snapshot():
         "deploymentEnvironment": config.DEPLOYMENT_ENVIRONMENT or None,
         "objectContext": {
             "environment": config.ENVIRONMENT or None,
+            "environmentTable": config.T_APPLICATION_PARAMETERS,
             "engineNamespace": config.APP_NAMESPACE,
             "metadataNamespace": config.METADATA_NAMESPACE,
             "orchestrationNamespace": config.ORCHESTRATION_NAMESPACE,
             "limDatabase": config.LIM_DATABASE,
             "limReadinessSource": config.LIM_READINESS_SOURCE,
             "limRole": config.LIM_ROLE,
-            "rawLimNamespace": f"{config.LIM_DATABASE}.RAW_LIM",
+            "rawLimNamespace": config.RAW_NAMESPACE,
             "rawLimMetaTable": config.RAW_LIM_META_TABLE,
             "rawLimPkgGroupSourceTable": config.T_RAW_LIM_PKG_GROUP_SOURCE,
         },
@@ -1739,6 +1753,7 @@ def _orchestration_workflow_values(payload):
 
 
 def _orchestration_job_values(payload):
+    validate_definition(payload)
     name = str(payload.get("jobName") or "").strip()
     job_type = str(payload.get("jobType") or "SQL").strip().upper()
     job_layer = str(payload.get("jobLayer") or "GENERAL").strip().upper()
@@ -1769,9 +1784,9 @@ def _orchestration_job_values(payload):
         "command_line": command_line if job_type == "COMMAND" else None,
         "sql_command": sql_command if job_type == "SQL" else None,
         "dbt_command": dbt_command if job_type == "DBT" else None,
-        "dbt_target": str(payload.get("dbtTarget") or "").strip() or None,
+        "dbt_target": str(payload.get("dbtTarget") or DBT_TARGET_TEMPLATE).strip() if job_type == "DBT" else None,
         "dbt_workspace": str(payload.get("dbtWorkspace") or "").strip() or None,
-        "dbt_project_fqn": str(payload.get("dbtProjectFqn") or "").strip() or None,
+        "dbt_project_fqn": str(payload.get("dbtProjectFqn") or DBT_PROJECT_TEMPLATE).strip() if job_type == "DBT" else None,
         "timeout": timeout,
         "enabled": bool(payload.get("enabled", True)),
     }
@@ -2537,8 +2552,8 @@ def workflow_detail(workflow_id):
             "description": "Mock workflow",
             "dbtCommand": "dbt build --select tag:daily" if workflow["workflowType"] == "DBT" else "",
             "sqlCommand": "select 1" if workflow["workflowType"] == "SQL" else "",
-            "dbtProjectFqn": config.DBT_PROJECT_FQN,
-            "dbtTarget": "prod",
+            "dbtProjectFqn": DBT_PROJECT_TEMPLATE,
+            "dbtTarget": DBT_TARGET_TEMPLATE,
             "scheduleCron": workflow["scheduleCron"],
             "scheduleTimezone": workflow["scheduleTimezone"],
             "taskEnabled": workflow["taskEnabled"],
@@ -2685,6 +2700,23 @@ def workflow_dag(workflow_id):
         return jsonify({"ok": True, **result})
     except Exception as exc:
         _record_interaction("VIEW_DAG_RUN", actor=actor, entity_type="WORKFLOW", entity_id=workflow_id, workflow_id=workflow_id, status="FAILED", success=False, error_message=str(exc))
+        return _json_error(exc, 500)
+
+
+@app.route("/api/workflow-command-preview", methods=["POST"])
+def workflow_command_preview():
+    definition = request.get_json(silent=True) or {}
+    try:
+        validate_definition(definition)
+        if config.USE_MOCK or not sf.is_configured():
+            return _json_error("Command preview requires the configured environment's Snowflake connection.", 400)
+        with sf.connection_scope(use_warehouse=True, include_context=True, force_service=True):
+            result = repo.resolve_workflow_command(definition)
+        return jsonify(result)
+    except ValueError as exc:
+        return _json_error(exc, 400)
+    except Exception as exc:
+        app.logger.exception("Failed to resolve workflow command")
         return _json_error(exc, 500)
 
 

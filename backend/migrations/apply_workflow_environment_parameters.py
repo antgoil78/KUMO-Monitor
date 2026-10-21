@@ -19,6 +19,7 @@ PARAMETERS = {
     "MONITOR_APP_SCHEMA": ("MONITOR_APP", "Schema containing monitor procedures and tasks."),
     "META_SCHEMA": ("MONITOR_META", "Schema containing monitor configuration and runtime tables."),
     "APP_SCHEMA": ("META", "Application metadata schema for batch control, progress and status tables."),
+    "RAW_SCHEMA": ("RAW_LIM", "Schema containing raw LIM data tables."),
     "DBT_SCHEMA": ("DBT_APP", "Schema containing the Snowflake dbt project object."),
     "DBT_PROJECT": ("KUMO_DEV", "Snowflake dbt project object name."),
     "DBT_TARGET": ("kumo_DEV", "dbt profile target; case is preserved."),

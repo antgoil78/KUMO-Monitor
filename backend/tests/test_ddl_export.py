@@ -22,6 +22,7 @@ class DdlExportTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.scope = json.loads(EXPORT_PATH.with_name("export_scope.json").read_text())
         (self.root / "export_scope.json").write_text(json.dumps(self.scope))
+        (self.root / "00_databases_schemas.sql").write_text("-- Existing app namespaces; preserve during targeted updates.\n")
         self.table = {"type": "TABLE", "name": "KUMO_DEV.MONITOR_META.KEEP_TABLE",
                       "file": "ddl/KUMO_DEV/MONITOR_META/tables/KEEP_TABLE.sql"}
         path = self.root / self.table["file"]
@@ -60,6 +61,7 @@ class DdlExportTests(unittest.TestCase):
 
     def test_targeted_export_reads_one_overload_and_preserves_untouched_definitions(self):
         before = (self.root / self.table["file"]).read_bytes()
+        bootstrap = (self.root / "00_databases_schemas.sql").read_bytes()
         self.run_export()
         statements = [call.args for call in self.cursor.execute.call_args_list]
         ddl_reads = [call for call in statements if "GET_DDL" in call[0]]
@@ -68,6 +70,7 @@ class DdlExportTests(unittest.TestCase):
         self.assertEqual([call[0] for call in statements if call[0].startswith("SHOW")],
                          ['SHOW PROCEDURES IN SCHEMA "KUMO_DEV"."MONITOR_APP"'])
         self.assertEqual((self.root / self.table["file"]).read_bytes(), before)
+        self.assertEqual((self.root / "00_databases_schemas.sql").read_bytes(), bootstrap)
         manifest = json.loads((self.root / "manifest.json").read_text())
         self.assertEqual(len(manifest["objects"]), 2)
         self.assertIn(self.table, manifest["objects"])

@@ -76,8 +76,8 @@ the destination is configured and ready.
 
 ## Current DEV migrations
 
-`backend/migrations/` keeps the current DEV readiness change and the environment
-parameter migration, with `migration_support.py` providing shared helpers.
+`backend/migrations/` keeps the current DEV readiness, parameter and command
+template migrations, with `migration_support.py` providing shared helpers.
 The readiness migration verifies the three procedures it changes and reads
 back only those changed definitions. It never performs a full DDL export.
 The optional live readiness checks in `backend/tests/live_dev_lim_readiness*.py`
@@ -86,8 +86,9 @@ use disposable synthetic fixtures; they are not routine checks or backups.
 The DEV readiness implementation registers nonempty payload files in
 `META.LIM_BATCH_CTRL` and records validated empty deliveries in the current and
 historical readiness logs. It does not require RAW readiness flag columns.
-The loader and readiness procedures remain restricted to DEV. TST provisioning
-must use the reviewed DEV implementation and its environment configuration.
+The loader and readiness procedures resolve their database and schemas from the
+shared environment parameters. An explicit database argument must match the
+configured engine environment; omitted arguments use that environment.
 
 ## Workflow environment parameters
 
@@ -100,16 +101,103 @@ DEV's old `APP_SCHEMA=MONITOR_APP` to `MONITOR_APP_SCHEMA` and adds:
 | `MONITOR_APP_SCHEMA` | `MONITOR_APP` |
 | `META_SCHEMA` | `MONITOR_META` |
 | `APP_SCHEMA` | `META` |
+| `RAW_SCHEMA` | `RAW_LIM` |
 | `DBT_SCHEMA` | `DBT_APP` |
 | `DBT_PROJECT` | `KUMO_DEV` |
 | `DBT_TARGET` | `kumo_DEV` |
 
-All seven use instance `DEFAULT`, group `ENVIRONMENT`, type `STRING`, and are
+All eight use instance `DEFAULT`, group `ENVIRONMENT`, type `STRING`, and are
 active and non-secret. `DATABASE` and `META_SCHEMA` retain their earlier meanings.
 Without `--apply`, the migration performs a read-only preflight. It checks the
 live dbt project/default target, commits changes in one transaction, refuses
 conflicting values, and preserves matching rows on repeat runs.
 
 `DBT_SCHEMA` locates the project object; model output schemas remain in the dbt
-profile. Runtime token substitution is not implemented yet. These are row-only
-changes and never require a DDL refresh.
+profile. Parameter row changes never require a DDL refresh.
+
+## App and engine routing
+
+Start the app with `KUMO_ENVIRONMENT_TABLE=database.schema.table`. This full
+bootstrap address is independent of the monitored database/schema names.
+The app reads the eight required parameters at startup before importing its
+repositories. Restart the app after changing routing parameters. Missing,
+inactive, secret, duplicate or unsafe required values fail explicitly.
+
+Deploy the engine's environment routing with:
+
+```bash
+python backend/migrations/apply_environment_routing.py \
+  --environment-table KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS
+# Review the preflight, then apply the same command with --apply.
+```
+
+This migration adds `RAW_SCHEMA` when absent (default `RAW_LIM`, override with
+`--raw-schema`), and uses the table's database/schema parameters to deploy the
+current engine implementation. It binds `SP_GET_ENVIRONMENT()` to that exact
+parameter-table path. Consumers read this helper at invocation time and use
+validated identifiers for tables, callbacks, task placement, RAW context, LIM
+stage/file format, dependency rules and dbt command resolution. Optional legacy
+database arguments default to the configured database and cannot select a
+different environment.
+
+The master task's stream condition and consumers' helper address are deployment
+bindings; native Snowflake DDL stores concrete names. Re-run the migration when
+moving the engine database, monitor schemas, or parameter table. It checks live
+DDL drift, refuses to migrate while workflows are active, preserves procedure
+grants and the master's state, and alters the master in place. It does not run
+workflows or enable previously suspended tasks. Only changed objects in the two
+maintained DEV app schemas are exported; configuration rows are never saved.
+Provision TST's tables/stream/task and parameters before applying its routing.
+The helper needs USAGE for roles invoking CALLER procedures; the migration copies
+those grants from the LIM loader. OWNER engine procedures use their owner rights.
+
+## Portable workflow commands
+
+Save workflow and job definitions with `[VARIABLE]` tokens:
+
+```sql
+CALL [DATABASE].[MONITOR_APP_SCHEMA].SP_LOAD_RAW_LIM_INCREMENTAL_PERSIST(
+    '[DATABASE]'
+);
+
+SELECT * FROM [DATABASE].[META_SCHEMA].WORKFLOW_HISTORY
+WHERE RUN_ID = '[run_id]';
+```
+
+`RAW_SCHEMA` locates raw subject tables, for example
+`[DATABASE].[RAW_SCHEMA].RAW_LIM_PYMT`. `APP_SCHEMA` means data-platform metadata (`META`); `META_SCHEMA` means monitor
+metadata (`MONITOR_META`). dbt project and target fields default to
+`[DATABASE].[DBT_SCHEMA].[DBT_PROJECT]` and `[DBT_TARGET]`. Keep command selections
+portable too. New definitions reject fixed DEV/TST/legacy names and the old
+`#[run_id]#` syntax.
+
+`SP_RESOLVE_WORKFLOW_COMMAND(VARIANT,VARCHAR)` is the shared resolver used by
+both dispatcher overloads and the app's command preview. It reads active
+`DEFAULT` / `ENVIRONMENT` parameters at resolution time and returns command
+text without executing it. Missing/inactive/empty parameters, secret parameters,
+invalid identifiers and an environment database that differs from the engine
+database cause a clear error. In SQL, quote string values yourself; inserted
+single quotes are escaped. SQL comments and numeric array subscripts are
+preserved. Token names use letters/underscores followed by letters/digits/
+underscores; bracketed names in command text are reserved for parameters.
+
+dbt targets can appear in the target field or as `--target [DBT_TARGET]` in the
+command, but conflicting targets fail. Existing `--vars` must be a JSON object;
+the resolver preserves its values and always sets `runId` to the actual run ID.
+The optional leading `dbt` executable name is removed before constructing
+`EXECUTE DBT PROJECT`. DAG previews use the same resolution and variables.
+
+The editor, job editor and run dialog automatically show the complete resolved
+command as the definition changes. **Refresh** reads current parameter values
+again; **Copy** copies the displayed command. Resolution does not execute
+SQL/dbt or create a workflow run. When it appears in the command, the all-zero
+UUID is labelled as an example; actual runs resolve again with their assigned
+ID and the then-current parameter values.
+
+`apply_workflow_command_templates.py` performs a targeted preflight by default.
+With `--apply`, it creates the shared resolver, upgrades both dispatchers while
+preserving grants, validates distinct converted SQL/dbt definitions, then converts
+DEV workflow/job configuration in one transaction. It preserves IDs and schedules
+and never executes the returned workflow commands. Only the three changed DDL
+objects are read back. Run this conversion before the environment-routing migration; that later migration
+updates the resolver/dispatchers to the shared environment helper. Historical workflow runs/logs are preserved as recorded.

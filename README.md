@@ -14,66 +14,68 @@ Use `.env.example` as the non-secret template for required variables.
 
 ## DEV/TST configuration and migration
 
-Set one application environment selector at runtime:
+Set the full parameter table path when starting the service:
 
 ```dotenv
+KUMO_ENVIRONMENT_TABLE=KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS
 KUMO_ENV=DEV
 ```
 
-The top bar shows a persistent environment badge: yellow **DEV**, green
-**TEST**, blue **UAT**, or red **PROD**. `TST` displays as `TEST`. The label
-comes from the backend's startup configuration and remains visible when the
-sidebar is collapsed or hidden on mobile. An unavailable label shows `UNKNOWN`.
+`KUMO_ENVIRONMENT_TABLE` is required for a connected service. The table can live
+in any accessible database/schema and can have a different name. The app reads
+active, non-secret `STRING` parameters for instance `DEFAULT`, group
+`ENVIRONMENT`, before loading its repositories and pages. Missing or invalid
+required parameters stop startup rather than routing queries to a fallback.
+Mock mode keeps local defaults without connecting.
 
-`KUMO_DEPLOYMENT_ENV` optionally sets the service label independently of the
-DEV/TST database selector. It defaults to `KUMO_ENV`, so DEV and TEST need no
-additional setting. Future UAT and PROD deployments on their separate Snowflake
-accounts can set `KUMO_DEPLOYMENT_ENV=UAT` or `PROD`; this does not change the
-database selector or choose an account. Their account/database setup remains a
-separate deployment step. The SPCS renderer accepts `--deployment-env` for this.
-
-Use `TST` later, after its new layout has been provisioned. Both environments
-use the same image and schema layout:
-
-| Object group | Location derived from `KUMO_ENV` |
+| Object group | Location from parameters |
 | --- | --- |
-| Workflow procedures and tasks | `KUMO_<env>.MONITOR_APP` |
-| Monitor tables, workflow/job catalog, configuration, audit, notifications and queue stream | `KUMO_<env>.MONITOR_META` |
-| LIM loader procedure and `RAW_LOAD_RESULTS` | `KUMO_<env>.MONITOR_META` |
-| `RAW_LIM_META`, `_SET_READY_LOG`, package/source mapping | `KUMO_<env>.MONITOR_META` |
-| `_TMP_SET_READY_LOG`, stage, file format, batch control, dbt progress and statuses | `KUMO_<env>.META` |
-| RAW subject data | `KUMO_<env>.RAW_LIM` |
-| SPCS service | `KUMO_<env>.MONITOR_APP.KUMO_MONITOR_SERVICE` |
-| Container image | `KUMO_SHARED.MONITOR_APP.MONITOR_REPOSITORY` within the deployment account |
-| Compute pool | `KUMO_SHARED_MONITOR_POOL` (account-level, shared by new DEV/TST services) |
+| Workflow procedures and tasks | `[DATABASE].[MONITOR_APP_SCHEMA]` |
+| Monitor configuration, workflow/job catalog, audit, queues and history | `[DATABASE].[META_SCHEMA]` |
+| LIM loader, raw file metadata and readiness history | `[DATABASE].[META_SCHEMA]` |
+| Stage, file format, batch control, progress and statuses | `[DATABASE].[APP_SCHEMA]` |
+| RAW subject data | `[DATABASE].[RAW_SCHEMA]` |
+| dbt project object | `[DATABASE].[DBT_SCHEMA].[DBT_PROJECT]` |
+| dbt profile target | `[DBT_TARGET]` (case preserved) |
 
-`backend/config.py` resolves these locations once at startup. Backend queries
-use the resolved names, and `/api/health` supplies the same context to the
-frontend for labels and generated worksheet SQL. The settings page cannot
-switch the application's environment. Restart/redeploy after changing it.
+The same app image supports different database and schema names. `KUMO_ENV`
+sets the DEV/TEST label and mock defaults; it does not override the parameter
+store's database. `KUMO_DEPLOYMENT_ENV` can label future services UAT or PROD.
+The top bar shows the backend's environment label, and `/api/health` reports
+both the parameter-table address and resolved object context.
 
-In SPCS, place `KUMO_ENV` under `spec.containers[].env`. A service is itself a
-Snowflake object with a database and schema; changing the container variable
-does not relocate it. The offline
-[`render_service.py`](snowflake/spcs/render_service.py) derives both the service
-name and its container environment from the same selector. See the
-[SPCS deployment guide](snowflake/spcs/README.md) for a complete example.
-Snowflake supplies `SNOWFLAKE_DATABASE` and `SNOWFLAKE_SCHEMA` from the service
-location. The backend checks that the connection database agrees with
-`KUMO_ENV`; use the new environment's service rather than changing the old
-service to another environment.
+The app loads routing at startup. Restart it after changing routing parameters
+or the bootstrap table path. Old `KUMO_DB`, schema and per-object overrides must
+be removed or agree with the parameter store. Snowflake-provided service
+`SNOWFLAKE_DATABASE`/`SNOWFLAKE_SCHEMA` do not control application routing.
+Credentials, account, roles and warehouses remain deployment settings.
 
-Clear old database/schema overrides in the local `.env`, Docker configuration
-and SPCS specification when using the new defaults. Blank settings use the
-selected layout. `KUMO_SCHEMA` overrides the procedure/task schema,
-`KUMO_METADATA_SCHEMA` overrides the monitor table schema, and
-`KUMO_ORCHESTRATION_SCHEMA` can override the workflow/job catalog schema.
-Database-qualified overrides must belong to the selected environment;
-conflicting settings stop startup with the setting name.
+In SPCS, put `KUMO_ENVIRONMENT_TABLE` under `spec.containers[].env`. The offline
+[`render_service.py`](snowflake/spcs/render_service.py) accepts
+`--environment-table DATABASE.SCHEMA.TABLE`; it only prepares deployment SQL.
+The Snowflake service object itself has its own concrete deployment address.
+See the [SPCS deployment guide](snowflake/spcs/README.md).
 
-Use `KUMO_ENV=DEV` for current local/DEV work and `KUMO_ENV=TST` after its
-app schemas and dependencies have been provisioned. The example configuration
-selects DEV. TST uses the same application source and image.
+The Snowflake engine reads the same parameter table through
+`SP_GET_ENVIRONMENT()` for each invocation. Its bootstrap pointer and the master
+stream condition are bound by
+[`apply_environment_routing.py`](backend/migrations/apply_environment_routing.py).
+Run that migration against the new parameter table when moving the engine or
+its configuration store. Native DDL object names and task conditions must have
+concrete addresses at deployment; table access and execution routing inside
+the engine use the parameters. The migration preserves grants and the master's
+original running/suspended state, and updates only changed DDL copies.
+
+TST provisioning remains a separate step: provision its objects and parameter
+rows, bind its engine to that table, and start the same app image with that
+full table path. No workflow/job definition edits are needed.
+
+Workflow SQL and dbt fields use `[VARIABLE]` tokens from **Settings → Environment**.
+For example, `[DATABASE].[MONITOR_APP_SCHEMA]` locates workflow procedures;
+`[DATABASE].[APP_SCHEMA]` locates data-platform metadata. Use `'[run_id]'` for a
+SQL string containing the current run ID. The command preview resolves the
+current editor/run-dialog values without running SQL or dbt. See the
+[command template guide](snowflake/README.md#portable-workflow-commands).
 
 Account, warehouses, roles and image location are deployment resources.
 SPCS uses Snowflake's service OAuth token; the service owner needs access to
@@ -100,8 +102,8 @@ them. App startup never resumes the master task automatically.
 
 DEV definitions and workflow configuration have been copied: 27 engine
 workflows, 29 catalog workflows and 44 jobs, plus their dependent configuration.
-Executable references use DEV, including `KUMO_DEV.DBT_APP.KUMO_DEV` and its
-`kumo_DEV` target. Copied schedules are disabled and the dispatcher is suspended.
+Workflow/job command fields use parameter templates; DEV parameter values resolve
+to the `KUMO_DEV.DBT_APP.KUMO_DEV` project and `kumo_DEV` target. Copied schedules are disabled and the dispatcher is suspended.
 Workflow execution validation remains; `META.WORKFLOW_DEP_RULE` is intentionally
 not created yet. The DEV SPCS service has been deployed as
 `KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE`, owned by `KUMO_ADMIN`, using image

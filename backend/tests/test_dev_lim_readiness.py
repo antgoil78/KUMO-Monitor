@@ -50,6 +50,17 @@ class DevLimReadinessTests(unittest.TestCase):
             file_ingestion._load_raw_table_readiness(cur, [{"SUBJECT_AREA": "PAAR"}])
         self.assertIn("COUNT_IF(COALESCE(DW_READY_TO_LOAD_FL", cur.execute.call_args.args[0])
 
+    def test_raw_queries_use_the_configured_schema(self):
+        with patch.object(config, "RAW_SCHEMA", "LANDING"):
+            sql = lim_readiness.raw_file_readiness_sql("PYMT")
+            self.assertIn("FROM KUMO_DEV.LANDING.RAW_LIM_PYMT", sql)
+            self.assertIn("'LANDING.RAW_LIM_PYMT'", sql)
+            cur = MagicMock()
+            cur.fetchall.return_value = [{"TABLE_NAME": "RAW_LIM_PYMT"}]
+            self.assertEqual(file_ingestion._load_lim_subject_areas(cur, "KUMO_DEV"), ["PYMT"])
+            self.assertIn("TABLE_SCHEMA = 'LANDING'", cur.execute.call_args.args[0])
+            self.assertNotIn("TABLE_SCHEMA = 'RAW_LIM'", cur.execute.call_args.args[0])
+
     def test_subject_in_query_cannot_inject_sql(self):
         with self.assertRaises(ValueError):
             lim_readiness.raw_file_readiness_sql("PAAR; DROP DATABASE KUMO_DEV")

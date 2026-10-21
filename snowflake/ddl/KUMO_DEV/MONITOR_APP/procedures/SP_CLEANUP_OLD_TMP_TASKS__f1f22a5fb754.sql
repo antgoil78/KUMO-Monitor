@@ -1,5 +1,5 @@
 -- Source: KUMO_DEV.MONITOR_APP.SP_CLEANUP_OLD_TMP_TASKS(FLOAT)
--- Refresh: python snowflake/export_ddl.py
+-- Refresh: python snowflake/export_ddl.py --object PROCEDURE 'KUMO_DEV.MONITOR_APP.SP_CLEANUP_OLD_TMP_TASKS(FLOAT)'
 USE DATABASE "KUMO_DEV";
 USE SCHEMA "KUMO_DEV"."MONITOR_APP";
 
@@ -8,13 +8,16 @@ RETURNS VARIANT
 LANGUAGE JAVASCRIPT
 EXECUTE AS OWNER
 AS '
+var contextRows = snowflake.execute({sqlText: "CALL KUMO_DEV.MONITOR_META.SP_GET_ENVIRONMENT()"});
+contextRows.next();
+var environment = contextRows.getColumnValue(1);
+if (typeof environment === ''string'') environment = JSON.parse(environment);
+
 function exec(sqlText, binds) {
   return snowflake.execute({ sqlText, binds: binds || [] });
 }
 
-const databaseRow = exec("SELECT CURRENT_DATABASE()");
-databaseRow.next();
-const taskPrefix = String(databaseRow.getColumnValue(1)).toUpperCase() + ".MONITOR_APP.TMP_WF_";
+const taskPrefix = environment.DATABASE + ''.'' + environment.MONITOR_APP_SCHEMA + ''.TMP_WF_'';
 
 function assertSafeTaskFqn(taskFqn) {
   const s = String(taskFqn || "").trim();
@@ -37,8 +40,8 @@ const rows = exec(`
   SELECT
       t.TASK_FQN,
       t.RUN_ID
-  FROM MONITOR_META.WORKFLOW_TMP_TASKS t
-  JOIN MONITOR_META.WORKFLOW_HISTORY h
+  FROM ${environment.DATABASE}.${environment.META_SCHEMA}.WORKFLOW_TMP_TASKS t
+  JOIN ${environment.DATABASE}.${environment.META_SCHEMA}.WORKFLOW_HISTORY h
     ON h.RUN_ID = t.RUN_ID
   WHERE COALESCE(t.STATUS, '''') <> ''DROPPED''
     AND t.CREATED_AT < DATEADD(''minute'', -1 * CAST(? AS INTEGER), SYSDATE())
@@ -70,7 +73,7 @@ while (rows.next()) {
     exec(`DROP TASK IF EXISTS ${taskFqn}`);
 
     exec(`
-      UPDATE MONITOR_META.WORKFLOW_TMP_TASKS
+      UPDATE ${environment.DATABASE}.${environment.META_SCHEMA}.WORKFLOW_TMP_TASKS
       SET STATUS = ''DROPPED'',
           CLEANED_AT = SYSDATE(),
           CLEANUP_ERROR = NULL
@@ -81,7 +84,7 @@ while (rows.next()) {
 
   } catch (e) {
     exec(`
-      UPDATE MONITOR_META.WORKFLOW_TMP_TASKS
+      UPDATE ${environment.DATABASE}.${environment.META_SCHEMA}.WORKFLOW_TMP_TASKS
       SET STATUS = ''CLEANUP_FAILED'',
           CLEANUP_ERROR = ?
       WHERE TASK_FQN = ?

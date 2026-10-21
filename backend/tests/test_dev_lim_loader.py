@@ -28,13 +28,13 @@ class DevLimLoaderTests(unittest.TestCase):
 
         cursor.reset_mock()
         with patch.object(file_ingestion.sf, "connection_scope") as scope, \
-                patch.object(file_ingestion.config, "ENVIRONMENT", ""), \
-                patch.object(file_ingestion.config, "LIM_LOAD_PROCEDURE", "KUMO_TST.META.LOAD_RAW_LIM_FROM_STAGE"):
+                patch.object(file_ingestion.config, "ENVIRONMENT", "TST"), \
+                patch.object(file_ingestion.config, "LIM_LOAD_PROCEDURE", "KUMO_TST.MONITOR_META.LOAD_RAW_LIM_FROM_STAGE"):
             scope.return_value.__enter__.return_value = connection
             file_ingestion._run_reload_job(app, "test-job", {**params, "database": "KUMO_TST"})
         query, _ = cursor.execute.call_args_list[-1].args
-        self.assertIn("CALL KUMO_TST.META.LOAD_RAW_LIM_FROM_STAGE(", query)
-        self.assertNotIn("P_DATABASE =>", query)
+        self.assertIn("CALL KUMO_TST.MONITOR_META.LOAD_RAW_LIM_FROM_STAGE(", query)
+        self.assertIn("P_DATABASE => %(database)s", query)
 
 
 

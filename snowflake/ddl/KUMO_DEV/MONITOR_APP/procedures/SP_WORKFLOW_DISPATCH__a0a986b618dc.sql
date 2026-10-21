@@ -1,5 +1,5 @@
 -- Source: KUMO_DEV.MONITOR_APP.SP_WORKFLOW_DISPATCH(VARCHAR)
--- Refresh: python snowflake/export_ddl.py
+-- Refresh: python snowflake/export_ddl.py --object PROCEDURE 'KUMO_DEV.MONITOR_APP.SP_WORKFLOW_DISPATCH(VARCHAR)'
 USE DATABASE "KUMO_DEV";
 USE SCHEMA "KUMO_DEV"."MONITOR_APP";
 
@@ -8,6 +8,11 @@ RETURNS VARIANT
 LANGUAGE JAVASCRIPT
 EXECUTE AS OWNER
 AS '
+var contextRows = snowflake.execute({sqlText: "CALL KUMO_DEV.MONITOR_META.SP_GET_ENVIRONMENT()"});
+contextRows.next();
+var environment = contextRows.getColumnValue(1);
+if (typeof environment === ''string'') environment = JSON.parse(environment);
+
 function escMsg(s) {
   return (s === null || s === undefined) ? "" : String(s);
 }
@@ -15,7 +20,7 @@ function escMsg(s) {
 function log(runId, level, msg) {
   snowflake.execute({
     sqlText: `
-      INSERT INTO MONITOR_META.WORKFLOW_RUN_LOGS
+      INSERT INTO ${environment.DATABASE}.${environment.META_SCHEMA}.WORKFLOW_RUN_LOGS
         (RUN_ID, LOG_LEVEL, MESSAGE)
       VALUES (?, ?, ?)
     `,
@@ -62,7 +67,7 @@ function isSafeProjectFqn(fqn) {
 function markFailedAndDone(runId, msg) {
   snowflake.execute({
     sqlText: `
-      UPDATE MONITOR_META.WORKFLOW_HISTORY
+      UPDATE ${environment.DATABASE}.${environment.META_SCHEMA}.WORKFLOW_HISTORY
          SET STATUS = ''FAILED'',
              START_TIME = COALESCE(START_TIME, SYSDATE()),
              END_TIME = SYSDATE(),
@@ -80,7 +85,7 @@ function markFailedAndDone(runId, msg) {
   */
   snowflake.execute({
     sqlText: `
-      UPDATE MONITOR_META.WORKFLOW_RUN_QUEUE
+      UPDATE ${environment.DATABASE}.${environment.META_SCHEMA}.WORKFLOW_RUN_QUEUE
          SET STATUS = ''DONE''
        WHERE RUN_ID = ?
     `,
@@ -122,8 +127,8 @@ const wf = oneRow(
         COALESCE(w.DBT_PROJECT_FQN, '''') AS DBT_PROJECT_FQN,
         t.ON_SUCCESS AS ON_SUCCESS,
         t.ON_FAIL    AS ON_FAIL
-     FROM MONITOR_META.WORKFLOWS w
-     LEFT JOIN MONITOR_META.WORKFLOW_TASKS t
+     FROM ${environment.DATABASE}.${environment.META_SCHEMA}.WORKFLOWS w
+     LEFT JOIN ${environment.DATABASE}.${environment.META_SCHEMA}.WORKFLOW_TASKS t
        ON t.WORKFLOW_ID = w.WORKFLOW_ID
     WHERE w.WORKFLOW_ID = ?
   `,
@@ -163,7 +168,7 @@ for (let attempt = 0; attempt < 5; attempt++) {
           CHAIN_DEPTH,
           PARENT_RUN_ID,
           DBT_COMMAND_OVERRIDE
-       FROM MONITOR_META.WORKFLOW_RUN_QUEUE
+       FROM ${environment.DATABASE}.${environment.META_SCHEMA}.WORKFLOW_RUN_QUEUE
       WHERE TRIM(WORKFLOW_ID) = TRIM(?)
         AND UPPER(TRIM(STATUS)) IN (''DISPATCHING'', ''QUEUED'', ''STARTING'')
       ORDER BY
@@ -221,7 +226,7 @@ for (let attempt = 0; attempt < 5; attempt++) {
   const running = oneRow(
     `
       SELECT COUNT(*) AS CNT
-        FROM MONITOR_META.WORKFLOW_HISTORY
+        FROM ${environment.DATABASE}.${environment.META_SCHEMA}.WORKFLOW_HISTORY
        WHERE WORKFLOW_ID = ?
          AND UPPER(TRIM(STATUS)) = ''RUNNING''
     `,
@@ -256,7 +261,7 @@ for (let attempt = 0; attempt < 5; attempt++) {
   */
   const upd = snowflake.execute({
     sqlText: `
-      UPDATE MONITOR_META.WORKFLOW_RUN_QUEUE
+      UPDATE ${environment.DATABASE}.${environment.META_SCHEMA}.WORKFLOW_RUN_QUEUE
          SET STATUS = ''DISPATCHED'',
              CLAIMED_AT = COALESCE(CLAIMED_AT, SYSDATE()),
              CLAIMED_BY = COALESCE(CLAIMED_BY, CURRENT_USER())
@@ -325,6 +330,28 @@ const onFail    = normalizeHook(wf.ON_FAIL);
 /*
   Build exec_sql depending on workflow type.
 */
+// Resolve templates once, before history is marked RUNNING or any task is created.
+let resolved;
+try {
+  const resolution = snowflake.execute({
+    sqlText: `CALL ${environment.DATABASE}.${environment.MONITOR_APP_SCHEMA}.SP_RESOLVE_WORKFLOW_COMMAND(PARSE_JSON(?), ?)`,
+    binds: [JSON.stringify({workflowType: wtype, sqlCommand: wf.SQL_COMMAND,
+      dbtCommand: claimed.DBT_COMMAND_OVERRIDE || wf.DBT_COMMAND,
+      dbtProjectFqn: wf.DBT_PROJECT_FQN, dbtTarget: wf.DBT_TARGET}), runId]
+  });
+  resolution.next();
+  resolved = resolution.getColumnValue(1);
+  if (typeof resolved === "string") resolved = JSON.parse(resolved);
+  if (!resolved || !resolved.ok) throw new Error(resolved && resolved.error || "Command resolution failed");
+} catch (error) {
+  const message = "ENVIRONMENT_RESOLUTION_FAILED: " + String(error.message || error);
+  log(runId, "ERROR", message);
+  markFailedAndDone(runId, message);
+  return {ok: false, run_id: runId, workflow_id: String(P_WORKFLOW_ID), reason: message};
+}
+log(runId, "INFO", "ENVIRONMENT_PARAMETERS: " + JSON.stringify(resolved.parametersUsed));
+wf.DBT_PROJECT_FQN = resolved.dbtProjectFqn;
+wf.DBT_TARGET = resolved.dbtTarget;
 let execSql = null;
 
 if (wtype === "DBT") {
@@ -367,38 +394,8 @@ if (wtype === "DBT") {
     };
   }
 
-  let argsCore = String(claimed.DBT_COMMAND_OVERRIDE || wf.DBT_COMMAND || "").trim();
-
-  if (argsCore === "") {
-    log(runId, "ERROR", "SP_DISPATCH: DBT_COMMAND_EMPTY");
-    markFailedAndDone(runId, "DBT_COMMAND_EMPTY");
-
-    return {
-      ok: false,
-      run_id: runId,
-      workflow_id: String(P_WORKFLOW_ID),
-      reason: "DBT_COMMAND_EMPTY"
-    };
-  }
-
-  let args = argsCore;
-
-  /*
-    Add runId vars and target only when target is not already supplied.
-  */
-  if (!/(^|\\s)--target(\\s|=)/i.test(args)) {
-    const runIdClean = String(runId).trim();
-    const varsJson = JSON.stringify({ runId: runIdClean });
-
-    args += " --vars ''" + varsJson + "''";
-    args += " --target " + String(wf.DBT_TARGET).trim();
-  }
-
-  const argsSqlEsc = String(args).replace(/''/g, "''''");
-
-  execSql =
-    "EXECUTE DBT PROJECT " + projectFqnRaw +
-    " ARGS = ''" + argsSqlEsc + "''";
+  const args = resolved.dbtCommand;
+  execSql = resolved.execSql;
 
   log(runId, "INFO", "WORKFLOW_TYPE=DBT");
   log(runId, "INFO", "DBT_EXEC_SQL: " + execSql);
@@ -409,7 +406,7 @@ if (wtype === "DBT") {
   */
   snowflake.execute({
     sqlText: `
-      UPDATE MONITOR_META.WORKFLOW_HISTORY
+      UPDATE ${environment.DATABASE}.${environment.META_SCHEMA}.WORKFLOW_HISTORY
          SET STATUS = ''RUNNING'',
              START_TIME = SYSDATE(),
              DBT_ARGS = ?,
@@ -422,7 +419,7 @@ if (wtype === "DBT") {
   /* WORKFLOW_STATUS: PROCESSING */
   snowflake.execute({
     sqlText: `
-      MERGE INTO META.WORKFLOW_STATUS t
+      MERGE INTO ${environment.DATABASE}.${environment.APP_SCHEMA}.WORKFLOW_STATUS t
       USING (SELECT ? AS WORKFLOW_ID, ? AS RUN_ID) s
          ON t.WORKFLOW_ID = s.WORKFLOW_ID
       WHEN MATCHED THEN UPDATE SET
@@ -454,12 +451,7 @@ if (wtype === "DBT") {
 /*
   SQL workflow.
 */
-const sqlCmdRaw = String(wf.SQL_COMMAND || "");
-let sqlCmd = trimTrailingSemicolons(sqlCmdRaw);
-
-/* SQL_RUN_ID_PARAMETER_V2: replace every #[run_id]# token after RUN_ID is known. */
-const runIdSql = String(runId).replace(/''/g, "''''");
-sqlCmd = sqlCmd.split("#[run_id]#").join(runIdSql);
+const sqlCmd = resolved.sqlCommand;
 
 if (!sqlCmd || sqlCmd.trim() === "") {
   log(runId, "ERROR", "SP_DISPATCH: SQL_COMMAND_EMPTY");
@@ -483,7 +475,7 @@ log(runId, "INFO", "SQL_EXEC_SQL(preview): " + preview);
 
 snowflake.execute({
   sqlText: `
-    UPDATE MONITOR_META.WORKFLOW_HISTORY
+    UPDATE ${environment.DATABASE}.${environment.META_SCHEMA}.WORKFLOW_HISTORY
        SET STATUS = ''RUNNING'',
            START_TIME = SYSDATE(),
            UPDATED_AT = SYSDATE()

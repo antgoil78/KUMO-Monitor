@@ -112,6 +112,9 @@ export const api = {
     body: JSON.stringify({ triggerSource: 'MANUAL', workflowName, skipChildren, dbtCommandOverride })
   }),
   workflowDetail: (workflowId, options = {}) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`, options),
+  previewWorkflowCommand: definition => requestJson('/api/workflow-command-preview', {
+    method: 'POST', body: JSON.stringify(definition)
+  }),
   updateWorkflow: (workflowId, payload) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`, {
     method: 'PATCH',
     body: JSON.stringify(payload)

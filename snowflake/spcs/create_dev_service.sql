@@ -15,6 +15,7 @@ spec:
     - name: monitor
       image: /kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-215-1-022ffedd2bf2
       env:
+        KUMO_ENVIRONMENT_TABLE: "KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS"
         KUMO_ENV: "DEV"
         KUMO_DEPLOYMENT_ENV: "DEV"
         SNOWFLAKE_WAREHOUSE: "KUMO_ELT_GEN_1"

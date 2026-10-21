@@ -22,7 +22,7 @@ def accepted_deliveries_sql():
 
 def raw_file_readiness_sql(subject):
     subject = _subject(subject)
-    table = f"{config.LIM_DATABASE}.RAW_LIM.RAW_LIM_{subject}"
+    table = f"{config.LIM_DATABASE}.{config.RAW_SCHEMA}.RAW_LIM_{subject}"
     return f"""
         WITH physical_files AS (
             SELECT DW_FILE_NM, REGEXP_SUBSTR(DW_FILE_NM, '[^/]+$') AS BASE_NAME,
@@ -39,7 +39,7 @@ def raw_file_readiness_sql(subject):
             GROUP BY DW_FILE_NM
         ), registered AS (
             SELECT DISTINCT DW_FILE_NM, DW_SRC_SYST FROM {config.LIM_BATCH_CTRL_TABLE}
-            WHERE UPPER(DW_TABLE_NM) IN ('RAW_LIM.RAW_LIM_{subject}', '{table}')
+            WHERE UPPER(DW_TABLE_NM) IN ('{config.RAW_SCHEMA}.RAW_LIM_{subject}', '{table}')
         ), accepted AS ({accepted_deliveries_sql()})
         SELECT DISTINCT '{subject}' AS SUBJECT_AREA, files.SOURCE_ID, files.DW_FILE_NM,
                IFF(b.DW_FILE_NM IS NOT NULL OR

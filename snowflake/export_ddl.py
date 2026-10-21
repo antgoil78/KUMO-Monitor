@@ -221,7 +221,9 @@ def export(role=None, items=None, refresh=False):
                 definitions[obj['file']] = (ROOT / obj['file']).read_text()
         objects.sort(key=lambda obj: (scope['schemas'].index(obj['name'].rsplit('.', 1)[0]),
                                      scope['object_types'].index(obj['type']), obj['name'], obj.get('signature', '')))
-    definitions['00_databases_schemas.sql'] = '\n'.join(bootstrap) + '\n'
+    bootstrap_path = ROOT / '00_databases_schemas.sql'
+    definitions['00_databases_schemas.sql'] = (bootstrap_path.read_text()
+        if requested and bootstrap_path.exists() else '\n'.join(bootstrap) + '\n')
     ordered = ['00_databases_schemas.sql']
     ordered.extend(obj['file'] for obj in objects if obj['type'] == 'SEQUENCE')
     ordered.extend(obj['file'] for obj in objects if obj['type'] == 'FILE_FORMAT')

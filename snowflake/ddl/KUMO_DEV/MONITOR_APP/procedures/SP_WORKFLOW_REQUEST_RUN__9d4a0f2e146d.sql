@@ -1,5 +1,5 @@
 -- Source: KUMO_DEV.MONITOR_APP.SP_WORKFLOW_REQUEST_RUN(VARCHAR, VARCHAR, VARCHAR, NUMBER, VARCHAR)
--- Refresh: python snowflake/export_ddl.py
+-- Refresh: python snowflake/export_ddl.py --object PROCEDURE 'KUMO_DEV.MONITOR_APP.SP_WORKFLOW_REQUEST_RUN(VARCHAR, VARCHAR, VARCHAR, NUMBER, VARCHAR)'
 USE DATABASE "KUMO_DEV";
 USE SCHEMA "KUMO_DEV"."MONITOR_APP";
 
@@ -9,6 +9,12 @@ LANGUAGE SQL
 EXECUTE AS OWNER
 AS '
 DECLARE
+  V_ENV VARIANT;
+  E_META_SCHEMA_APP_WORKFLOW_RUN_LOCKS VARCHAR;
+  E_META_SCHEMA_WORKFLOWS VARCHAR;
+  E_META_SCHEMA_WORKFLOW_HISTORY VARCHAR;
+  E_META_SCHEMA_WORKFLOW_RUN_QUEUE VARCHAR;
+
   V_RUN_ID         STRING DEFAULT UUID_STRING();
   V_QUEUE_ID       STRING DEFAULT UUID_STRING();
 
@@ -17,6 +23,12 @@ DECLARE
 
   V_TRIGGER_SOURCE STRING;
 BEGIN
+  CALL KUMO_DEV.MONITOR_META.SP_GET_ENVIRONMENT() INTO :V_ENV;
+  E_META_SCHEMA_APP_WORKFLOW_RUN_LOCKS := V_ENV:DATABASE::VARCHAR || ''.'' || V_ENV:META_SCHEMA::VARCHAR || ''.APP_WORKFLOW_RUN_LOCKS'';
+  E_META_SCHEMA_WORKFLOWS := V_ENV:DATABASE::VARCHAR || ''.'' || V_ENV:META_SCHEMA::VARCHAR || ''.WORKFLOWS'';
+  E_META_SCHEMA_WORKFLOW_HISTORY := V_ENV:DATABASE::VARCHAR || ''.'' || V_ENV:META_SCHEMA::VARCHAR || ''.WORKFLOW_HISTORY'';
+  E_META_SCHEMA_WORKFLOW_RUN_QUEUE := V_ENV:DATABASE::VARCHAR || ''.'' || V_ENV:META_SCHEMA::VARCHAR || ''.WORKFLOW_RUN_QUEUE'';
+
   --------------------------------------------------------------------
   -- Normalize inputs into variables (avoid expressions in VALUES)
   --------------------------------------------------------------------
@@ -28,7 +40,7 @@ BEGIN
   --------------------------------------------------------------------
   -- 1) Insert into HISTORY (as QUEUED)
   --------------------------------------------------------------------
-  INSERT INTO MONITOR_META.WORKFLOW_HISTORY (
+  INSERT INTO IDENTIFIER(:E_META_SCHEMA_WORKFLOW_HISTORY) (
       RUN_ID,
       WORKFLOW_ID,
       STATUS,
@@ -56,7 +68,7 @@ BEGIN
   --------------------------------------------------------------------
   -- 2) Insert into RUN_QUEUE (as QUEUED)
   --------------------------------------------------------------------
-  INSERT INTO MONITOR_META.WORKFLOW_RUN_QUEUE (
+  INSERT INTO IDENTIFIER(:E_META_SCHEMA_WORKFLOW_RUN_QUEUE) (
       QUEUE_ID,
       WORKFLOW_ID,
       RUN_ID,
@@ -77,7 +89,7 @@ BEGIN
   -- KUMO_EXTERNAL_RUN_LOCK_TRACKING_V1
   -- Register runs from dependency rules, schedules, and external SQL.
   --------------------------------------------------------------------
-  MERGE INTO MONITOR_META.APP_WORKFLOW_RUN_LOCKS t
+  MERGE INTO IDENTIFIER(:E_META_SCHEMA_APP_WORKFLOW_RUN_LOCKS) t
   USING (
     SELECT
       UUID_STRING() AS LOCK_ID,
@@ -85,7 +97,7 @@ BEGIN
       COALESCE(w.WORKFLOW_NAME, :P_WORKFLOW_ID) AS WORKFLOW_NAME,
       :V_RUN_ID AS RUN_ID,
       CURRENT_USER() AS REQUESTED_BY
-    FROM MONITOR_META.WORKFLOWS w
+    FROM IDENTIFIER(:E_META_SCHEMA_WORKFLOWS) w
     WHERE w.WORKFLOW_ID = :P_WORKFLOW_ID
   ) s
   ON t.WORKFLOW_ID = s.WORKFLOW_ID

@@ -12,6 +12,7 @@ spec:
     image: "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-216-1-0ce9611cf217"
     sha256: "@sha256:59145b48dc4dfebcf8c2042f556d0f88199fdbcb200bb7ce3b7f8feb6a42912c"
     env:
+      KUMO_ENVIRONMENT_TABLE: "KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS"
       KUMO_ENV: "DEV"
       KUMO_DEPLOYMENT_ENV: "DEV"
       SNOWFLAKE_WAREHOUSE: "KUMO_ELT_GEN_1"

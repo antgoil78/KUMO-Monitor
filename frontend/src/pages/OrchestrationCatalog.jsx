@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api.js'
 import LoadingState from '../components/LoadingState.jsx'
+import CommandPreview from '../components/CommandPreview.jsx'
 import PageHeader from '../components/PageHeader.jsx'
 import './OrchestrationCatalog.css'
 
@@ -236,7 +237,7 @@ function JobEditor({ job, defaultLayer, assignments, saving, error, onClose, onS
   const [form, setForm] = useState({
     jobName: job?.JOB_NAME || '', description: job?.DESCRIPTION || '', jobType: job?.JOB_TYPE || 'SQL', jobLayer: job?.JOB_LAYER || defaultLayer || 'GENERAL',
     sqlCommand: job?.SQL_COMMAND || '', dbtCommand: job?.DBT_COMMAND || '', commandLine: job?.COMMAND_LINE || '',
-    dbtTarget: job?.DBT_TARGET || '', dbtWorkspace: job?.DBT_WORKSPACE || '', dbtProjectFqn: job?.DBT_PROJECT_FQN || '',
+    dbtTarget: job?.DBT_TARGET || '[DBT_TARGET]', dbtWorkspace: job?.DBT_WORKSPACE || '', dbtProjectFqn: job?.DBT_PROJECT_FQN || '[DATABASE].[DBT_SCHEMA].[DBT_PROJECT]',
     timeoutSeconds: job?.TIMEOUT_SECONDS || '', enabled: job ? Boolean(job.IS_ENABLED) : true
   })
   const jobAssignments = job ? assignments.filter(item => item.JOB_ID === job.JOB_ID) : []
@@ -267,6 +268,7 @@ function JobEditor({ job, defaultLayer, assignments, saving, error, onClose, onS
       {form.jobType === 'SQL' && <div className="form-field"><label>SQL command</label><textarea required rows="5" value={form.sqlCommand} onChange={event => update('sqlCommand', event.target.value)} /></div>}
       {form.jobType === 'COMMAND' && <div className="form-field"><label>Command line</label><textarea required rows="4" value={form.commandLine} onChange={event => update('commandLine', event.target.value)} /></div>}
       {form.jobType === 'DBT' && <><div className="form-field"><label>DBT command</label><textarea required rows="4" value={form.dbtCommand} onChange={event => update('dbtCommand', event.target.value)} /></div><div className="form-grid two"><div className="form-field"><label>DBT target</label><input value={form.dbtTarget} onChange={event => update('dbtTarget', event.target.value)} /></div><div className="form-field"><label>DBT workspace</label><input value={form.dbtWorkspace} onChange={event => update('dbtWorkspace', event.target.value)} /></div></div><div className="form-field"><label>DBT project FQN</label><input value={form.dbtProjectFqn} onChange={event => update('dbtProjectFqn', event.target.value)} /></div></>}
+      {form.jobType !== 'COMMAND' && <CommandPreview definition={form} />}
       <div className="form-grid two"><div className="form-field"><label>Timeout seconds</label><input type="number" min="1" value={form.timeoutSeconds} onChange={event => update('timeoutSeconds', event.target.value)} /></div><div className="toggle-row"><label><input type="checkbox" checked={form.enabled} onChange={event => update('enabled', event.target.checked)} /> Job enabled</label></div></div>
       <div className="modal-actions">{job && <button className="button danger orchestration-delete" type="button" disabled={saving} onClick={requestDelete}>{confirmDelete ? 'Confirm delete' : 'Delete'}</button>}<button className="button" type="button" onClick={onClose}>Cancel</button><button className="button primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save job'}</button></div>
     </form>
