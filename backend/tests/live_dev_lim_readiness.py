@@ -27,7 +27,7 @@ def run():
             for table, source in {
                 "RAW_LIM_META": "MONITOR_META.RAW_LIM_META",
                 "RAW_LIM_PKG_GROUP_SOURCE": "MONITOR_META.RAW_LIM_PKG_GROUP_SOURCE",
-                "_TMP_SET_READY_LOG": "META._TMP_SET_READY_LOG",
+                "_TMP_SET_READY_LOG": "MONITOR_META._TMP_SET_READY_LOG",
                 "_SET_READY_LOG": "MONITOR_META._SET_READY_LOG",
                 "RAW_LIM_CONTROL_ARCHIVE": "MONITOR_META.RAW_LIM_CONTROL_ARCHIVE",
             }.items():

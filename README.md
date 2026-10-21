@@ -32,7 +32,7 @@ Mock mode keeps local defaults without connecting.
 | --- | --- |
 | Workflow procedures and tasks | `[DATABASE].[MONITOR_APP_SCHEMA]` |
 | Monitor configuration, workflow/job catalog, audit, queues and history | `[DATABASE].[META_SCHEMA]` |
-| LIM loader, raw file metadata and readiness history | `[DATABASE].[META_SCHEMA]` |
+| LIM loader, raw file metadata and both readiness logs | `[DATABASE].[META_SCHEMA]` |
 | Stage, file format, batch control, progress and statuses | `[DATABASE].[APP_SCHEMA]` |
 | RAW subject data | `[DATABASE].[RAW_SCHEMA]` |
 | dbt project object | `[DATABASE].[DBT_SCHEMA].[DBT_PROJECT]` |
