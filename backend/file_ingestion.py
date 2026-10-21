@@ -17,6 +17,7 @@ from snowflake.connector import DictCursor
 
 import config
 import snowflake_client as sf
+import lim_readiness
 from utils import normalize_rows
 
 
@@ -114,7 +115,7 @@ def _run_reload_job(app, job_id, params):
                 try:
                     cur.execute(f"USE ROLE {role}")
                     cur.execute(f"USE DATABASE {database}")
-                    database_argument = ",\n                          P_DATABASE => %(database)s" if config.ENVIRONMENT else ""
+                    database_argument = ",\n                          P_DATABASE => %(database)s"
                     cur.execute(
                         f"""
                         CALL {config.LIM_LOAD_PROCEDURE}(
@@ -502,6 +503,9 @@ def _load_raw_table_readiness(cur, catalog):
 
     branches = []
     for subject in subjects:
+        if config.LIM_READINESS_SOURCE == "BATCH_CONTROL":
+            branches.append(f"SELECT * FROM ({lim_readiness.raw_file_readiness_sql(subject)})")
+            continue
         branches.append(
             f"""
             SELECT '{subject}' AS SUBJECT_AREA,
@@ -509,7 +513,7 @@ def _load_raw_table_readiness(cur, catalog):
                    DW_FILE_NM,
                    IFF(COUNT_IF(COALESCE(DW_READY_TO_LOAD_FL, FALSE) = FALSE) = 0, TRUE, FALSE) AS FILE_READY,
                    MAX(DW_LOAD_DTTM) AS FILE_LOAD_DTTM
-            FROM {database}.RAW_LIM.RAW_LIM_{subject}
+            FROM {database}.{config.RAW_SCHEMA}.RAW_LIM_{subject}
             WHERE DW_FILE_NM IS NOT NULL
               AND POSITION('{subject}' IN UPPER(DW_FILE_NM)) > 1
               AND SUBSTR(DW_FILE_NM, POSITION('{subject}' IN UPPER(DW_FILE_NM)) + {len(subject)}, 3) <> '000'
@@ -686,6 +690,10 @@ def _load_overview(history_days):
 
 
 def _load_raw_detail(group_name):
+    if config.LIM_READINESS_SOURCE == "BATCH_CONTROL":
+        return normalize_rows(sf.query_service(
+            lim_readiness.metadata_detail_sql(), params={"group_name": group_name},
+        ))
     meta_rows = sf.query_service(
         f"""
         SELECT RAW_TABLE,
@@ -742,7 +750,7 @@ def _load_raw_detail(group_name):
                 f"""
                 SELECT DW_FILE_NM,
                        IFF(COUNT_IF(COALESCE(DW_READY_TO_LOAD_FL, FALSE) = FALSE) = 0, TRUE, FALSE) AS FILE_READY
-                FROM {database}.RAW_LIM.RAW_LIM_{subject}
+                FROM {database}.{config.RAW_SCHEMA}.RAW_LIM_{subject}
                 WHERE DW_FILE_NM IS NOT NULL
                   AND SUBSTR(DW_FILE_NM, POSITION('{subject}' IN UPPER(DW_FILE_NM)) + {len(subject)}, 3) <> '000'
                   AND SUBSTR(DW_FILE_NM, 1, POSITION('{subject}' IN UPPER(DW_FILE_NM)) - 1) IN (
@@ -950,7 +958,7 @@ def _load_lim_subject_areas(cur, database):
             f"""
             SELECT TABLE_NAME
             FROM {database}.INFORMATION_SCHEMA.TABLES
-            WHERE TABLE_SCHEMA = 'RAW_LIM'
+            WHERE TABLE_SCHEMA = '{config.RAW_SCHEMA}'
               AND TABLE_TYPE = 'BASE TABLE'
               AND STARTSWITH(TABLE_NAME, 'RAW_LIM_')
               AND TABLE_NAME <> 'RAW_LIM_META'
@@ -964,7 +972,7 @@ def _load_lim_subject_areas(cur, database):
         current_app.logger.warning("INFORMATION_SCHEMA subject discovery failed: %s", exc)
 
     try:
-        cur.execute(f"SHOW TABLES LIKE 'RAW_LIM_%' IN SCHEMA {database}.RAW_LIM")
+        cur.execute(f"SHOW TABLES LIKE 'RAW_LIM_%' IN SCHEMA {database}.{config.RAW_SCHEMA}")
         show_rows = normalize_rows(cur.fetchall())
         subjects = subjects_from_names(row.get("NAME") for row in show_rows)
         if subjects:
@@ -1096,7 +1104,7 @@ def file_ingestion_reload():
                 cur.execute(f"USE DATABASE {database}")
                 subject_areas = _load_lim_subject_areas(cur, database)
                 if lim_format not in subject_areas:
-                    return _json_error(f"RAW_LIM_{lim_format} was not found in {database}.RAW_LIM.", 400)
+                    return _json_error(f"RAW_LIM_{lim_format} was not found in {database}.{config.RAW_SCHEMA}.", 400)
             finally:
                 cur.close()
 

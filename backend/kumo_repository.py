@@ -9,6 +9,7 @@ from snowflake.connector import DictCursor
 
 import config
 import snowflake_client as sf
+from workflow_commands import DBT_PROJECT_TEMPLATE, DBT_TARGET_TEMPLATE, validate_definition
 from utils import normalize_rows, row_get, sql_escape, parse_variant_array, next_run, format_task_name
 
 _describe_cache = {}
@@ -163,7 +164,7 @@ def verify_dependency_rules(workflow_id):
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]*\.[A-Za-z_][A-Za-z0-9_$]*\.[A-Za-z_][A-Za-z0-9_$]*", procedure):
         raise RuntimeError("KUMO_RULE_VERIFY_PROCEDURE must be a three-part Snowflake procedure name")
     database, schema, _ = procedure.split(".")
-    database_argument = ", %(database)s" if config.ENVIRONMENT else ""
+    database_argument = ", %(database)s"
     with sf.connection(use_warehouse=True, include_context=True, force_service=True) as conn:
         cur = conn.cursor(DictCursor)
         try:
@@ -1139,34 +1140,55 @@ def upstream_workflows_for(workflow_id):
     return upstream
 
 
-def get_engine_state():
+def get_engine_state(refresh=False, raise_on_error=False):
     global _engine_state_cache, _engine_state_cache_monotonic
 
     now = time.monotonic()
-    if _engine_state_cache and now - _engine_state_cache_monotonic < 30:
+    if not refresh and _engine_state_cache and now - _engine_state_cache_monotonic < 30:
         return dict(_engine_state_cache)
 
     def rdict(row):
         return {str(k).upper(): v for k, v in dict(row).items()}
 
     task_name = "TASK_WF_MASTER_DISPATCHER"
-    result = {"task": None, "state": None, "status": "MISSING"}
-    for scope in (f"SCHEMA {config.DB}.{config.SCHEMA}", f"DATABASE {config.DB}"):
-        try:
-            rows = _query(f"SHOW TASKS LIKE '{task_name}' IN {scope}")
-            for row in rows or []:
-                d = rdict(row)
-                if str(d.get("NAME", "")).upper() == task_name:
-                    state = str(d.get("STATE", "")).upper().strip()
-                    result = {"task": str(d.get("NAME", task_name)), "state": state, "status": _engine_status(state)}
-                    _engine_state_cache = dict(result)
-                    _engine_state_cache_monotonic = now
-                    return result
-        except Exception:
-            continue
+    result = {"task": task_name, "taskFqn": f"{config.APP_NAMESPACE}.{task_name}", "state": None, "status": "MISSING"}
+    try:
+        # Keep status and controls scoped to the same configured engine schema.
+        # A database-wide fallback could report another schema's dispatcher.
+        rows = _query(f"SHOW TASKS LIKE '{task_name}' IN SCHEMA {config.APP_NAMESPACE}")
+        for row in rows or []:
+            d = rdict(row)
+            if str(d.get("NAME", "")).upper() == task_name:
+                state = str(d.get("STATE", "")).upper().strip()
+                result.update(state=state, status=_engine_status(state))
+                break
+    except Exception as exc:
+        _engine_state_cache = None
+        if raise_on_error:
+            raise
+        return {**result, "status": "UNKNOWN", "error": str(exc)}
     _engine_state_cache = dict(result)
     _engine_state_cache_monotonic = now
     return result
+
+
+def set_engine_enabled(enabled):
+    """Explicitly resume/suspend only this application's master dispatcher."""
+    global _engine_state_cache, _engine_state_cache_monotonic
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be a boolean")
+    action = "RESUME" if enabled else "SUSPEND"
+    # Even a failed/timed-out request may have reached Snowflake.
+    _engine_state_cache = None
+    _engine_state_cache_monotonic = 0.0
+    _execute(f"ALTER TASK {config.APP_NAMESPACE}.TASK_WF_MASTER_DISPATCHER {action}")
+    try:
+        return get_engine_state(refresh=True, raise_on_error=True)
+    except Exception as exc:
+        raise RuntimeError(
+            f"The engine {action.lower()} command succeeded, but its current state could not be read. "
+            f"Refresh the engine status before trying again: {exc}"
+        ) from exc
 
 
 def _engine_status(state):
@@ -1575,6 +1597,8 @@ def request_run(workflow_id, trigger_source="MANUAL", requested_by=None, skip_ch
     procedure = call SP_WORKFLOW_REQUEST_RUN first, then fallback to queue insert.
     queue = direct insert into WORKFLOW_HISTORY and WORKFLOW_RUN_QUEUE.
     """
+    if dbt_command_override:
+        validate_definition({"dbtCommand": dbt_command_override})
     mode = getattr(config, "KUMO_MANUAL_RUN_MODE", "queue")
     if mode == "procedure" and not skip_children and not dbt_command_override:
         try:
@@ -1725,9 +1749,9 @@ def _workflow_payload_defaults(payload):
         "description": str(payload.get("description") or "").strip(),
         "dbtCommand": str(payload.get("dbtCommand") or "").strip(),
         "sqlCommand": str(payload.get("sqlCommand") or "").strip(),
-        "dbtTarget": str(payload.get("dbtTarget") or "").strip(),
+        "dbtTarget": str(payload.get("dbtTarget") or DBT_TARGET_TEMPLATE).strip(),
         "dbtWorkspace": str(payload.get("dbtWorkspace") or "").strip(),
-        "dbtProjectFqn": str(payload.get("dbtProjectFqn") or "").strip(),
+        "dbtProjectFqn": str(payload.get("dbtProjectFqn") or DBT_PROJECT_TEMPLATE).strip(),
         "scheduleCron": str(payload.get("scheduleCron") or "0 0 * * *").strip(),
         "scheduleTimezone": str(payload.get("scheduleTimezone") or "UTC").strip(),
         "taskEnabled": bool(payload.get("taskEnabled", False)),
@@ -1741,6 +1765,7 @@ def insert_workflow(payload):
     wf_types = describe_table(config.T_WORKFLOWS)
     t_types = describe_table(config.T_TASKS)
     data = _workflow_payload_defaults(payload)
+    validate_definition(data)
     workflow_id = str(uuid.uuid4())
 
     if not data["workflowName"]:
@@ -1788,6 +1813,7 @@ def insert_workflow(payload):
 def update_workflow_detail(workflow_id, payload):
     wf_types = describe_table(config.T_WORKFLOWS)
     data = _workflow_payload_defaults(payload)
+    validate_definition(data)
 
     if not data["workflowName"]:
         raise ValueError("Workflow name is required")
@@ -2231,7 +2257,24 @@ def _short_model_name(model):
     return short[:32]
 
 
-_DBT_PROJECT_FQN_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*){2}$')
+def resolve_workflow_command(definition, run_id=None):
+    """Read environment parameters and resolve a command without executing it."""
+    rows = normalize_rows(_query(
+        f"CALL {config.APP_NAMESPACE}.SP_RESOLVE_WORKFLOW_COMMAND(PARSE_JSON(%(definition)s), %(run_id)s)",
+        {"definition": json.dumps({key: definition.get(key) for key in
+                                  ("workflowType", "jobType", "sqlCommand", "dbtCommand", "dbtProjectFqn", "dbtTarget")}),
+         "run_id": run_id},
+    ))
+    result = next(iter(rows[0].values())) if rows else None
+    if isinstance(result, str):
+        result = json.loads(result)
+    if not isinstance(result, dict):
+        raise ValueError("Could not resolve the workflow command")
+    if not result.get("ok"):
+        raise ValueError(result.get("error", "Could not resolve the workflow command"))
+    return result
+
+
 _ANSI_ESCAPE_RE = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
 
 
@@ -2300,15 +2343,18 @@ def load_dag_preview(workflow_id, dbt_command_override=None):
     if str(workflow.get("WORKFLOW_TYPE") or "").upper() != "DBT":
         raise ValueError("DAG preview is only available for DBT workflows.")
 
-    project_fqn = str(workflow.get("DBT_PROJECT_FQN") or "").strip()
-    if not _DBT_PROJECT_FQN_RE.fullmatch(project_fqn):
-        raise ValueError("The workflow does not have a valid DBT project FQN.")
-    effective_command = str(dbt_command_override or "").strip() or workflow.get("DBT_COMMAND")
-    selectors = _dbt_preview_selection(effective_command)
-    target = str(workflow.get("DBT_TARGET") or "").strip()
+    resolved = resolve_workflow_command({
+        "workflowType": "DBT", "dbtProjectFqn": workflow.get("DBT_PROJECT_FQN"),
+        "dbtTarget": workflow.get("DBT_TARGET"),
+        "dbtCommand": str(dbt_command_override or "").strip() or workflow.get("DBT_COMMAND"),
+    })
+    project_fqn = resolved["dbtProjectFqn"]
+    selectors = _dbt_preview_selection(resolved["dbtCommand"])
+    target = resolved["dbtTarget"]
     args = ["list", "--select", *selectors, "--output", "json"]
     if target:
         args.extend(["--target", target])
+    args.extend(["--vars", json.dumps(resolved["dbtVars"])])
     args_text = shlex.join(args).replace("'", "''")
     sql = f"EXECUTE DBT PROJECT {project_fqn} ARGS = '{args_text}'"
 

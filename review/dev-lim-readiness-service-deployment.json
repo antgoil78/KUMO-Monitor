@@ -1,0 +1,28 @@
+{
+  "service": "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE",
+  "image": "/kumo_shared/monitor_app/monitor_repository/kumo-monitor:dev-lim-readiness-9d685037d60a",
+  "image_tag": "dev-lim-readiness-9d685037d60a",
+  "source_revision": "f22eb05404c7a28889fae3dcd4dc0eb08e5ad80e-dirty",
+  "alter_query_id": "01c7db4e-010b-79ef-0004-a4f2075ef542",
+  "before_spec_digest": "2d7867f20a351d99ee2dfd92c0e31ab2c0d7ad7f6fea85cffc61d29ec88a99ff",
+  "after_spec_digest": "b3f8d7a6af6d18bbb2e4cef7d7dd905aaa961888bae4f1b767774cf5bd0958a5",
+  "status": "RUNNING",
+  "is_upgrading": "false",
+  "only_container_image_changed": true,
+  "workflow_or_loader_called": false,
+  "task_state_changed": false,
+  "readiness_health_http_200": true,
+  "expected_image_digest": "sha256:9cd0c60c51493795182e9ca9559e974b87e430431ceeb21ed0e15d058dd34269",
+  "digest_correction_query_id": "01c7db53-010b-8144-0004-a4f2075eea7a",
+  "containers": [
+    {
+      "container_name": "monitor",
+      "status": "READY",
+      "image_name": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:dev-lim-readiness-9d685037d60a",
+      "image_digest": "sha256:9cd0c60c51493795182e9ca9559e974b87e430431ceeb21ed0e15d058dd34269",
+      "restart_count": 0,
+      "start_time": "2026-10-20T13:07:44Z"
+    }
+  ],
+  "running_digest_matches_published_image": true
+}

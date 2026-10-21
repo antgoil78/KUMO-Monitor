@@ -1,0 +1,519 @@
+{
+  "image": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:dev-readiness-20261020-134830-1bb36d43",
+  "tag": "dev-readiness-20261020-134830-1bb36d43",
+  "source_revision": "f22eb05404c7a28889fae3dcd4dc0eb08e5ad80e-dirty",
+  "source_fingerprint": "1bb36d43c4ddc5379141166cfcb4850409dafd73018ea1cd6c3c8c67b7b301d2",
+  "spcs_image": "/kumo_shared/monitor_app/monitor_repository/kumo-monitor:dev-readiness-20261020-134830-1bb36d43",
+  "digest": "sha256:f65286b5397d8b1f1bf553fc476eafc90a1ed39379ac47e1f985a3ffc7e50d98",
+  "service": "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE",
+  "alter_query_id": "01c7db7e-010b-6f9d-0004-a4f2075fcf4e",
+  "before_spec_digest": "3a86eed1335b930ca996ca3302656814ba1bdd0138b4b026b7579cbb5da1885c",
+  "expected_spec_digest": "3630b250c992a780a74fe5ac714998d3b15a804422c3200daddd249c8b71cbb8",
+  "only_image_and_digest_changed": true,
+  "status": "VERIFIED",
+  "smoke_job": "KUMO_DEV.MONITOR_APP.JOB_READINESS_SMOKE_20261020_135312",
+  "smoke_job_query_id": "01c7db81-010b-6f9d-0004-a4f20760151e",
+  "containers": [
+    {
+      "database_name": "KUMO_DEV",
+      "schema_name": "MONITOR_APP",
+      "service_name": "KUMO_MONITOR_SERVICE",
+      "service_status": "RUNNING",
+      "instance_id": "0",
+      "instance_status": "READY",
+      "container_name": "monitor",
+      "status": "READY",
+      "message": "Running",
+      "image_name": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:dev-readiness-20261020-134830-1bb36d43",
+      "image_digest": "sha256:f65286b5397d8b1f1bf553fc476eafc90a1ed39379ac47e1f985a3ffc7e50d98",
+      "restart_count": 0,
+      "start_time": "2026-10-20T13:51:08Z",
+      "last_exit_code": null,
+      "last_restart_time": null
+    }
+  ],
+  "smoke_job_status": "DONE",
+  "smoke_containers": [
+    {
+      "database_name": "KUMO_DEV",
+      "schema_name": "MONITOR_APP",
+      "service_name": "JOB_READINESS_SMOKE_20261020_135135",
+      "service_status": "FAILED",
+      "instance_id": "0",
+      "instance_status": "FAILED",
+      "container_name": "smoke",
+      "status": "FAILED",
+      "message": "User application error, check container logs",
+      "image_name": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:dev-readiness-20261020-134830-1bb36d43",
+      "image_digest": "sha256:f65286b5397d8b1f1bf553fc476eafc90a1ed39379ac47e1f985a3ffc7e50d98",
+      "restart_count": 0,
+      "start_time": "",
+      "last_exit_code": 1,
+      "last_restart_time": null
+    }
+  ],
+  "previous_smoke_runs": [
+    {
+      "job": "KUMO_DEV.MONITOR_APP.JOB_READINESS_SMOKE_20261020_135135",
+      "status": "FAILED",
+      "results": {
+        "passed": 38,
+        "failed": 1,
+        "checks": [
+          {
+            "name": "GET /api/health",
+            "passed": true,
+            "status": 200,
+            "expected_status": 200,
+            "elapsed_seconds": 0.008
+          },
+          {
+            "name": "DEV service context",
+            "passed": true
+          },
+          {
+            "name": "Published image is running",
+            "passed": true,
+            "image_version": "dev-readiness-20261020-134830-1bb36d43"
+          },
+          {
+            "name": "SPCS OAuth available",
+            "passed": true
+          },
+          {
+            "name": "Batch control readiness selected",
+            "passed": true
+          },
+          {
+            "name": "GET /",
+            "passed": true,
+            "status": 200,
+            "expected_status": 200,
+            "elapsed_seconds": 0.045
+          },
+          {
+            "name": "React bundle referenced",
+            "passed": true
+          },
+          {
+            "name": "GET /assets/index-CZ5OpNri.js",
+            "passed": true,
+            "status": 200,
+            "expected_status": 200,
+            "elapsed_seconds": 0.02
+          },
+          {
+            "name": "Updated readiness UI shipped",
+            "passed": true
+          },
+          {
+            "name": "GET /api/file-ingestion/reload/subject-areas",
+            "passed": true,
+            "status": 200,
+            "expected_status": 200,
+            "elapsed_seconds": 3.82
+          },
+          {
+            "name": "/api/file-ingestion/reload/subject-areas uses live Snowflake",
+            "passed": true
+          },
+          {
+            "name": "PAAR discovered in DEV RAW",
+            "passed": true,
+            "subject_count": 40
+          },
+          {
+            "name": "GET /api/file-ingestion",
+            "passed": true,
+            "status": 200,
+            "expected_status": 200,
+            "elapsed_seconds": 3.832
+          },
+          {
+            "name": "/api/file-ingestion uses live Snowflake",
+            "passed": true
+          },
+          {
+            "name": "PAAR appears in overview",
+            "passed": true
+          },
+          {
+            "name": "GET /api/file-ingestion/PKG_PAAR_1/raw",
+            "passed": true,
+            "status": 200,
+            "expected_status": 200,
+            "elapsed_seconds": 6.837
+          },
+          {
+            "name": "/api/file-ingestion/PKG_PAAR_1/raw uses live Snowflake",
+            "passed": true
+          },
+          {
+            "name": "Accepted PAAR files preserve boundary",
+            "passed": true,
+            "accepted_files": 230,
+            "metadata_files": 1740
+          },
+          {
+            "name": "Registered nonempty payloads agree with batch",
+            "passed": true,
+            "nonempty_files": 8,
+            "data_rows": 29
+          },
+          {
+            "name": "Failed and blocked PAAR files remain unready",
+            "passed": true
+          },
+          {
+            "name": "GET /api/file-ingestion/PKG_PAAR_1/ready",
+            "passed": true,
+            "status": 200,
+            "expected_status": 200,
+            "elapsed_seconds": 6.316
+          },
+          {
+            "name": "/api/file-ingestion/PKG_PAAR_1/ready uses live Snowflake",
+            "passed": true
+          },
+          {
+            "name": "Validation outcomes preserved",
+            "passed": true,
+            "statuses": {
+              "BLOCKED": 150,
+              "STOPPED": 1,
+              "UPDATED": 23
+            }
+          },
+          {
+            "name": "Accepted row metric preserved",
+            "passed": true
+          },
+          {
+            "name": "Actual first stop remains visible",
+            "passed": true
+          },
+          {
+            "name": "GET /api/file-ingestion/PKG_PAAR_1/history",
+            "passed": true,
+            "status": 200,
+            "expected_status": 200,
+            "elapsed_seconds": 2.767
+          },
+          {
+            "name": "/api/file-ingestion/PKG_PAAR_1/history uses live Snowflake",
+            "passed": true
+          },
+          {
+            "name": "Validation history available",
+            "passed": false
+          },
+          {
+            "name": "GET /api/file-ingestion/reload/spcs-smoke-missing-job",
+            "passed": true,
+            "status": 404,
+            "expected_status": 404,
+            "elapsed_seconds": 0.006
+          },
+          {
+            "name": "POST /api/file-ingestion/reload",
+            "passed": true,
+            "status": 400,
+            "expected_status": 400,
+            "elapsed_seconds": 0.008
+          },
+          {
+            "name": "Rejected invalid subject",
+            "passed": true
+          },
+          {
+            "name": "POST /api/file-ingestion/reload",
+            "passed": true,
+            "status": 400,
+            "expected_status": 400,
+            "elapsed_seconds": 0.008
+          },
+          {
+            "name": "Rejected invalid mode",
+            "passed": true
+          },
+          {
+            "name": "POST /api/file-ingestion/reload",
+            "passed": true,
+            "status": 400,
+            "expected_status": 400,
+            "elapsed_seconds": 0.021
+          },
+          {
+            "name": "Rejected missing date pair",
+            "passed": true
+          },
+          {
+            "name": "POST /api/file-ingestion/reload",
+            "passed": true,
+            "status": 400,
+            "expected_status": 400,
+            "elapsed_seconds": 0.009
+          },
+          {
+            "name": "Rejected reversed dates",
+            "passed": true
+          },
+          {
+            "name": "POST /api/file-ingestion/reload",
+            "passed": true,
+            "status": 400,
+            "expected_status": 400,
+            "elapsed_seconds": 0.012
+          },
+          {
+            "name": "Rejected reload without confirmation",
+            "passed": true
+          }
+        ]
+      },
+      "test_correction": "The initial history assertion assumed previous archived runs. Compare with the actual Snowflake archive count instead."
+    }
+  ],
+  "expected_history_rows": 0,
+  "service_settings_preserved": true,
+  "batch_unchanged": true,
+  "sdl_unchanged": true,
+  "watermark_unchanged": true,
+  "task_states_unchanged": true,
+  "paar_raw_counts": {
+    "RAW_ROWS": 4542,
+    "RAW_FILES": 1717
+  },
+  "built_source_files_verified": true,
+  "public_ingress_session_token_check": {
+    "http_status": 500,
+    "application_response_verified": false,
+    "browser_login_verified": false
+  },
+  "spcs_smoke_tests": {
+    "passed": 39,
+    "failed": 0,
+    "checks": [
+      {
+        "name": "GET /api/health",
+        "passed": true,
+        "status": 200,
+        "expected_status": 200,
+        "elapsed_seconds": 0.01
+      },
+      {
+        "name": "DEV service context",
+        "passed": true
+      },
+      {
+        "name": "Published image is running",
+        "passed": true,
+        "image_version": "dev-readiness-20261020-134830-1bb36d43"
+      },
+      {
+        "name": "SPCS OAuth available",
+        "passed": true
+      },
+      {
+        "name": "Batch control readiness selected",
+        "passed": true
+      },
+      {
+        "name": "GET /",
+        "passed": true,
+        "status": 200,
+        "expected_status": 200,
+        "elapsed_seconds": 0.011
+      },
+      {
+        "name": "React bundle referenced",
+        "passed": true
+      },
+      {
+        "name": "GET /assets/index-CZ5OpNri.js",
+        "passed": true,
+        "status": 200,
+        "expected_status": 200,
+        "elapsed_seconds": 0.011
+      },
+      {
+        "name": "Updated readiness UI shipped",
+        "passed": true
+      },
+      {
+        "name": "GET /api/file-ingestion/reload/subject-areas",
+        "passed": true,
+        "status": 200,
+        "expected_status": 200,
+        "elapsed_seconds": 3.994
+      },
+      {
+        "name": "/api/file-ingestion/reload/subject-areas uses live Snowflake",
+        "passed": true
+      },
+      {
+        "name": "PAAR discovered in DEV RAW",
+        "passed": true,
+        "subject_count": 40
+      },
+      {
+        "name": "GET /api/file-ingestion",
+        "passed": true,
+        "status": 200,
+        "expected_status": 200,
+        "elapsed_seconds": 2.992
+      },
+      {
+        "name": "/api/file-ingestion uses live Snowflake",
+        "passed": true
+      },
+      {
+        "name": "PAAR appears in overview",
+        "passed": true
+      },
+      {
+        "name": "GET /api/file-ingestion/PKG_PAAR_1/raw",
+        "passed": true,
+        "status": 200,
+        "expected_status": 200,
+        "elapsed_seconds": 3.748
+      },
+      {
+        "name": "/api/file-ingestion/PKG_PAAR_1/raw uses live Snowflake",
+        "passed": true
+      },
+      {
+        "name": "Accepted PAAR files preserve boundary",
+        "passed": true,
+        "accepted_files": 230,
+        "metadata_files": 1740
+      },
+      {
+        "name": "Registered nonempty payloads agree with batch",
+        "passed": true,
+        "nonempty_files": 8,
+        "data_rows": 29
+      },
+      {
+        "name": "Failed and blocked PAAR files remain unready",
+        "passed": true
+      },
+      {
+        "name": "GET /api/file-ingestion/PKG_PAAR_1/ready",
+        "passed": true,
+        "status": 200,
+        "expected_status": 200,
+        "elapsed_seconds": 6.036
+      },
+      {
+        "name": "/api/file-ingestion/PKG_PAAR_1/ready uses live Snowflake",
+        "passed": true
+      },
+      {
+        "name": "Validation outcomes preserved",
+        "passed": true,
+        "statuses": {
+          "BLOCKED": 150,
+          "STOPPED": 1,
+          "UPDATED": 23
+        }
+      },
+      {
+        "name": "Accepted row metric preserved",
+        "passed": true
+      },
+      {
+        "name": "Actual first stop remains visible",
+        "passed": true
+      },
+      {
+        "name": "GET /api/file-ingestion/PKG_PAAR_1/history",
+        "passed": true,
+        "status": 200,
+        "expected_status": 200,
+        "elapsed_seconds": 3.122
+      },
+      {
+        "name": "/api/file-ingestion/PKG_PAAR_1/history uses live Snowflake",
+        "passed": true
+      },
+      {
+        "name": "Validation history agrees with Snowflake archive",
+        "passed": true,
+        "history_rows": 0,
+        "expected_history_rows": 0
+      },
+      {
+        "name": "GET /api/file-ingestion/reload/spcs-smoke-missing-job",
+        "passed": true,
+        "status": 404,
+        "expected_status": 404,
+        "elapsed_seconds": 0.007
+      },
+      {
+        "name": "POST /api/file-ingestion/reload",
+        "passed": true,
+        "status": 400,
+        "expected_status": 400,
+        "elapsed_seconds": 0.008
+      },
+      {
+        "name": "Rejected invalid subject",
+        "passed": true
+      },
+      {
+        "name": "POST /api/file-ingestion/reload",
+        "passed": true,
+        "status": 400,
+        "expected_status": 400,
+        "elapsed_seconds": 0.006
+      },
+      {
+        "name": "Rejected invalid mode",
+        "passed": true
+      },
+      {
+        "name": "POST /api/file-ingestion/reload",
+        "passed": true,
+        "status": 400,
+        "expected_status": 400,
+        "elapsed_seconds": 0.006
+      },
+      {
+        "name": "Rejected missing date pair",
+        "passed": true
+      },
+      {
+        "name": "POST /api/file-ingestion/reload",
+        "passed": true,
+        "status": 400,
+        "expected_status": 400,
+        "elapsed_seconds": 0.007
+      },
+      {
+        "name": "Rejected reversed dates",
+        "passed": true
+      },
+      {
+        "name": "POST /api/file-ingestion/reload",
+        "passed": true,
+        "status": 400,
+        "expected_status": 400,
+        "elapsed_seconds": 0.008
+      },
+      {
+        "name": "Rejected reload without confirmation",
+        "passed": true
+      }
+    ]
+  },
+  "smoke_job_removed": true,
+  "verified_at_utc": "2026-10-20T13:53:55.936600+00:00",
+  "backend_unit_tests": {
+    "passed": 65,
+    "failed": 0
+  },
+  "frontend_build_passed": true,
+  "running_digest_matches_published_image": true,
+  "load_or_workflow_triggered": false
+}

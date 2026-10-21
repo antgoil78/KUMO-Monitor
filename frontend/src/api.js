@@ -57,6 +57,11 @@ export const api = {
     method: 'PATCH',
     body: JSON.stringify({ seconds })
   }),
+  engineSettings: () => requestJson('/api/settings/engine'),
+  setEngineEnabled: enabled => requestJson('/api/settings/engine', {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled })
+  }),
   session: () => {
     if (!sessionRequest) {
       sessionRequest = requestJson('/api/session').catch(error => {
@@ -107,6 +112,9 @@ export const api = {
     body: JSON.stringify({ triggerSource: 'MANUAL', workflowName, skipChildren, dbtCommandOverride })
   }),
   workflowDetail: (workflowId, options = {}) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`, options),
+  previewWorkflowCommand: definition => requestJson('/api/workflow-command-preview', {
+    method: 'POST', body: JSON.stringify(definition)
+  }),
   updateWorkflow: (workflowId, payload) => requestJson(`/api/workflows/${encodeURIComponent(workflowId)}`, {
     method: 'PATCH',
     body: JSON.stringify(payload)

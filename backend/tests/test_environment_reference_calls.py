@@ -66,6 +66,14 @@ class EnvironmentReferenceCallsTests(unittest.TestCase):
                 for managed in ("SNOWFLAKE_DATABASE:", "SNOWFLAKE_SCHEMA:", "SNOWFLAKE_PASSWORD:", "SNOWFLAKE_ROLE:"):
                     self.assertNotIn(managed, sql)
 
+    def test_service_renderer_accepts_a_separate_parameter_table(self):
+        sql = service.render("TST", "/shared/app/images/monitor:review", "POOL", "WH", "OWNER",
+                             environment_table="CONTROL.CONFIG.TEST_SETTINGS")
+        self.assertIn('KUMO_ENVIRONMENT_TABLE: "CONTROL.CONFIG.TEST_SETTINGS"', sql)
+        with self.assertRaises(ValueError):
+            service.render("TST", "/shared/app/images/monitor:review", "POOL", "WH", "OWNER",
+                           environment_table="CONFIG.TEST_SETTINGS; DROP DATABASE OTHER")
+
     def test_service_renderer_rejects_unknown_environments_and_sql_metacharacters(self):
         with self.assertRaises(ValueError):
             service.render("PRD", "/shared/app/images/monitor:latest", "POOL", "WH", "OWNER")

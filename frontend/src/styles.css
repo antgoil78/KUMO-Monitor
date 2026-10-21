@@ -97,6 +97,12 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .sidebar.collapsed .nav-item { justify-content: center; padding-inline: 0; }
 .sidebar.collapsed .nav-list { gap: 5px; }
 .settings-tabs { margin-bottom: 18px; }
+.settings-engine-card { padding: 22px; }
+.settings-engine-details { display: grid; gap: 14px; margin: 20px 0; }
+.settings-engine-details dt { color: var(--muted); font-size: 12px; margin-bottom: 5px; }
+.settings-engine-details dd { margin: 0; overflow-wrap: anywhere; }
+.settings-engine-note { color: var(--muted); line-height: 1.6; }
+.settings-engine-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 .settings-parameters-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
 .settings-parameters-heading p { margin: 5px 0 0; color: var(--muted); }
 .brand {

@@ -16,15 +16,23 @@ def load_config(**settings):
         return runpy.run_path(str(CONFIG))
 
 
+def environment_rows(**changes):
+    values = dict(DATABASE="KUMO_DEV", MONITOR_APP_SCHEMA="MONITOR_APP", META_SCHEMA="MONITOR_META",
+                  APP_SCHEMA="META", RAW_SCHEMA="RAW_LIM", DBT_SCHEMA="DBT_APP", DBT_PROJECT="KUMO_DEV", DBT_TARGET="kumo_DEV")
+    values.update(changes)
+    return [dict(PARAMETER_KEY=key, PARAMETER_VALUE=value, VALUE_TYPE="STRING", ACTIVE_FL=True, IS_SECRET=False)
+            for key, value in values.items()]
+
+
 class EnvironmentConfigTests(unittest.TestCase):
-    def test_unset_selector_preserves_split_deployment(self):
+    def test_unset_selector_uses_the_current_dev_layout(self):
         config = load_config()
-        self.assertEqual(config["T_WORKFLOWS"], "KUMO_ADMIN.WORKFLOW_MANAGER.WORKFLOWS")
-        self.assertEqual(config["MODEL_PROGRESS_TABLE"], "KUMO_TST.META.MODEL_PROGRESS")
-        self.assertEqual(config["ORCHESTRATION_NAMESPACE"], "KUMO_TST.MONITOR_APP")
-        self.assertEqual(config["LIM_STAGE"], "KUMO_TST.META.AZURE_LIM_STAGE")
-        self.assertEqual(config["LIM_LOAD_PROCEDURE"], "KUMO_TST.META.LOAD_RAW_LIM_FROM_STAGE")
-        self.assertTrue(config["AUTO_RESUME_TASKS"])
+        self.assertEqual(config["T_WORKFLOWS"], "KUMO_DEV.MONITOR_META.WORKFLOWS")
+        self.assertEqual(config["MODEL_PROGRESS_TABLE"], "KUMO_DEV.META.MODEL_PROGRESS")
+        self.assertEqual(config["ORCHESTRATION_NAMESPACE"], "KUMO_DEV.MONITOR_META")
+        self.assertEqual(config["LIM_STAGE"], "KUMO_DEV.META.AZURE_LIM_STAGE")
+        self.assertEqual(config["LIM_LOAD_PROCEDURE"], "KUMO_DEV.MONITOR_META.LOAD_RAW_LIM_FROM_STAGE")
+        self.assertFalse(config["AUTO_RESUME_TASKS"])
 
     def test_each_environment_routes_all_application_objects_to_its_database(self):
         for environment in ("DEV", "TST", " dev "):
@@ -44,6 +52,7 @@ class EnvironmentConfigTests(unittest.TestCase):
                 self.assertEqual(config["RULE_VERIFY_PROCEDURE"], database + ".MONITOR_APP.SP_RULE_BASED_WORKFLOW_REQUEST_RUN")
                 self.assertFalse(config["AUTO_RESUME_TASKS"])
                 self.assertEqual(config["LIM_LOAD_PROCEDURE"], database + ".MONITOR_META.LOAD_RAW_LIM_FROM_STAGE")
+                self.assertEqual(config["LIM_READINESS_SOURCE"], "BATCH_CONTROL")
                 for key, value in config.items():
                     if key.startswith("T_") or key.endswith(("_TABLE", "_PROCEDURE", "_FQN")) or key == "LIM_STAGE":
                         self.assertTrue(value.startswith(database + "."), (key, value))
@@ -58,40 +67,52 @@ class EnvironmentConfigTests(unittest.TestCase):
         self.assertEqual(config["ORCHESTRATION_SCHEMA"], "MONITOR_META")
         self.assertFalse(config["AUTO_RESUME_TASKS"])
 
-    def test_conflicting_database_and_object_overrides_fail_at_startup(self):
-        settings = {
-            "KUMO_DB": "KUMO_ADMIN",
-            "SNOWFLAKE_DATABASE": "KUMO_TST",
-            "KUMO_LIM_DATABASE": "KUMO_TST",
-            "KUMO_MODEL_PROGRESS_TABLE": "KUMO_TST.META.MODEL_PROGRESS",
-            "KUMO_TEST_PROGRESS_TABLE": "KUMO_TST.META.TEST_PROGRESS",
-            "KUMO_RUN_LOG_TABLE": "KUMO_TST.META.RUN_LOG",
-            "KUMO_WORKFLOW_DEP_RULE_TABLE": "KUMO_TST.META.WORKFLOW_DEP_RULE",
-            "KUMO_MODEL_STATUS_TABLE": "KUMO_TST.META.MODEL_STATUS",
-            "KUMO_WORKFLOW_STATUS_TABLE": "KUMO_TST.META.WORKFLOW_STATUS",
-            "KUMO_RULE_VERIFY_PROCEDURE": "KUMO_ADMIN.WORKFLOW_MANAGER.SP_RULE_BASED_WORKFLOW_REQUEST_RUN",
-            "KUMO_LIM_STAGE": "KUMO_TST.META.AZURE_LIM_STAGE",
-            "KUMO_LIM_LOAD_PROCEDURE": "KUMO_TST.META.LOAD_RAW_LIM_FROM_STAGE",
-            "KUMO_PROGRESS_TABLE": "KUMO_TST.META.MODEL_PROGRESS",
-        }
-        for key, value in settings.items():
-            with self.subTest(setting=key), self.assertRaisesRegex(ValueError, key):
-                load_config(KUMO_ENV="DEV", **{key: value})
+    def test_parameter_table_can_live_outside_the_monitored_database(self):
+        settings = load_config(KUMO_ENV="DEV", KUMO_ENVIRONMENT_TABLE="CONTROL.CONFIG.ENV_SETTINGS")
+        rows = environment_rows(DATABASE="ANALYTICS_TEST", MONITOR_APP_SCHEMA="ENGINE", META_SCHEMA="RUNTIME",
+                                APP_SCHEMA="APPDATA", RAW_SCHEMA="LANDING", DBT_SCHEMA="PROJECTS",
+                                DBT_PROJECT="PROJECT_TEST", DBT_TARGET="MixedCaseTarget")
+        with patch.dict(os.environ, {}, clear=True):
+            settings["apply_environment"](rows)
+        settings = settings["apply_environment"].__globals__
+        self.assertEqual(settings["T_APPLICATION_PARAMETERS"], "CONTROL.CONFIG.ENV_SETTINGS")
+        self.assertEqual(settings["APP_NAMESPACE"], "ANALYTICS_TEST.ENGINE")
+        self.assertEqual(settings["T_HISTORY"], "ANALYTICS_TEST.RUNTIME.WORKFLOW_HISTORY")
+        self.assertEqual(settings["T_ORCHESTRATION_JOB"], "ANALYTICS_TEST.RUNTIME.JOB")
+        self.assertEqual(settings["MODEL_PROGRESS_TABLE"], "ANALYTICS_TEST.APPDATA.MODEL_PROGRESS")
+        self.assertEqual(settings["LIM_STAGE"], "ANALYTICS_TEST.APPDATA.AZURE_LIM_STAGE")
+        self.assertEqual(settings["RAW_NAMESPACE"], "ANALYTICS_TEST.LANDING")
+        self.assertEqual(settings["DBT_TARGET"], "MixedCaseTarget")
+        self.assertEqual(settings["SNOWFLAKE_DATABASE"], "ANALYTICS_TEST")
 
-    def test_schema_and_same_environment_object_overrides_remain_available(self):
-        config = load_config(KUMO_ENV="DEV", KUMO_SCHEMA="workflow_monitor", KUMO_METADATA_SCHEMA="custom_metadata", KUMO_ORCHESTRATION_SCHEMA="catalog", KUMO_RUN_LOG_TABLE="KUMO_DEV.CUSTOM.RUN_LOG")
-        self.assertEqual(config["APP_NAMESPACE"], "KUMO_DEV.WORKFLOW_MONITOR")
-        self.assertEqual(config["T_HISTORY"], "KUMO_DEV.CUSTOM_METADATA.WORKFLOW_HISTORY")
-        self.assertEqual(config["T_ORCHESTRATION_JOB"], "KUMO_DEV.CATALOG.JOB")
-        self.assertEqual(config["RUN_LOG_TABLE"], "KUMO_DEV.CUSTOM.RUN_LOG")
+    def test_invalid_or_incomplete_parameters_are_rejected(self):
+        for bad in (None, "", "META; DROP DATABASE OTHER", "two.parts"):
+            settings = load_config()
+            with self.subTest(value=bad), self.assertRaisesRegex(ValueError, "RAW_SCHEMA"):
+                settings["apply_environment"](environment_rows(RAW_SCHEMA=bad))
+        for field, value in (("ACTIVE_FL", False), ("IS_SECRET", True), ("VALUE_TYPE", "INTEGER")):
+            rows = environment_rows()
+            rows[0][field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "DATABASE"):
+                load_config()["apply_environment"](rows)
+        rows = environment_rows()
+        with self.assertRaisesRegex(ValueError, "Duplicate"):
+            load_config()["apply_environment"](rows + rows[:1])
+        with self.assertRaisesRegex(ValueError, "DBT_TARGET"):
+            load_config()["apply_environment"](rows[:-1])
 
-    def test_invalid_selector_and_identifiers_are_rejected(self):
-        for settings in (
-            {"KUMO_ENV": "PROD"},
-            {"KUMO_ENV": "SHARED"},
-            {"KUMO_ENV": "DEV", "KUMO_SCHEMA": "PUBLIC; DROP DATABASE KUMO_TST"},
-            {"KUMO_ENV": "DEV", "KUMO_RUN_LOG_TABLE": "META.RUN_LOG"},
-        ):
+    def test_old_routing_overrides_cannot_bypass_the_parameter_store(self):
+        for setting, value in (("KUMO_DB", "ANOTHER_DB"), ("KUMO_SCHEMA", "OTHER_ENGINE"),
+                               ("KUMO_RUN_LOG_TABLE", "KUMO_DEV.OTHER.RUN_LOG")):
+            with patch.dict(os.environ, {setting: value}, clear=True):
+                settings = runpy.run_path(str(CONFIG))
+                with self.subTest(setting=setting), self.assertRaisesRegex(ValueError, setting):
+                    settings["apply_environment"](environment_rows())
+
+    def test_invalid_selector_and_bootstrap_path_are_rejected(self):
+        for settings in ({"KUMO_ENV": "SHARED"},
+                         {"KUMO_ENVIRONMENT_TABLE": "CONFIG.PARAMETERS"},
+                         {"KUMO_ENVIRONMENT_TABLE": "DB.SCHEMA.TABLE; DROP DATABASE OTHER"}):
             with self.subTest(settings=settings), self.assertRaises(ValueError):
                 load_config(**settings)
 
@@ -102,9 +123,42 @@ class EnvironmentConfigTests(unittest.TestCase):
                 self.assertEqual(settings["DEPLOYMENT_ENVIRONMENT"], label)
                 self.assertEqual(settings["T_WORKFLOWS"], "KUMO_TST.MONITOR_META.WORKFLOWS")
         self.assertEqual(load_config(KUMO_ENV="DEV", KUMO_DEPLOYMENT_ENV="")["DEPLOYMENT_ENVIRONMENT"], "DEV")
-        self.assertEqual(load_config()["DEPLOYMENT_ENVIRONMENT"], "")
+        self.assertEqual(load_config()["DEPLOYMENT_ENVIRONMENT"], "DEV")
         with self.assertRaisesRegex(ValueError, "KUMO_DEPLOYMENT_ENV"):
             load_config(KUMO_ENV="DEV", KUMO_DEPLOYMENT_ENV="PRODD")
+
+    def test_live_startup_hydrates_routing_before_importing_blueprints(self):
+        script = """
+import json, os
+import dotenv
+dotenv.load_dotenv = lambda: None
+import snowflake_client as sf
+sf.is_configured = lambda: True
+rows = json.loads(os.environ['TEST_ENVIRONMENT_ROWS'])
+queries = []
+def query(sql, **kwargs):
+    queries.append((sql, kwargs))
+    return rows
+sf.query = query
+import app, batch_control, file_ingestion
+assert 'CONTROL.CONFIG.SETTINGS' in queries[0][0]
+assert queries[0][1]['include_context'] is False
+assert batch_control.TABLE == 'ANOTHER_DB.APPDATA.LIM_BATCH_CTRL'
+assert file_ingestion.LIM_DATABASE == 'ANOTHER_DB'
+assert file_ingestion.LIM_STAGE == 'ANOTHER_DB.APPDATA.AZURE_LIM_STAGE'
+assert file_ingestion.RAW_LIM_META_TABLE == 'ANOTHER_DB.RUNTIME.RAW_LIM_META'
+assert app.config.APP_NAMESPACE == 'ANOTHER_DB.ENGINE'
+assert app.config.RAW_NAMESPACE == 'ANOTHER_DB.LANDING'
+"""
+        environment = {key: value for key, value in os.environ.items()
+                       if not key.startswith(("KUMO_", "SNOWFLAKE_", "PYTHON_DOTENV_"))}
+        environment.update(PYTHONPATH=str(CONFIG.parent), KUMO_ENVIRONMENT_TABLE="CONTROL.CONFIG.SETTINGS",
+                           TEST_ENVIRONMENT_ROWS=__import__('json').dumps(environment_rows(
+                               DATABASE="ANOTHER_DB", MONITOR_APP_SCHEMA="ENGINE", META_SCHEMA="RUNTIME",
+                               APP_SCHEMA="APPDATA", RAW_SCHEMA="LANDING")))
+        result = subprocess.run([sys.executable, "-c", script], cwd=CONFIG.parent, env=environment,
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_dotenv_is_loaded_before_blueprints_and_health_reports_selected_context(self):
         # A fresh interpreter catches import-order failures hidden by cached

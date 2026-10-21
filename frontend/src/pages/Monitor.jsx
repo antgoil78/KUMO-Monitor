@@ -5,6 +5,7 @@ import dagre from '@dagrejs/dagre'
 import { api } from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
 import LoadingState from '../components/LoadingState.jsx'
+import CommandPreview from '../components/CommandPreview.jsx'
 import StatusBadge, { isWorkflowBusy, statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import { elapsedDuration, formatDateTime } from '../utils/time.js'
@@ -804,8 +805,9 @@ function EditModal({ workflowId, onClose, onSaved, notify }) {
               </div>
             </>
           ) : (
-            <div className="form-field"><label>SQL Command</label><textarea rows="5" value={detail.sqlCommand || ''} onChange={e => patch('sqlCommand', e.target.value)} /><small className="form-help">Use <code>#[run_id]#</code> where the current workflow run ID should be inserted.</small></div>
+            <div className="form-field"><label>SQL Command</label><textarea rows="5" value={detail.sqlCommand || ''} onChange={e => patch('sqlCommand', e.target.value)} /><small className="form-help">Use environment variables such as <code>[DATABASE]</code> and quote string values, for example <code>'[run_id]'</code>.</small></div>
           )}
+          <CommandPreview definition={detail} />
           <div className="form-grid two">
             <div className="form-field"><label>Cron</label><input value={detail.scheduleCron || ''} onChange={e => patch('scheduleCron', e.target.value)} /></div>
             <div className="form-field"><label>Timezone</label><input value={detail.scheduleTimezone || 'UTC'} onChange={e => patch('scheduleTimezone', e.target.value)} /></div>
@@ -1109,6 +1111,7 @@ function RunWorkflowModal({ workflow, pendingRun, onClose, onRun }) {
         ) : (
           <div className="form-field"><label>SQL command</label><textarea rows="7" value={detail.sqlCommand || ''} readOnly /><small>One-time SQL overrides are not enabled yet.</small></div>
         )}
+        <CommandPreview definition={detail} />
         <label className="workflow-run-only-option">
           <input type="checkbox" checked={runOnlyThisWorkflow} onChange={event => setRunOnlyThisWorkflow(event.target.checked)} />
           <span><strong>Run only this workflow</strong><small>Skip both ON_SUCCESS and ON_FAIL child workflows for this manual run.</small></span>

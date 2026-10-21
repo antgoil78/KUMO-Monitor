@@ -4,6 +4,7 @@ import { api } from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
 import { formatDateTimeSeconds } from '../utils/time.js'
 import EnvironmentSettings from './EnvironmentSettings.jsx'
+import EngineSettings from './EngineSettings.jsx'
 
 const backendIntervals = [5, 10, 30, 60, 120, 300]
 
@@ -86,10 +87,11 @@ export default function Settings({ initialSection = 'cache' }) {
 
       <div className="parameter-tabs settings-tabs" role="tablist">
         <button type="button" role="tab" aria-selected={section === 'cache'} onClick={() => setSection('cache')}>Cache</button>
+        <button type="button" role="tab" aria-selected={section === 'engine'} onClick={() => setSection('engine')}>Engine</button>
         <button type="button" role="tab" aria-selected={section === 'parameters'} onClick={() => setSection('parameters')}>Environment &amp; system</button>
       </div>
 
-      {section === 'parameters' ? <EnvironmentSettings embedded /> : <>
+      {section === 'parameters' ? <EnvironmentSettings embedded /> : section === 'engine' ? <EngineSettings /> : <>
 
       {error && <div className="alert error">{error}</div>}
 

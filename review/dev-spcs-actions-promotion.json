@@ -1,0 +1,52 @@
+{
+  "service": "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE",
+  "image_tag": "build-216-1-0ce9611cf217",
+  "expected_image_digest": "sha256:59145b48dc4dfebcf8c2042f556d0f88199fdbcb200bb7ce3b7f8feb6a42912c",
+  "source_commit": "0ce9611cf2175b68013b14d00a8d03113cf3fbd3",
+  "github_actions_run": "https://github.com/antgoil78/KUMO-Monitor/actions/runs/39435105259",
+  "requested_by_user": true,
+  "started_at_utc": "2026-10-20T14:14:26.586398+00:00",
+  "before_spec_digest": "3630b250c992a780a74fe5ac714998d3b15a804422c3200daddd249c8b71cbb8",
+  "only_image_and_digest_changed": true,
+  "status": "VERIFIED",
+  "script_query_ids": [
+    "01c7db96-010b-79ef-0004-a4f2076095fa",
+    "01c7db96-010b-79ef-0004-a4f2076095fe",
+    "01c7db96-010b-79ef-0004-a4f207609612",
+    "01c7db96-010b-6f9d-0004-a4f207608982"
+  ],
+  "containers": [
+    {
+      "database_name": "KUMO_DEV",
+      "schema_name": "MONITOR_APP",
+      "service_name": "KUMO_MONITOR_SERVICE",
+      "service_status": "RUNNING",
+      "instance_id": "0",
+      "instance_status": "READY",
+      "container_name": "monitor",
+      "status": "READY",
+      "message": "Running",
+      "image_name": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-216-1-0ce9611cf217",
+      "image_digest": "sha256:59145b48dc4dfebcf8c2042f556d0f88199fdbcb200bb7ce3b7f8feb6a42912c",
+      "restart_count": 0,
+      "start_time": "2026-10-20T14:15:13Z",
+      "last_exit_code": null,
+      "last_restart_time": null
+    }
+  ],
+  "service_status": "RUNNING",
+  "is_upgrading": "false",
+  "verified_at_utc": "2026-10-20T14:15:24.758120+00:00",
+  "running_digest_matches_published_image": true,
+  "service_settings_preserved": true,
+  "endpoints": [
+    {
+      "name": "kumo-monitor-dev-ui",
+      "port": 5000,
+      "port_range": null,
+      "protocol": "HTTP",
+      "is_public": "true",
+      "ingress_url": "mnztue-vymkbmw-ov24823.snowflakecomputing.app"
+    }
+  ]
+}

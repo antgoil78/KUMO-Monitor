@@ -1,6 +1,0 @@
--- Source: KUMO_ADMIN.WORKFLOW_MANAGER.TASK_DUMMY_STREAM
--- Refresh: python snowflake/export_ddl.py
-USE DATABASE "KUMO_ADMIN";
-USE SCHEMA "KUMO_ADMIN"."WORKFLOW_MANAGER";
-
-create or replace stream KUMO_ADMIN.WORKFLOW_MANAGER.TASK_DUMMY_STREAM on table TASK_DUMMY append_only = true;
