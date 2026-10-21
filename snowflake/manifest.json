@@ -1,5 +1,5 @@
 {
-  "exported_at": "2026-10-21T12:07:46+02:00",
+  "exported_at": "2026-10-21T15:02:35+02:00",
   "source": {
     "ACCOUNT_NAME": "OV24823",
     "ROLE_NAME": "KUMO_ADMIN"
@@ -11,7 +11,7 @@
   "counts": {
     "PROCEDURE": 18,
     "STREAM": 1,
-    "TABLE": 21,
+    "TABLE": 22,
     "TASK": 1
   },
   "objects": [
@@ -224,6 +224,11 @@
       "file": "ddl/KUMO_DEV/MONITOR_META/tables/_SET_READY_LOG.sql"
     },
     {
+      "type": "TABLE",
+      "name": "KUMO_DEV.MONITOR_META._TMP_SET_READY_LOG",
+      "file": "ddl/KUMO_DEV/MONITOR_META/tables/_TMP_SET_READY_LOG.sql"
+    },
+    {
       "type": "STREAM",
       "name": "KUMO_DEV.MONITOR_META.WORKFLOW_EXECUTION_QUEUE_STREAM",
       "file": "ddl/KUMO_DEV/MONITOR_META/streams/WORKFLOW_EXECUTION_QUEUE_STREAM.sql"
@@ -260,6 +265,7 @@
     "ddl/KUMO_DEV/MONITOR_META/tables/WORKFLOW_RUN_QUEUE.sql",
     "ddl/KUMO_DEV/MONITOR_META/tables/WORKFLOW_TMP_TASKS.sql",
     "ddl/KUMO_DEV/MONITOR_META/tables/_SET_READY_LOG.sql",
+    "ddl/KUMO_DEV/MONITOR_META/tables/_TMP_SET_READY_LOG.sql",
     "ddl/KUMO_DEV/MONITOR_META/tables/WORKFLOW_DEPENDENCY.sql",
     "ddl/KUMO_DEV/MONITOR_META/tables/WORKFLOW_HISTORY.sql",
     "ddl/KUMO_DEV/MONITOR_META/tables/WORKFLOW_JOB.sql",

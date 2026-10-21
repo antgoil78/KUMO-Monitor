@@ -1,0 +1,68 @@
+{
+  "service": "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE",
+  "image_tag": "build-217-1-0004ec2c3422",
+  "expected_image_digest": "sha256:9caad95504cedcb918eef1b332f9ae36d78914390769e0ed85f045f0dc787042",
+  "source_commit": "0004ec2c342277ac49b12fbb63b61a609e582cd4",
+  "github_actions_run": "https://github.com/antgoil78/KUMO-Monitor/actions/runs/39585655144",
+  "requested_by_user": true,
+  "started_at_utc": "2026-10-21T10:42:05.530741+00:00",
+  "status": "VERIFIED",
+  "before_spec_digest": "c0f30a029f67e215ac968701faf642d986aecaf2a107a221e0fdbe9b52570161",
+  "environment_table": "KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS",
+  "only_image_digest_and_bootstrap_changed": true,
+  "alter_query_id": "01c7e062-010b-830c-0004-a4f2076ad172",
+  "containers": [
+    {
+      "database_name": "KUMO_DEV",
+      "schema_name": "MONITOR_APP",
+      "service_name": "KUMO_MONITOR_SERVICE",
+      "service_status": "RUNNING",
+      "instance_id": "0",
+      "instance_status": "READY",
+      "container_name": "monitor",
+      "status": "READY",
+      "message": "Running",
+      "image_name": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-217-1-0004ec2c3422",
+      "image_digest": "sha256:9caad95504cedcb918eef1b332f9ae36d78914390769e0ed85f045f0dc787042",
+      "restart_count": 0,
+      "start_time": "2026-10-21T10:42:52Z",
+      "last_exit_code": null,
+      "last_restart_time": null
+    }
+  ],
+  "service_status": "RUNNING",
+  "is_upgrading": "false",
+  "running_digest_matches_published_image": true,
+  "service_settings_verified": true,
+  "verified_at_utc": "2026-10-21T10:43:02.972476+00:00",
+  "endpoints": [
+    {
+      "name": "kumo-monitor-dev-ui",
+      "port": 5000,
+      "port_range": null,
+      "protocol": "HTTP",
+      "is_public": "true",
+      "ingress_url": "mnztue-vymkbmw-ov24823.snowflakecomputing.app"
+    }
+  ],
+  "http_checks": {
+    "ok": true,
+    "imageVersion": "build-217-1-0004ec2c3422",
+    "buildSha": "0004ec2c342277ac49b12fbb63b61a609e582cd4",
+    "environmentTable": "KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS",
+    "db": "KUMO_DEV",
+    "checks": [
+      {
+        "type": "SQL",
+        "passed": true
+      },
+      {
+        "type": "DBT",
+        "passed": true
+      }
+    ],
+    "workflow_commands_executed": false
+  },
+  "smoke_job_query_id": "01c7e063-010b-830e-0004-a4f2076af552",
+  "http_verified_at_utc": "2026-10-21T10:43:50.731160+00:00"
+}

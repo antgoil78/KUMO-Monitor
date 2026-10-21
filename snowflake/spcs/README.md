@@ -120,6 +120,28 @@ the update script to apply a new specification. Neither script targets the
 existing `KUMO_ADMIN.KUMO_MONITOR.KUMO_MONITOR_SERVICE` instance. The update
 script does not move a service between compute pools.
 
+## TST worksheet scripts
+
+[`create_tst_service.sql`](create_tst_service.sql) creates
+`KUMO_TST.MONITOR_APP.KUMO_MONITOR_SERVICE`.
+[`alter_tst_service.sql`](alter_tst_service.sql) updates that service for later
+releases. Both are prepared SQL and have not been executed. Replace
+`REPLACE_WITH_PUBLISHED_BUILD_TAG` in the script with the GitHub Actions tag for
+the app build containing the readiness-log routing correction. Use the same
+published app image in DEV and TST; build 217 predates that correction.
+
+The scripts use `KUMO_ADMIN`, `KUMO_SHARED_MONITOR_POOL`, the shared image
+repository and `KUMO_ELT_GEN_1`. They bind
+`KUMO_ENVIRONMENT_TABLE=KUMO_TST.MONITOR_META.APPLICATION_PARAMETERS`, label
+the app TST/TEST, and expose `kumo-monitor-tst-ui`. Container resources match
+the current DEV alter script, with 7200-second timeouts and automatic task
+resume disabled. Confirm the shared pool is `IDLE` or `ACTIVE` before creation;
+the existing shared infrastructure/role setup is reused. The create script
+leaves an existing service unchanged; use the alter script to update it.
+The alter script replaces the specification and selects the image by tag,
+without carrying over a previous digest pin. Neither script resumes workflow
+tasks. Both finish with service status, container and endpoint checks.
+
 ## Shared runtime infrastructure
 
 The new DEV and TST services share these resources within their account:

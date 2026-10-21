@@ -85,7 +85,8 @@ use disposable synthetic fixtures; they are not routine checks or backups.
 
 The DEV readiness implementation registers nonempty payload files in
 `META.LIM_BATCH_CTRL` and records validated empty deliveries in the current and
-historical readiness logs. It does not require RAW readiness flag columns.
+historical readiness logs, both in `[DATABASE].[META_SCHEMA]`
+(`MONITOR_META` in DEV/TST). It does not require RAW readiness flag columns.
 The loader and readiness procedures resolve their database and schemas from the
 shared environment parameters. An explicit database argument must match the
 configured engine environment; omitted arguments use that environment.
@@ -201,3 +202,55 @@ DEV workflow/job configuration in one transaction. It preserves IDs and schedule
 and never executes the returned workflow commands. Only the three changed DDL
 objects are read back. Run this conversion before the environment-routing migration; that later migration
 updates the resolver/dispatchers to the shared environment helper. Historical workflow runs/logs are preserved as recorded.
+
+## Readiness log location correction
+
+`backend/migrations/move_ready_log_to_monitor_meta.py --apply` moves the existing
+DEV `_TMP_SET_READY_LOG` table from `META` into `MONITOR_META`, preserving its
+rows and grants, and updates only the three procedures that reference it.
+Both current and historical readiness logs use `META_SCHEMA` in the application.
+The migration verifies the data fingerprint, preserves the master task state,
+and refreshes only the moved table and changed procedures in the DDL copy.
+
+A read-only compatibility view at `KUMO_DEV.META._TMP_SET_READY_LOG` lets the
+previously deployed app continue reading until the corrected image is released
+through Git. Remove that view after the deployed service uses the new routing.
+The focused check `python backend/tests/live_ready_log_schema.py` verifies
+refresh, current logging and archival using separate disposable data and monitor
+schemas. The compatibility view is not part of the maintained app schema DDL.
+The TST provisioning migration also relocates the earlier, empty TST `META`
+table into `MONITOR_META`.
+
+## TST monitor schemas
+
+`backend/migrations/provision_tst_monitor_schemas.py` provisions
+`KUMO_TST.MONITOR_APP` and `KUMO_TST.MONITOR_META` from the maintained DEV
+definitions. Run it without arguments for a read-only preflight, or add
+`--apply` to create missing objects. Existing definitions must match; the script
+does not replace them or copy DEV configuration/data.
+
+Provisioning completed with 22 tables, 18 procedures, one queue stream and one
+master dispatcher. The eight TST environment parameters are stored in
+`KUMO_TST.MONITOR_META.APPLICATION_PARAMETERS`. SQL/dbt command resolution and
+TST foreign-key/stream bindings were verified. The master remains suspended;
+the TST service is a separate setup step.
+
+Use an app build containing the readiness-log routing correction before starting
+the TST service. Set its `KUMO_ENVIRONMENT_TABLE` to the TST parameter-table path.
+TST does not need a separate DDL snapshot: the DEV definitions and this migration
+remain the source for both environments.
+
+`backend/migrations/copy_dev_workflows_to_tst.py --apply` copies the current DEV
+workflow containers, jobs, assignments, dependencies, engine definitions,
+schedule rows, notifications and email groups into the TST monitor metadata.
+Run without `--apply` for a read-only preflight. Commands, IDs, flags, timestamps
+and notification settings are preserved as stored in DEV. TST environment
+parameters are retained; run history, queue entries and generated tasks are not
+copied. The script checks command resolution using TST parameters, refuses to
+overwrite differing populated tables, and verifies row counts/fingerprints in
+one transaction. It never resumes the master or creates native schedulers.
+
+The 38 `RAW_LIM_PKG_GROUP_SOURCE` configuration rows were also copied unchanged
+from DEV into TST and verified by count and fingerprint. All 12 active subjects
+have their required TST RAW tables. `RAW_LIM_META` and readiness logs are derived
+from TST loads/refreshes rather than copied from DEV.

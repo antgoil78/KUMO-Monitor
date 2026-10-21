@@ -47,7 +47,7 @@ class EnvironmentConfigTests(unittest.TestCase):
                 self.assertEqual(config["T_HISTORY"], database + ".MONITOR_META.WORKFLOW_HISTORY")
                 self.assertEqual(config["T_ORCHESTRATION_JOB"], database + ".MONITOR_META.JOB")
                 self.assertEqual(config["RAW_LIM_META_TABLE"], database + ".MONITOR_META.RAW_LIM_META")
-                self.assertEqual(config["SET_READY_LATEST_TABLE"], database + ".META._TMP_SET_READY_LOG")
+                self.assertEqual(config["SET_READY_LATEST_TABLE"], database + ".MONITOR_META._TMP_SET_READY_LOG")
                 self.assertEqual(config["SET_READY_HISTORY_TABLE"], database + ".MONITOR_META._SET_READY_LOG")
                 self.assertEqual(config["RULE_VERIFY_PROCEDURE"], database + ".MONITOR_APP.SP_RULE_BASED_WORKFLOW_REQUEST_RUN")
                 self.assertFalse(config["AUTO_RESUME_TASKS"])
@@ -82,6 +82,8 @@ class EnvironmentConfigTests(unittest.TestCase):
         self.assertEqual(settings["MODEL_PROGRESS_TABLE"], "ANALYTICS_TEST.APPDATA.MODEL_PROGRESS")
         self.assertEqual(settings["LIM_STAGE"], "ANALYTICS_TEST.APPDATA.AZURE_LIM_STAGE")
         self.assertEqual(settings["RAW_NAMESPACE"], "ANALYTICS_TEST.LANDING")
+        self.assertEqual(settings["SET_READY_LATEST_TABLE"], "ANALYTICS_TEST.RUNTIME._TMP_SET_READY_LOG")
+        self.assertEqual(settings["SET_READY_HISTORY_TABLE"], "ANALYTICS_TEST.RUNTIME._SET_READY_LOG")
         self.assertEqual(settings["DBT_TARGET"], "MixedCaseTarget")
         self.assertEqual(settings["SNOWFLAKE_DATABASE"], "ANALYTICS_TEST")
 
