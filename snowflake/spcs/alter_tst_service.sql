@@ -1,6 +1,6 @@
 -- Prepared deployment SQL; not executed automatically.
--- Replace REPLACE_WITH_PUBLISHED_BUILD_TAG with the GitHub Actions image tag
--- containing the MONITOR_META readiness-log routing correction before running.
+-- GitHub Actions image: build-218-1-df9704efa34c (readiness-log routing correction).
+-- Build: https://github.com/antgoil78/KUMO-Monitor/actions/runs/39609959753
 -- Use the same published app image for DEV and TST.
 -- Updates the TST service created by create_tst_service.sql.
 -- The specification intentionally selects the image by tag without a digest;
@@ -11,7 +11,7 @@ ALTER SERVICE KUMO_TST.MONITOR_APP.KUMO_MONITOR_SERVICE FROM SPECIFICATION $$
 spec:
   containers:
     - name: monitor
-      image: /kumo_shared/monitor_app/monitor_repository/kumo-monitor:REPLACE_WITH_PUBLISHED_BUILD_TAG
+      image: /kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-218-1-df9704efa34c
       env:
         KUMO_ENVIRONMENT_TABLE: "KUMO_TST.MONITOR_META.APPLICATION_PARAMETERS"
         KUMO_ENV: "TST"

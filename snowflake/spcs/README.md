@@ -125,10 +125,13 @@ script does not move a service between compute pools.
 [`create_tst_service.sql`](create_tst_service.sql) creates
 `KUMO_TST.MONITOR_APP.KUMO_MONITOR_SERVICE`.
 [`alter_tst_service.sql`](alter_tst_service.sql) updates that service for later
-releases. Both are prepared SQL and have not been executed. Replace
-`REPLACE_WITH_PUBLISHED_BUILD_TAG` in the script with the GitHub Actions tag for
-the app build containing the readiness-log routing correction. Use the same
-published app image in DEV and TST; build 217 predates that correction.
+releases. The create script was executed on 21 October 2026 using
+`build-218-1-df9704efa34c`, published by
+[GitHub Actions run 39609959753](https://github.com/antgoil78/KUMO-Monitor/actions/runs/39609959753).
+Both scripts select that build, which includes the readiness-log routing
+correction. Update the image tag when choosing another published release.
+Use the same app build for DEV and TST; the existing DEV service remains on its
+previously selected version until explicitly updated.
 
 The scripts use `KUMO_ADMIN`, `KUMO_SHARED_MONITOR_POOL`, the shared image
 repository and `KUMO_ELT_GEN_1`. They bind
