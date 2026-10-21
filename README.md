@@ -83,6 +83,17 @@ Application-created scheduler tasks stay suspended in DEV/TST unless
 persistent master dispatcher. Generated execution tasks inside procedures
 retain their own lifecycle.
 
+Use **Settings → Engine** to inspect, resume or suspend the persistent
+`TASK_WF_MASTER_DISPATCHER` in the configured engine namespace. Resuming allows
+queued runs to dispatch, including existing requests. Suspending pauses new
+dispatches while work already running can finish; individual workflow schedules
+are managed separately. Both actions use the app's service context and are
+audited against the browser user. The service role needs OWNERSHIP or OPERATE
+on the task; Snowflake also checks the task owner's execution privileges when
+resuming. Status refreshes every 15 seconds while the Engine tab is open.
+Demo mode simulates the controls; an unconfigured Snowflake connection disables
+them. App startup never resumes the master task automatically.
+
 DEV definitions and workflow configuration have been copied: 27 engine
 workflows, 29 catalog workflows and 44 jobs, plus their dependent configuration.
 Executable references use DEV, including `KUMO_DEV.DBT_APP.KUMO_DEV` and its

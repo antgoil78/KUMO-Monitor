@@ -1139,34 +1139,55 @@ def upstream_workflows_for(workflow_id):
     return upstream
 
 
-def get_engine_state():
+def get_engine_state(refresh=False, raise_on_error=False):
     global _engine_state_cache, _engine_state_cache_monotonic
 
     now = time.monotonic()
-    if _engine_state_cache and now - _engine_state_cache_monotonic < 30:
+    if not refresh and _engine_state_cache and now - _engine_state_cache_monotonic < 30:
         return dict(_engine_state_cache)
 
     def rdict(row):
         return {str(k).upper(): v for k, v in dict(row).items()}
 
     task_name = "TASK_WF_MASTER_DISPATCHER"
-    result = {"task": None, "state": None, "status": "MISSING"}
-    for scope in (f"SCHEMA {config.DB}.{config.SCHEMA}", f"DATABASE {config.DB}"):
-        try:
-            rows = _query(f"SHOW TASKS LIKE '{task_name}' IN {scope}")
-            for row in rows or []:
-                d = rdict(row)
-                if str(d.get("NAME", "")).upper() == task_name:
-                    state = str(d.get("STATE", "")).upper().strip()
-                    result = {"task": str(d.get("NAME", task_name)), "state": state, "status": _engine_status(state)}
-                    _engine_state_cache = dict(result)
-                    _engine_state_cache_monotonic = now
-                    return result
-        except Exception:
-            continue
+    result = {"task": task_name, "taskFqn": f"{config.APP_NAMESPACE}.{task_name}", "state": None, "status": "MISSING"}
+    try:
+        # Keep status and controls scoped to the same configured engine schema.
+        # A database-wide fallback could report another schema's dispatcher.
+        rows = _query(f"SHOW TASKS LIKE '{task_name}' IN SCHEMA {config.APP_NAMESPACE}")
+        for row in rows or []:
+            d = rdict(row)
+            if str(d.get("NAME", "")).upper() == task_name:
+                state = str(d.get("STATE", "")).upper().strip()
+                result.update(state=state, status=_engine_status(state))
+                break
+    except Exception as exc:
+        _engine_state_cache = None
+        if raise_on_error:
+            raise
+        return {**result, "status": "UNKNOWN", "error": str(exc)}
     _engine_state_cache = dict(result)
     _engine_state_cache_monotonic = now
     return result
+
+
+def set_engine_enabled(enabled):
+    """Explicitly resume/suspend only this application's master dispatcher."""
+    global _engine_state_cache, _engine_state_cache_monotonic
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be a boolean")
+    action = "RESUME" if enabled else "SUSPEND"
+    # Even a failed/timed-out request may have reached Snowflake.
+    _engine_state_cache = None
+    _engine_state_cache_monotonic = 0.0
+    _execute(f"ALTER TASK {config.APP_NAMESPACE}.TASK_WF_MASTER_DISPATCHER {action}")
+    try:
+        return get_engine_state(refresh=True, raise_on_error=True)
+    except Exception as exc:
+        raise RuntimeError(
+            f"The engine {action.lower()} command succeeded, but its current state could not be read. "
+            f"Refresh the engine status before trying again: {exc}"
+        ) from exc
 
 
 def _engine_status(state):

@@ -1453,6 +1453,44 @@ def refresh_settings():
     return jsonify({"ok": True, **_set_runtime_refresh_seconds(seconds)})
 
 
+@app.route("/api/settings/engine", methods=["GET", "PATCH"])
+def engine_settings():
+    payload = request.get_json(silent=True) if request.method == "PATCH" else None
+    if request.method == "PATCH" and (not isinstance(payload, dict) or not isinstance(payload.get("enabled"), bool)):
+        return _json_error("enabled must be a boolean", 400)
+
+    task_fqn = f"{config.APP_NAMESPACE}.TASK_WF_MASTER_DISPATCHER"
+    if not config.USE_MOCK and not sf.is_configured():
+        return _json_error("Snowflake is not configured; engine controls are unavailable.", 503)
+
+    actor = _actor_context() if request.method == "PATCH" else None
+    action = ("RESUME_ENGINE" if payload["enabled"] else "SUSPEND_ENGINE") if payload else None
+    try:
+        if config.USE_MOCK:
+            engine = {**MOCK_MONITOR["engine"], "taskFqn": task_fqn}
+            engine.setdefault("state", "STARTED" if engine["status"] == "RUNNING" else "SUSPENDED")
+            if payload is not None:
+                engine.update(state="STARTED" if payload["enabled"] else "SUSPENDED",
+                              status="RUNNING" if payload["enabled"] else "STOPPED")
+                MOCK_MONITOR["engine"] = engine
+        elif payload is not None:
+            engine = repo.set_engine_enabled(payload["enabled"])
+        else:
+            engine = repo.get_engine_state(refresh=True, raise_on_error=True)
+
+        response = {"ok": True, "source": "mock" if config.USE_MOCK else "snowflake", "engine": engine}
+        if payload is not None:
+            monitor_cache.refresh_async()
+            _record_interaction(action, actor=actor, entity_type="TASK", entity_id=task_fqn,
+                                payload=payload, response=response)
+        return jsonify(response)
+    except Exception as exc:
+        if payload is not None:
+            _record_interaction(action, actor=actor, entity_type="TASK", entity_id=task_fqn,
+                                payload=payload, status="FAILED", success=False, error_message=str(exc))
+        return _json_error(exc, 500)
+
+
 @app.route("/api/session")
 def session_context():
     if config.USE_MOCK or not sf.is_configured():

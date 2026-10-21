@@ -58,9 +58,12 @@ OAuth token.
 `KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE` in `KUMO_SHARED_MONITOR_POOL`.
 [`alter_dev_service.sql`](alter_dev_service.sql) updates that same DEV service
 for subsequent deployments. The create script records the initial published
-version `build-215-1-022ffedd2bf2`. The update script now records the DEV readiness
-release `dev-readiness-20261020-134830-1bb36d43`, deployed on 20 October 2026, with its
-matching image digest. Change both tag and digest together when selecting another
+version `build-215-1-022ffedd2bf2`. The update script selects GitHub Actions image
+`build-216-1-0ce9611cf217` and its verified digest. This update was executed on
+20 October 2026 at the user's explicit request; the running container was verified
+`READY` with the published digest. The promotion receipt is
+[`dev-spcs-actions-promotion.json`](../../review/dev-spcs-actions-promotion.json).
+Change both tag and digest together when selecting another
 build: a stale digest can keep the previous image running despite a new tag.
 The update preserves existing environment settings, endpoint configuration and
 resources. Setup and creation were executed on 19 October 2026; the DEV service
