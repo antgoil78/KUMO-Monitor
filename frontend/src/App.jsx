@@ -18,6 +18,7 @@ import Dependencies from './pages/Dependencies.jsx'
 import EnvironmentSettings from './pages/EnvironmentSettings.jsx'
 import About from './pages/About.jsx'
 import WorkflowFlow from './pages/WorkflowFlow.jsx'
+import OrchestrationMonitor from './pages/OrchestrationMonitor.jsx'
 import { RuntimeConfigContext } from './RuntimeConfig.jsx'
 import { JobCatalog, WorkflowCatalog } from './pages/OrchestrationCatalog.jsx'
 
@@ -39,6 +40,7 @@ const pages = {
   about: About,
   orchestrationWorkflow: WorkflowCatalog,
   orchestrationJob: JobCatalog,
+  orchestrationMonitor: OrchestrationMonitor,
   orchestrationFlow: WorkflowFlow
 }
 
