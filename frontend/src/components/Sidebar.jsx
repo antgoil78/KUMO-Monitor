@@ -8,6 +8,7 @@ const navItems = [
     { key: 'dependencies', label: 'Dependencies', icon: '⌘' }
   ] },
   { key: 'orchestration', label: 'Orchestration', icon: '◇', children: [
+    { key: 'orchestrationMonitor', label: 'Monitor', icon: '◫' },
     { key: 'orchestrationWorkflow', label: 'Workflow', icon: '◇' },
     { key: 'orchestrationJob', label: 'Job', icon: '▪' },
     { key: 'orchestrationFlow', label: 'Flow', icon: '⌁' }
