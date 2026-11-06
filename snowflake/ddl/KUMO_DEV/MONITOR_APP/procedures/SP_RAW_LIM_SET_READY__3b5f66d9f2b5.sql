@@ -236,7 +236,8 @@ BEGIN
     ) accepted
     WHERE target.ACTIVE_FL = TRUE AND target.PKG_GROUP_NAME = :PKG_GROUP_NAME
       AND target.SOURCE_ID = accepted.DLVY_SOURCE_ID AND target.PKG_ID = accepted.DLVY_PKG_ID
-      AND (target.DLVY_PKG_YEAR IS NULL OR accepted.MAX_YEAR > target.DLVY_PKG_YEAR
+      AND (target.DLVY_PKG_YEAR IS NULL OR target.DLVY_PKG_YEAR_SEQ_NO IS NULL
+           OR accepted.MAX_YEAR > target.DLVY_PKG_YEAR
            OR (accepted.MAX_YEAR = target.DLVY_PKG_YEAR
                AND accepted.MAX_SEQUENCE > target.DLVY_PKG_YEAR_SEQ_NO));
 

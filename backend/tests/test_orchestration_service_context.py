@@ -34,7 +34,6 @@ class OrchestrationServiceContextTests(unittest.TestCase):
         for name, table in (
             ("T_ORCHESTRATION_WORKFLOW", "WORKFLOW"),
             ("T_ORCHESTRATION_JOB", "JOB"),
-            ("T_ORCHESTRATION_WORKFLOW_JOB", "WORKFLOW_JOB"),
             ("T_ORCHESTRATION_DEPENDENCY", "WORKFLOW_DEPENDENCY"),
         ):
             patches.append(patch.object(config, name, f"KUMO_DEV.MONITOR_META.{table}"))
@@ -54,7 +53,7 @@ class OrchestrationServiceContextTests(unittest.TestCase):
         sql = self.statements[-1]
         if sql.startswith("SELECT COUNT(*) AS CNT"):
             # Existing IDs are valid; names and assignments are available.
-            count = 0 if "UPPER(" in sql or "FROM KUMO_DEV.MONITOR_META.WORKFLOW_JOB" in sql else 1
+            count = 0 if "UPPER(" in sql or "FROM KUMO_DEV.MONITOR_META.WORKFLOW_DEPENDENCY" in sql else 1
             return [{"CNT": count}]
         return []
 
@@ -72,10 +71,11 @@ class OrchestrationServiceContextTests(unittest.TestCase):
         self.assertFalse(sf.caller_token_present())
         self.assertTrue(any("KUMO_DEV.MONITOR_META." in sql for sql in self.statements))
         self.assertFalse(any("KUMO_TST." in sql or "KUMO_ADMIN." in sql for sql in self.statements))
+        self.assertFalse(any("WORKFLOW_JOB" in sql for sql in self.statements))
         return response
 
     def test_catalog_and_flow_use_service_credentials_with_browser_caller(self):
-        for path in ("/api/orchestration/catalog", "/api/orchestration/flow", "/api/workflow-flow"):
+        for path in ("/api/orchestration/catalog", "/api/orchestration/flow", "/api/workflow-flow", "/api/orchestration/configuration"):
             with self.subTest(path=path):
                 self.connect.reset_mock()
                 response = self.request("GET", path)
@@ -84,7 +84,7 @@ class OrchestrationServiceContextTests(unittest.TestCase):
                 self.assertEqual(self.connect.call_count, 1)
 
     def test_workflow_edits_and_job_assignments_share_service_transaction(self):
-        payload = {"workflowName": "Shared workflow", "jobIds": ["job-1"]}
+        payload = {"workflowName": "Shared workflow", "entryJobId": "job-1"}
         for method, path in (
             ("POST", "/api/orchestration/workflows"),
             ("PATCH", "/api/orchestration/workflows/workflow-1"),
@@ -109,7 +109,23 @@ class OrchestrationServiceContextTests(unittest.TestCase):
                 self.connect.reset_mock()
                 self.request(method, path, payload)
 
-    def test_assignment_failure_rolls_back_on_same_service_connection(self):
+    def test_configuration_save_shares_one_service_transaction(self):
+        # Empty catalogs here exercise the real endpoint and transaction wiring;
+        # topology and persistence checks use populated fixtures separately.
+        initial = self.client.get('/api/orchestration/configuration').get_json()
+        self.connect.reset_mock()
+        self.statements.clear()
+        self.request('PUT', '/api/orchestration/configuration', {'rows': [], 'revision': initial['revision']})
+        self.assertEqual(self.connect.call_count, 1)
+        self.assertIn('BEGIN', self.statements)
+        self.assertIn('COMMIT', self.statements)
+
+    def test_stale_configuration_save_returns_conflict(self):
+        response = self.client.put('/api/orchestration/configuration', json={'rows': [], 'revision': 'stale'})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('ROLLBACK', self.statements)
+
+    def test_unknown_entry_job_is_rejected_before_writing(self):
         original_query_rows = self.query_rows
 
         def unknown_job():
@@ -120,14 +136,14 @@ class OrchestrationServiceContextTests(unittest.TestCase):
         self.cursor.fetchall.side_effect = unknown_job
         response = self.client.post(
             "/api/orchestration/workflows",
-            json={"workflowName": "Shared workflow", "jobIds": ["missing-job"]},
+            json={"workflowName": "Shared workflow", "entryJobId": "missing-job"},
             headers={"Sf-Context-Current-User-Token": "browser-token"},
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.connect.call_count, 1)
         self.assertEqual(self.connect.call_args.kwargs["token"], "service-token")
-        self.assertIn("ROLLBACK", self.statements)
-        self.assertNotIn("COMMIT", self.statements)
+        self.assertNotIn("BEGIN", self.statements)
+        self.assertFalse(any(sql.startswith("INSERT") for sql in self.statements))
 
     def test_user_session_still_uses_caller_credentials(self):
         handle = sf.set_ingress_user_token("browser-token")

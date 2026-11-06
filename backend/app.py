@@ -34,6 +34,7 @@ from batch_control import batch_control_bp
 
 from workflow_commands import DBT_PROJECT_TEMPLATE, DBT_TARGET_TEMPLATE, validate_definition
 import kumo_repository as repo
+import orchestration_configuration as orchestration
 from monitor_cache import monitor_cache
 from mock_data import MOCK_HISTORY, MOCK_MONITOR
 from realtime_events import realtime_broker
@@ -1617,116 +1618,57 @@ def refresh_monitor():
 @app.route("/api/workflow-flow")
 @app.route("/api/orchestration/flow")
 def workflow_flow():
-    """Read application-owned orchestration metadata using the service role."""
     if config.USE_MOCK or not sf.is_configured():
         return jsonify({"ok": True, "source": "mock", "workflows": [], "jobs": [], "dependencies": []})
     try:
         with sf.connection_scope(force_service=True):
-            workflows = sf.query_service(f"""
-                SELECT
-                    WORKFLOW_ID,
-                    WORKFLOW_NAME,
-                    EXTERNAL_TRIGGERS
-                FROM {config.T_ORCHESTRATION_WORKFLOW}
-                WHERE IS_ENABLED
-                ORDER BY WORKFLOW_NAME
-            """)
-            jobs = sf.query_service(f"""
-                SELECT
-                    WJ.WORKFLOW_ID,
-                    WJ.PARENT_JOB_ID,
-                    WJ.JOB_ID,
-                    WJ.JOB_SEQUENCE,
-                    J.JOB_NAME,
-                    J.COMMAND_LINE,
-                    J.ON_SUCCESS_COMMAND_LINE,
-                    J.ON_WARNING_COMMAND_LINE,
-                    J.ON_ERROR_COMMAND_LINE,
-                    WJ.MIN_STATUS_LEVEL,
-                    WJ.DEPENDENCY_TYPE
-                FROM {config.T_ORCHESTRATION_WORKFLOW_JOB} WJ
-                JOIN {config.T_ORCHESTRATION_JOB} J
-                  ON J.JOB_ID = WJ.JOB_ID
-                JOIN {config.T_ORCHESTRATION_WORKFLOW} W
-                  ON W.WORKFLOW_ID = WJ.WORKFLOW_ID
-                WHERE WJ.IS_ENABLED AND J.IS_ENABLED AND W.IS_ENABLED
-                ORDER BY WJ.WORKFLOW_ID, WJ.JOB_SEQUENCE
-            """)
-            dependencies = sf.query_service(f"""
-                SELECT
-                    WORKFLOW_DEPENDENCY_ID AS DEPENDENCY_ID,
-                    PARENT_WORKFLOW_ID,
-                    CHILD_WORKFLOW_ID,
-                    MIN_STATUS_LEVEL,
-                    DEPENDENCY_TYPE
-                FROM {config.T_ORCHESTRATION_DEPENDENCY}
-                WHERE IS_ENABLED
-                ORDER BY PARENT_WORKFLOW_ID, CHILD_WORKFLOW_ID
-            """)
-        return jsonify({
-            "ok": True,
-            "source": config.ORCHESTRATION_NAMESPACE,
-            "workflows": workflows,
-            "jobs": jobs,
-            "dependencies": dependencies,
-            "generatedAt": _now_iso(),
-        })
+            catalog = orchestration.read_catalog()
+            enabled_workflows = {row['WORKFLOW_ID'] for row in catalog['workflows'] if row['IS_ENABLED']}
+            jobs = [row for row in orchestration.assignments(catalog)
+                    if row['CHILD_WORKFLOW_ID'] in enabled_workflows and row['IS_ENABLED'] and row['JOB_IS_ENABLED']]
+            dependencies = [{**row, 'DEPENDENCY_ID': row['WORKFLOW_DEPENDENCY_ID']}
+                            for row in catalog['records'] if not row.get('JOB_ID') and row.get('PARENT_WORKFLOW_ID')
+                            and row['IS_ENABLED'] and row['CHILD_WORKFLOW_ID'] in enabled_workflows
+                            and row['PARENT_WORKFLOW_ID'] in enabled_workflows]
+        return jsonify(dict(ok=True, source=config.ORCHESTRATION_NAMESPACE,
+                            workflows=[row for row in catalog['workflows'] if row['WORKFLOW_ID'] in enabled_workflows],
+                            jobs=jobs, dependencies=dependencies, generatedAt=_now_iso()))
     except Exception as exc:
         return _json_error(exc, 500)
 
 
 @app.route("/api/orchestration/catalog")
 def orchestration_catalog():
-    """Read the editable catalog using the service role, independent of caller grants."""
     if config.USE_MOCK or not sf.is_configured():
         return jsonify({"ok": True, "source": "mock", "workflows": [], "jobs": [], "assignments": []})
     try:
         with sf.connection_scope(force_service=True):
-            workflows = sf.query_service(f"""
-                SELECT
-                    W.*,
-                    (SELECT COUNT(*)
-                       FROM {config.T_ORCHESTRATION_WORKFLOW_JOB} WJ
-                      WHERE WJ.WORKFLOW_ID = W.WORKFLOW_ID) AS JOB_COUNT
-                FROM {config.T_ORCHESTRATION_WORKFLOW} W
-                ORDER BY W.WORKFLOW_NAME
-            """)
-            jobs = sf.query_service(f"""
-                SELECT
-                    J.*,
-                    (SELECT COUNT(*)
-                       FROM {config.T_ORCHESTRATION_WORKFLOW_JOB} WJ
-                      WHERE WJ.JOB_ID = J.JOB_ID) AS WORKFLOW_COUNT
-                FROM {config.T_ORCHESTRATION_JOB} J
-                ORDER BY J.JOB_NAME
-            """)
-            assignments = sf.query_service(f"""
-                SELECT
-                    WJ.WORKFLOW_JOB_ID,
-                    WJ.WORKFLOW_ID,
-                    W.WORKFLOW_NAME,
-                    WJ.JOB_ID,
-                    J.JOB_NAME,
-                    WJ.JOB_SEQUENCE,
-                    WJ.PARENT_JOB_ID,
-                    WJ.MIN_STATUS_LEVEL,
-                    WJ.DEPENDENCY_TYPE,
-                    WJ.IS_ENABLED
-                FROM {config.T_ORCHESTRATION_WORKFLOW_JOB} WJ
-                JOIN {config.T_ORCHESTRATION_WORKFLOW} W
-                  ON W.WORKFLOW_ID = WJ.WORKFLOW_ID
-                JOIN {config.T_ORCHESTRATION_JOB} J
-                  ON J.JOB_ID = WJ.JOB_ID
-                ORDER BY W.WORKFLOW_NAME, WJ.JOB_SEQUENCE
-            """)
-        return jsonify({
-            "ok": True,
-            "source": config.ORCHESTRATION_NAMESPACE,
-            "workflows": workflows,
-            "jobs": jobs,
-            "assignments": assignments,
-            "generatedAt": _now_iso(),
-        })
+            catalog = orchestration.read_catalog()
+            assignments = orchestration.assignments(catalog)
+            workflows = [{**row, 'JOB_COUNT': sum(item['WORKFLOW_ID'] == row['WORKFLOW_ID'] for item in assignments)} for row in catalog['workflows']]
+            jobs = [{**row, 'WORKFLOW_COUNT': sum(item['JOB_ID'] == row['JOB_ID'] for item in assignments)} for row in catalog['jobs']]
+        return jsonify(dict(ok=True, source=config.ORCHESTRATION_NAMESPACE, workflows=workflows,
+                            jobs=jobs, assignments=assignments, generatedAt=_now_iso()))
+    except Exception as exc:
+        return _json_error(exc, 500)
+
+
+@app.route("/api/orchestration/configuration", methods=["GET", "PUT"])
+def orchestration_configuration():
+    if config.USE_MOCK or not sf.is_configured():
+        return _json_error('Connect to Snowflake to edit workflow and job configuration.', 503)
+    try:
+        with sf.connection_scope(force_service=True):
+            if request.method == 'GET':
+                return jsonify(orchestration.payload())
+            body = request.get_json(silent=True) or {}
+            if not isinstance(body, dict):
+                raise ValueError('A JSON object is required')
+            return jsonify(orchestration.save(body.get('rows'), body.get('revision')))
+    except orchestration.ConfigurationConflict as exc:
+        return _json_error(exc, 409)
+    except ValueError as exc:
+        return _json_error(exc, 400)
     except Exception as exc:
         return _json_error(exc, 500)
 
@@ -1792,56 +1734,25 @@ def _orchestration_job_values(payload):
     }
 
 
-def _replace_orchestration_workflow_jobs(workflow_id, job_ids):
-    ordered_ids = [str(job_id or "").strip() for job_id in (job_ids or []) if str(job_id or "").strip()]
-    if len(set(ordered_ids)) != len(ordered_ids):
-        raise ValueError("A job can only be assigned once within a workflow")
-    for job_id in ordered_ids:
-        exists = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE JOB_ID = %(job_id)s", {"job_id": job_id})
-        if int(exists.get("CNT") or 0) != 1:
-            raise ValueError(f"Unknown job ID: {job_id}")
-
-    existing_rows = sf.query_service(f"""
-        SELECT JOB_ID
-        FROM {config.T_ORCHESTRATION_WORKFLOW_JOB}
-        WHERE WORKFLOW_ID = %(workflow_id)s
-    """, {"workflow_id": workflow_id})
-    existing_ids = {str(row.get("JOB_ID")) for row in existing_rows}
-    for job_id in existing_ids - set(ordered_ids):
-        sf.execute_service(f"""
-            DELETE FROM {config.T_ORCHESTRATION_WORKFLOW_JOB}
-            WHERE WORKFLOW_ID = %(workflow_id)s AND JOB_ID = %(job_id)s
-        """, {"workflow_id": workflow_id, "job_id": job_id})
-    for sequence, job_id in enumerate(ordered_ids, start=1):
-        if job_id in existing_ids:
-            sf.execute_service(f"""
-                UPDATE {config.T_ORCHESTRATION_WORKFLOW_JOB} SET
-                    JOB_SEQUENCE = %(sequence)s,
-                    IS_ENABLED = TRUE,
-                    UPDATED_AT = CURRENT_TIMESTAMP(),
-                    UPDATED_BY = CURRENT_USER()
-                WHERE WORKFLOW_ID = %(workflow_id)s AND JOB_ID = %(job_id)s
-            """, {"workflow_id": workflow_id, "job_id": job_id, "sequence": sequence})
-        else:
-            sf.execute_service(f"""
-                INSERT INTO {config.T_ORCHESTRATION_WORKFLOW_JOB} (
-                    WORKFLOW_ID, JOB_ID, JOB_SEQUENCE, IS_ENABLED
-                ) VALUES (%(workflow_id)s, %(job_id)s, %(sequence)s, TRUE)
-            """, {"workflow_id": workflow_id, "job_id": job_id, "sequence": sequence})
-
-
 @app.route("/api/orchestration/workflows", methods=["POST"])
 def create_orchestration_workflow():
     payload = request.get_json(silent=True) or {}
     try:
         values = _orchestration_workflow_values(payload)
         workflow_id = str(uuid.uuid4())
+        entry_job_id = str(payload.get('entryJobId') or '').strip()
+        if not entry_job_id:
+            raise ValueError('Choose an entry job from the Job catalog')
         with sf.connection_scope(force_service=True):
+            job = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE JOB_ID = %(job_id)s", {'job_id': entry_job_id})
+            if int(job.get('CNT') or 0) != 1:
+                raise ValueError('Entry job was not found in the Job catalog')
             duplicate = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_WORKFLOW} WHERE UPPER(WORKFLOW_NAME) = UPPER(%(name)s)", values)
             if int(duplicate.get("CNT") or 0):
                 raise ValueError("A workflow with this name already exists")
             sf.execute_service("BEGIN")
             try:
+                orchestration.lock_configuration()
                 sf.execute_service(f"""
                     INSERT INTO {config.T_ORCHESTRATION_WORKFLOW} (
                         WORKFLOW_ID, WORKFLOW_NAME, WORKFLOW_GROUP, DESCRIPTION,
@@ -1858,7 +1769,7 @@ def create_orchestration_workflow():
                         )
                     )
                 """, {**values, "workflow_id": workflow_id})
-                _replace_orchestration_workflow_jobs(workflow_id, payload.get("jobIds"))
+                orchestration.add_workflow(workflow_id, entry_job_id)
                 sf.execute_service("COMMIT")
             except Exception:
                 sf.execute_service("ROLLBACK")
@@ -1903,7 +1814,6 @@ def update_orchestration_workflow(workflow_id):
                         UPDATED_BY = CURRENT_USER()
                     WHERE WORKFLOW_ID = %(workflow_id)s
                 """, {**values, "workflow_id": workflow_id})
-                _replace_orchestration_workflow_jobs(workflow_id, payload.get("jobIds"))
                 sf.execute_service("COMMIT")
             except Exception:
                 sf.execute_service("ROLLBACK")
@@ -1922,13 +1832,17 @@ def delete_orchestration_workflow(workflow_id):
             exists = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_WORKFLOW} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
             if int(exists.get("CNT") or 0) != 1:
                 return _json_error("Workflow not found", 404)
-            assigned = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_WORKFLOW_JOB} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
+            assigned = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_DEPENDENCY} WHERE CHILD_WORKFLOW_ID = %(workflow_id)s AND JOB_ID IS NOT NULL", {"workflow_id": workflow_id})
             assigned_count = int(assigned.get("CNT") or 0)
             if assigned_count:
                 return _json_error(f"This workflow cannot be deleted because it contains {assigned_count} job{'s' if assigned_count != 1 else ''}", 409)
+            children = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_DEPENDENCY} WHERE PARENT_WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
+            if int(children.get('CNT') or 0):
+                return _json_error('Remove dependent workflow relationships before deleting this workflow', 409)
             sf.execute_service("BEGIN")
             try:
-                sf.execute_service(f"DELETE FROM {config.T_ORCHESTRATION_DEPENDENCY} WHERE PARENT_WORKFLOW_ID = %(workflow_id)s OR CHILD_WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
+                orchestration.lock_configuration()
+                sf.execute_service(f"DELETE FROM {config.T_ORCHESTRATION_DEPENDENCY} WHERE CHILD_WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
                 sf.execute_service(f"DELETE FROM {config.T_ORCHESTRATION_WORKFLOW} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
                 sf.execute_service("COMMIT")
             except Exception:
@@ -2010,7 +1924,7 @@ def delete_orchestration_job(job_id):
                 return _json_error("Job not found", 404)
             assigned = sf.query_one_service(f"""
                 SELECT COUNT(*) AS CNT
-                FROM {config.T_ORCHESTRATION_WORKFLOW_JOB}
+                FROM {config.T_ORCHESTRATION_DEPENDENCY}
                 WHERE JOB_ID = %(job_id)s OR PARENT_JOB_ID = %(job_id)s
             """, {"job_id": job_id})
             assigned_count = int(assigned.get("CNT") or 0)

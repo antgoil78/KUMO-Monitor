@@ -387,14 +387,20 @@ BEGIN
         UNION ALL
         SELECT * FROM unexpected_payload_files
     ),
+    -- LIM_PENDING_SEQUENCE_V1: accepted deliveries remain visible, but cannot
+    -- consume the first pending sequence after the configured baseline is reset.
     distinct_deliveries AS (
-        SELECT DISTINCT
+        SELECT
             f.RAW_TABLE,
             f.DLVY_SOURCE_ID,
             f.DLVY_SUBJECT_AREA_ID,
             f.DLVY_PKG_ID,
             f.DLVY_PKG_YEAR,
-            f.DLVY_PKG_YEAR_SEQ_NO
+            f.DLVY_PKG_YEAR_SEQ_NO,
+            SUM(IFF(f.FILE_TYPE = ''PAYLOAD'', 1, 0)) > 0
+            AND SUM(IFF(f.FILE_TYPE = ''PAYLOAD''
+                        AND NOT COALESCE(f.DW_READY_TO_LOAD_FL, FALSE), 1, 0)) = 0
+                AS ALL_PAYLOADS_ACCEPTED
         FROM final_rows f
         WHERE NOT EXISTS (
             SELECT 1
@@ -409,6 +415,13 @@ BEGIN
                    OR (f.DLVY_PKG_YEAR = pgs.DLVY_PKG_YEAR
                        AND f.DLVY_PKG_YEAR_SEQ_NO <= pgs.DLVY_PKG_YEAR_SEQ_NO))
         )
+        GROUP BY f.RAW_TABLE, f.DLVY_SOURCE_ID, f.DLVY_SUBJECT_AREA_ID,
+                 f.DLVY_PKG_ID, f.DLVY_PKG_YEAR, f.DLVY_PKG_YEAR_SEQ_NO
+    ),
+    pending_deliveries AS (
+        SELECT * EXCLUDE ALL_PAYLOADS_ACCEPTED
+        FROM distinct_deliveries
+        WHERE NOT ALL_PAYLOADS_ACCEPTED
     ),
     delivery_sequence_check AS (
         SELECT
@@ -453,7 +466,7 @@ BEGIN
                 THEN FALSE
                 ELSE TRUE
             END AS IS_VALID_SEQUENCE
-        FROM distinct_deliveries d
+        FROM pending_deliveries d
         LEFT JOIN (
             SELECT SOURCE_ID, SUBJECT_AREA, PKG_ID, DLVY_PKG_YEAR, DLVY_PKG_YEAR_SEQ_NO
             FROM IDENTIFIER(:V_SOURCE_TABLE)
@@ -462,6 +475,10 @@ BEGIN
             ON pgs_stored.SOURCE_ID = d.DLVY_SOURCE_ID
             AND pgs_stored.SUBJECT_AREA = d.DLVY_SUBJECT_AREA_ID
             AND pgs_stored.PKG_ID = d.DLVY_PKG_ID
+        UNION ALL
+        SELECT * EXCLUDE ALL_PAYLOADS_ACCEPTED, TRUE AS IS_VALID_SEQUENCE
+        FROM distinct_deliveries
+        WHERE ALL_PAYLOADS_ACCEPTED
     ),
     sequence_validation AS (
         SELECT

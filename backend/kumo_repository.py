@@ -2357,7 +2357,7 @@ def load_dag_preview(workflow_id, dbt_command_override=None):
         args.extend(["--target", target])
     args.extend(["--vars", json.dumps(resolved["dbtVars"])])
     args_text = shlex.join(args).replace("'", "''")
-    sql = f"EXECUTE DBT PROJECT {project_fqn} ARGS = '{args_text}'"
+    sql = f"EXECUTE DBT PROJECT {project_fqn} ARGS = '{args_text}' WRITEBACK = FALSE"
 
     with sf.connection(use_warehouse=True, include_context=True, force_service=True) as conn:
         cur = conn.cursor(DictCursor)

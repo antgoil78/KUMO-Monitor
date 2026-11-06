@@ -1,7 +1,7 @@
--- Executed for the DEV SPCS update on 21 October 2026 at the user's request.
--- GitHub Actions run: https://github.com/antgoil78/KUMO-Monitor/actions/runs/39585655144
+-- Executed for the DEV SPCS update on 23 October 2026 at the user's request.
+-- GitHub Actions run: https://github.com/antgoil78/KUMO-Monitor/actions/runs/39938368016
 -- Tag and digest select the same published build.
--- Preserves live settings and sets the environment parameter-table bootstrap.
+-- Preserves live service settings; changes only image tag and digest.
 USE ROLE KUMO_ADMIN;
 
 ALTER SERVICE KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE FROM SPECIFICATION $$
@@ -9,8 +9,8 @@ ALTER SERVICE KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE FROM SPECIFICATION $$
 spec:
   containers:
   - name: "monitor"
-    image: "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-217-1-0004ec2c3422"
-    sha256: "@sha256:9caad95504cedcb918eef1b332f9ae36d78914390769e0ed85f045f0dc787042"
+    image: "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-219-1-6248c7d58e11"
+    sha256: "@sha256:77eb973a98d9b2fc44d06fe07a560ac24fcbf835795e4e865b2b7d5570fdf3c0"
     env:
       KUMO_ENVIRONMENT_TABLE: "KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS"
       KUMO_ENV: "DEV"

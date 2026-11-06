@@ -118,7 +118,7 @@ try {
     result.dbtVars = vars;
     args.push('--vars', JSON.stringify(vars), '--target', result.dbtTarget);
     result.dbtCommand = args.map(shellQuote).join(' ');
-    result.execSql = 'EXECUTE DBT PROJECT ' + result.dbtProjectFqn + " ARGS = '" + sqlEscape(result.dbtCommand) + "'";
+    result.execSql = 'EXECUTE DBT PROJECT ' + result.dbtProjectFqn + " ARGS = '" + sqlEscape(result.dbtCommand) + "' WRITEBACK = FALSE";
   } else fail('Command preview supports SQL and dbt definitions');
   result.parametersUsed = used;
   return result;

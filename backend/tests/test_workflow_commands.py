@@ -11,6 +11,7 @@ import kumo_repository as repo
 from workflow_commands import validate_definition
 
 SOURCE = Path(__file__).resolve().parents[1] / "migrations/workflow_command_resolver.js"
+sys.path.insert(0, str(SOURCE.parent))
 RUN_ID = "12345678-1234-1234-1234-123456789abc"
 NODE = r"""
 const fs = require('fs');
@@ -105,6 +106,23 @@ class WorkflowCommandResolverTests(unittest.TestCase):
         self.assertEqual(result["dbtTarget"], "kumo_TST")
         self.assertIn("KUMO_TST.DBT.KUMO_TST", result["execSql"])
 
+    def test_all_dbt_commands_disable_writeback_for_preview_and_execution(self):
+        for environment in ("DEV", "TST"):
+            for run_id in (None, RUN_ID):
+                for command in ("build", "run", "test", "list", "compile", "parse", "seed",
+                                "snapshot", "run-operation example", "retry", "debug", "deps", "clean"):
+                    with self.subTest(environment=environment, run_id=run_id, command=command):
+                        result = self.resolve({"jobType": "DBT", "dbtCommand": command}, environment, run_id=run_id)
+                        self.assertTrue(result["ok"], result)
+                        self.assertTrue(result["execSql"].endswith("' WRITEBACK = FALSE"), result)
+                        self.assertNotIn("WRITEBACK", result["dbtCommand"])
+
+    def test_saved_resolver_definition_matches_the_executable_source(self):
+        from apply_workflow_command_templates import logical_body
+        ddl = next((SOURCE.parents[2] / "snowflake/ddl/KUMO_DEV/MONITOR_APP/procedures").glob("SP_RESOLVE_WORKFLOW_COMMAND__*.sql"))
+        source = SOURCE.read_text().replace("[DATABASE].[META_SCHEMA].SP_GET_ENVIRONMENT", "KUMO_DEV.MONITOR_META.SP_GET_ENVIRONMENT")
+        self.assertEqual(logical_body(ddl.read_text()).strip(), source.strip())
+
     def test_conflicting_database_invalid_json_and_unfinished_commands_are_rejected(self):
         result = self.resolve({"workflowType": "SQL", "sqlCommand": "SELECT 1"}, changes={"DATABASE": {"value": "KUMO_TST"}})
         self.assertFalse(result["ok"])
@@ -113,6 +131,26 @@ class WorkflowCommandResolverTests(unittest.TestCase):
 
 
 class WorkflowCommandApiTests(unittest.TestCase):
+    def test_dag_preview_disables_writeback_and_preserves_selection_and_vars(self):
+        workflow = {"WORKFLOW_TYPE": "DBT", "WORKFLOW_NAME": "Daily", "DBT_COMMAND": "build --select tag:daily"}
+        resolved = {"dbtProjectFqn": "KUMO_TST.DBT.KUMO_TST", "dbtTarget": "kumo_TST",
+                    "dbtCommand": "build --select tag:daily", "dbtVars": {"runId": RUN_ID, "keep": 42}}
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [{"SUCCESS": True, "STDOUT": ""}]
+        with patch.object(repo, "_query", return_value=[workflow]), \
+                patch.object(repo, "resolve_workflow_command", return_value=resolved), \
+                patch.object(repo.sf, "connection") as connection:
+            connection.return_value.__enter__.return_value.cursor.return_value = cursor
+            result = repo.load_dag_preview("workflow-1")
+        sql = cursor.execute.call_args.args[0]
+        self.assertTrue(sql.startswith("EXECUTE DBT PROJECT KUMO_TST.DBT.KUMO_TST ARGS = 'list "))
+        self.assertTrue(sql.endswith("' WRITEBACK = FALSE"))
+        self.assertIn("--select tag:daily", sql)
+        self.assertIn("--target kumo_TST", sql)
+        self.assertIn(RUN_ID, sql)
+        self.assertIn('"keep": 42', sql)
+        self.assertEqual(result["modelCount"], 0)
+
     def test_repository_binds_the_template_to_the_read_only_resolver(self):
         definition = {"workflowType": "SQL", "sqlCommand": "SELECT '[DATABASE]'"}
         expected = {"ok": True, "execSql": "SELECT 'KUMO_DEV'"}
@@ -138,6 +176,34 @@ class WorkflowCommandApiTests(unittest.TestCase):
                              ("sqlCommand", "SELECT '#[run_id]#'")]:
             with self.subTest(field=field), self.assertRaises(ValueError):
                 validate_definition({field: value})
+
+
+class DbtWritebackMigrationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import apply_dbt_writeback_default as migration
+        cls.migration = migration
+        cls.desired = next((SOURCE.parents[2] / "snowflake/ddl/KUMO_DEV/MONITOR_APP/procedures").glob("SP_RESOLVE_WORKFLOW_COMMAND__*.sql")).read_text()
+
+    def test_only_the_previous_resolver_is_accepted_and_reapplying_is_a_noop(self):
+        previous = self.desired.replace(" WRITEBACK = FALSE", "", 1)
+        self.assertTrue(self.migration.needs_update(previous, self.desired))
+        self.assertFalse(self.migration.needs_update(self.desired, self.desired))
+        with self.assertRaisesRegex(ValueError, "drift"):
+            self.migration.needs_update(previous.replace("vars.runId = runId", "vars.runId = 'changed'"), self.desired)
+
+    def test_preflight_does_not_replace_the_procedure_or_execute_dbt(self):
+        cursor = MagicMock()
+        cursor.fetchone.return_value = {"DDL": self.desired.replace(" WRITEBACK = FALSE", "", 1)}
+        with patch.object(self.migration, "connect") as connect, \
+                patch.object(self.migration, "load_environment", return_value=({}, False)), \
+                patch.object(self.migration, "render_procedure", return_value=("DB.APP.RESOLVER(VARIANT,VARCHAR)", self.desired)):
+            connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value = cursor
+            result = self.migration.run("KUMO_TST.MONITOR_META.APPLICATION_PARAMETERS")
+        self.assertFalse(result["applied"])
+        self.assertEqual(result["procedures_to_update"], ["DB.APP.RESOLVER(VARIANT,VARCHAR)"])
+        self.assertEqual(cursor.execute.call_count, 2)
+        self.assertTrue(cursor.execute.call_args.args[0].startswith("SELECT GET_DDL"))
 
 
 if __name__ == "__main__":
