@@ -84,9 +84,11 @@ The old account role named `KUMO_ADMIN` is independent of the database with
 that name. The SPCS renderer sets `KUMO_LIM_ROLE` to the selected service owner
 for File Ingestion, without embedding user credentials.
 
-Application-created scheduler tasks stay suspended in DEV/TST unless
-`KUMO_AUTO_RESUME_TASKS=true` is explicitly set. This does not resume the
-persistent master dispatcher. Generated execution tasks inside procedures
+Saving or enabling a workflow schedule resumes its Snowflake scheduler when
+the workflow is enabled. Disabling the schedule removes its scheduler. The
+former `KUMO_AUTO_RESUME_TASKS` setting is ignored, including in existing service
+specifications. Starting the app does not activate copied schedules or resume
+the persistent master dispatcher. Generated execution tasks inside procedures
 retain their own lifecycle.
 
 Use **Settings → Engine** to inspect, resume or suspend the persistent

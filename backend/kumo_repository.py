@@ -1674,7 +1674,8 @@ def create_or_replace_sf_task(workflow_id, warehouse=None):
       CALL {config.DB}.{config.SCHEMA}.SP_WORKFLOW_REQUEST_RUN('{sql_escape(workflow_id)}', 'SCHEDULED', NULL, 0, NULL)
     """
     _execute(ddl)
-    _execute(f"ALTER TASK {scheduler_fqn} {'RESUME' if workflow_enabled and config.AUTO_RESUME_TASKS else 'SUSPEND'}")
+    # Saving an enabled schedule must activate its native Snowflake task.
+    _execute(f"ALTER TASK {scheduler_fqn} {'RESUME' if workflow_enabled else 'SUSPEND'}")
 
 
 def _ensure_json_array_str(value):
