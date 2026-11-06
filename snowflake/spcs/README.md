@@ -194,10 +194,11 @@ respective Snowflake accounts. Publish the image to each account's repository
 and set the corresponding registry hostname in CI. `KUMO_SHARED` is shared
 within an account; it is not a global repository across those accounts.
 
-Generated scheduler tasks stay suspended by default in DEV/TST. Set
-`KUMO_AUTO_RESUME_TASKS=true` only when scheduling should be enabled. This
-setting governs application-created schedulers; persistent dispatcher and
-procedure-generated execution tasks retain their separate lifecycle.
+Saving or enabling a schedule in the app resumes its generated scheduler when
+the workflow is enabled. The former `KUMO_AUTO_RESUME_TASKS` setting in existing
+service specifications is ignored. App startup does not activate copied
+schedules; persistent dispatcher and procedure-generated execution tasks retain
+their separate lifecycle.
 
 Current readiness: DEV definitions and workflow/job configuration have been
 copied, with executable references directed to DEV and copied schedules disabled.

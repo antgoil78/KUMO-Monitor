@@ -159,7 +159,7 @@ function WorkflowEditor({ workflow, groups, jobs, assignments, saving, error, on
     allowManualTrigger: workflow ? Boolean(workflow.ALLOW_MANUAL_TRIGGER) : true,
     allowExternalTrigger: Boolean(workflow?.ALLOW_EXTERNAL_TRIGGER),
     enabled: workflow ? Boolean(workflow.IS_ENABLED) : true,
-    jobIds: existingJobs
+    entryJobId: ''
   })
   const [groupSelection, setGroupSelection] = useState(initialGroup)
   const [deleteWarning, setDeleteWarning] = useState('')
@@ -169,16 +169,6 @@ function WorkflowEditor({ workflow, groups, jobs, assignments, saving, error, on
   function selectGroup(value) {
     setGroupSelection(value)
     update('workflowGroup', value === '__new_group__' ? '' : value)
-  }
-  function toggleJob(jobId) {
-    update('jobIds', form.jobIds.includes(jobId) ? form.jobIds.filter(id => id !== jobId) : [...form.jobIds, jobId])
-  }
-  function moveJob(index, direction) {
-    const target = index + direction
-    if (target < 0 || target >= form.jobIds.length) return
-    const next = [...form.jobIds]
-    ;[next[index], next[target]] = [next[target], next[index]]
-    update('jobIds', next)
   }
   function requestDelete() {
     if (existingJobs.length) {
@@ -220,14 +210,8 @@ function WorkflowEditor({ workflow, groups, jobs, assignments, saving, error, on
         <label><input type="checkbox" checked={form.allowExternalTrigger} onChange={event => update('allowExternalTrigger', event.target.checked)} /> External trigger</label>
         <label><input type="checkbox" checked={form.enabled} onChange={event => update('enabled', event.target.checked)} /> Workflow enabled</label>
       </div>
-      <div className="form-field"><label>Jobs and execution order</label><div className="orchestration-assignment-editor">
-        {form.jobIds.map((jobId, index) => {
-          const job = jobs.find(item => item.JOB_ID === jobId)
-          return <div key={jobId}><b>{index + 1}</b><span>{job?.JOB_NAME || jobId}</span><button type="button" onClick={() => moveJob(index, -1)} disabled={index === 0}>↑</button><button type="button" onClick={() => moveJob(index, 1)} disabled={index === form.jobIds.length - 1}>↓</button><button type="button" onClick={() => toggleJob(jobId)}>Remove</button></div>
-        })}
-        {jobs.filter(job => !form.jobIds.includes(job.JOB_ID)).map(job => <button className="orchestration-add-job" key={job.JOB_ID} type="button" onClick={() => toggleJob(job.JOB_ID)}>+ {job.JOB_NAME}</button>)}
-        {!jobs.length && <span className="orchestration-empty">Create a job before creating a workflow.</span>}
-      </div><small className="form-help">A workflow without jobs is an inactive placeholder. The same reusable job may belong to multiple workflows.</small></div>
+      {!workflow && <div className="form-field"><label>Entry job</label><select required value={form.entryJobId} onChange={event => update('entryJobId', event.target.value)}><option value="">Select an existing job</option>{jobs.map(job => <option key={job.JOB_ID} value={job.JOB_ID}>{job.JOB_NAME}</option>)}</select><small className="form-help">The workflow is created together with its entry job assignment.</small></div>}
+      {workflow && <div className="form-field"><label>Assigned jobs</label><div className="orchestration-fixed-value">{existingJobs.length} jobs</div><small className="form-help">Maintain job assignments, parents and execution rules in Orchestration / Dependencies.</small></div>}
       <div className="modal-actions">{workflow && <button className="button danger orchestration-delete" type="button" disabled={saving} onClick={requestDelete}>{confirmDelete ? 'Confirm delete' : 'Delete'}</button>}<button className="button" type="button" onClick={onClose}>Cancel</button><button className="button primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save workflow'}</button></div>
     </form>
   </div>

@@ -32,7 +32,6 @@ class EnvironmentConfigTests(unittest.TestCase):
         self.assertEqual(config["ORCHESTRATION_NAMESPACE"], "KUMO_DEV.MONITOR_META")
         self.assertEqual(config["LIM_STAGE"], "KUMO_DEV.META.AZURE_LIM_STAGE")
         self.assertEqual(config["LIM_LOAD_PROCEDURE"], "KUMO_DEV.MONITOR_META.LOAD_RAW_LIM_FROM_STAGE")
-        self.assertFalse(config["AUTO_RESUME_TASKS"])
 
     def test_each_environment_routes_all_application_objects_to_its_database(self):
         for environment in ("DEV", "TST", " dev "):
@@ -50,7 +49,6 @@ class EnvironmentConfigTests(unittest.TestCase):
                 self.assertEqual(config["SET_READY_LATEST_TABLE"], database + ".MONITOR_META._TMP_SET_READY_LOG")
                 self.assertEqual(config["SET_READY_HISTORY_TABLE"], database + ".MONITOR_META._SET_READY_LOG")
                 self.assertEqual(config["RULE_VERIFY_PROCEDURE"], database + ".MONITOR_APP.SP_RULE_BASED_WORKFLOW_REQUEST_RUN")
-                self.assertFalse(config["AUTO_RESUME_TASKS"])
                 self.assertEqual(config["LIM_LOAD_PROCEDURE"], database + ".MONITOR_META.LOAD_RAW_LIM_FROM_STAGE")
                 self.assertEqual(config["LIM_READINESS_SOURCE"], "BATCH_CONTROL")
                 for key, value in config.items():
@@ -65,7 +63,6 @@ class EnvironmentConfigTests(unittest.TestCase):
         self.assertEqual(config["SCHEMA"], "MONITOR_APP")
         self.assertEqual(config["METADATA_SCHEMA"], "MONITOR_META")
         self.assertEqual(config["ORCHESTRATION_SCHEMA"], "MONITOR_META")
-        self.assertFalse(config["AUTO_RESUME_TASKS"])
 
     def test_parameter_table_can_live_outside_the_monitored_database(self):
         settings = load_config(KUMO_ENV="DEV", KUMO_ENVIRONMENT_TABLE="CONTROL.CONFIG.ENV_SETTINGS")

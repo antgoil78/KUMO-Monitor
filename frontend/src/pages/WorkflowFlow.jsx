@@ -19,6 +19,14 @@ function relationVisual(dependency) {
   const type = String(dependency.DEPENDENCY_TYPE || 'TRIGGER').toUpperCase()
   const status = String(dependency.MIN_STATUS_LEVEL || 'SUCCESS').toUpperCase()
   if (type === 'BLOCKER') return { color: '#ef5350', port: 'red', label: `Blocks on ${status.toLowerCase()}` }
+  if (['SUCCESS', 'WARNING', 'ERROR'].some(key => Object.hasOwn(dependency, key))) {
+    const allowed = ['SUCCESS', 'WARNING', 'ERROR'].filter(key => dependency[key] !== false)
+    const label = allowed.length === 3 ? 'On any completed status' : allowed.length ? `On ${allowed.map(value => value.toLowerCase()).join(' / ')}` : 'All statuses rejected'
+    const tone = !allowed.includes('SUCCESS') && allowed.includes('ERROR') ? { color: '#ef5350', port: 'red' }
+      : allowed.includes('WARNING') && !allowed.includes('ERROR') ? { color: '#f2c94c', port: 'yellow' }
+      : { color: '#4299ff', port: 'blue' }
+    return { ...tone, label: `${label}${dependency.SQL_CONDITION ? ' + SQL condition' : ''}` }
+  }
   if (status === 'WARNING') return { color: '#f2c94c', port: 'yellow', label: 'On warning' }
   if (['ERROR', 'FAILED', 'FAILURE'].includes(status)) return { color: '#ef5350', port: 'red', label: `On ${status.toLowerCase()}` }
   return { color: '#4299ff', port: 'blue', label: `On ${status.toLowerCase()}` }

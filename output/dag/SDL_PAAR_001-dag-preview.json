@@ -1,0 +1,165 @@
+{
+  "workflowId": "9a0b17f0-187c-4c0c-aed7-348326ff258f",
+  "workflowName": "PAAR SDL EDV",
+  "selection": [
+    "+SDL_PAAR_001+"
+  ],
+  "projectFqn": "KUMO_TST.DBT_APP.KUMO_TST",
+  "target": "kumo_TST",
+  "nodes": [
+    {
+      "id": "model.kumo.EDV__PAAR_PGAR_H",
+      "label": "EDV__PAAR_PGAR_H",
+      "path": "models/data/EDV/PAAR/EDV__PAAR_PGAR_H.sql",
+      "materialization": "incremental",
+      "tests": 1
+    },
+    {
+      "id": "model.kumo.EDV__PAAR_PGAR_H_V",
+      "label": "EDV__PAAR_PGAR_H_V",
+      "path": "models/data/EDV/PAAR/SRC/EDV__PAAR_PGAR_H_V.sql",
+      "materialization": "view",
+      "tests": 0
+    },
+    {
+      "id": "model.kumo.EDV__PAAR_PGAR_S",
+      "label": "EDV__PAAR_PGAR_S",
+      "path": "models/data/EDV/PAAR/EDV__PAAR_PGAR_S.sql",
+      "materialization": "incremental",
+      "tests": 2
+    },
+    {
+      "id": "model.kumo.EDV__PAAR_PGAR_S_V",
+      "label": "EDV__PAAR_PGAR_S_V",
+      "path": "models/data/EDV/PAAR/SRC/EDV__PAAR_PGAR_S_V.sql",
+      "materialization": "view",
+      "tests": 0
+    },
+    {
+      "id": "model.kumo.EDV__PAAR_PGAR__CUST_CUST_L_V",
+      "label": "EDV__PAAR_PGAR__CUST_CUST_L_V",
+      "path": "models/data/EDV/PAAR/SRC/EDV__PAAR_PGAR__CUST_CUST_L_V.sql",
+      "materialization": "view",
+      "tests": 0
+    },
+    {
+      "id": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MSTR_L",
+      "label": "EDV__PAAR_PGAR__PAAR_PGAR$MSTR_L",
+      "path": "models/data/EDV/PAAR/EDV__PAAR_PGAR__PAAR_PGAR$MSTR_L.sql",
+      "materialization": "incremental",
+      "tests": 2
+    },
+    {
+      "id": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MSTR_LS",
+      "label": "EDV__PAAR_PGAR__PAAR_PGAR$MSTR_LS",
+      "path": "models/data/EDV/PAAR/EDV__PAAR_PGAR__PAAR_PGAR$MSTR_LS.sql",
+      "materialization": "incremental",
+      "tests": 0
+    },
+    {
+      "id": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MSTR_L_V",
+      "label": "EDV__PAAR_PGAR__PAAR_PGAR$MSTR_L_V",
+      "path": "models/data/EDV/PAAR/SRC/EDV__PAAR_PGAR__PAAR_PGAR$MSTR_L_V.sql",
+      "materialization": "view",
+      "tests": 0
+    },
+    {
+      "id": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MTHR_L",
+      "label": "EDV__PAAR_PGAR__PAAR_PGAR$MTHR_L",
+      "path": "models/data/EDV/PAAR/EDV__PAAR_PGAR__PAAR_PGAR$MTHR_L.sql",
+      "materialization": "incremental",
+      "tests": 2
+    },
+    {
+      "id": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MTHR_LS",
+      "label": "EDV__PAAR_PGAR__PAAR_PGAR$MTHR_LS",
+      "path": "models/data/EDV/PAAR/EDV__PAAR_PGAR__PAAR_PGAR$MTHR_LS.sql",
+      "materialization": "incremental",
+      "tests": 0
+    },
+    {
+      "id": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MTHR_L_V",
+      "label": "EDV__PAAR_PGAR__PAAR_PGAR$MTHR_L_V",
+      "path": "models/data/EDV/PAAR/SRC/EDV__PAAR_PGAR__PAAR_PGAR$MTHR_L_V.sql",
+      "materialization": "view",
+      "tests": 0
+    },
+    {
+      "id": "model.kumo.EDV__PAAR_PGAR__PART_PAPR_L_V",
+      "label": "EDV__PAAR_PGAR__PART_PAPR_L_V",
+      "path": "models/data/EDV/PAAR/SRC/EDV__PAAR_PGAR__PART_PAPR_L_V.sql",
+      "materialization": "view",
+      "tests": 0
+    },
+    {
+      "id": "model.kumo.RAW_LIM_PAAR_001_V",
+      "label": "RAW_LIM_PAAR_001_V",
+      "path": "models/data/SDL/PAAR/SRC/RAW_LIM_PAAR_001_V.sql",
+      "materialization": "view",
+      "tests": 0
+    },
+    {
+      "id": "model.kumo.SDL_PAAR_001",
+      "label": "SDL_PAAR_001",
+      "path": "models/data/SDL/PAAR/SDL_PAAR_001.sql",
+      "materialization": "incremental",
+      "tests": 1
+    }
+  ],
+  "edges": [
+    {
+      "source": "model.kumo.EDV__PAAR_PGAR_H_V",
+      "target": "model.kumo.EDV__PAAR_PGAR_H"
+    },
+    {
+      "source": "model.kumo.SDL_PAAR_001",
+      "target": "model.kumo.EDV__PAAR_PGAR_H_V"
+    },
+    {
+      "source": "model.kumo.EDV__PAAR_PGAR_S_V",
+      "target": "model.kumo.EDV__PAAR_PGAR_S"
+    },
+    {
+      "source": "model.kumo.SDL_PAAR_001",
+      "target": "model.kumo.EDV__PAAR_PGAR_S_V"
+    },
+    {
+      "source": "model.kumo.SDL_PAAR_001",
+      "target": "model.kumo.EDV__PAAR_PGAR__CUST_CUST_L_V"
+    },
+    {
+      "source": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MSTR_L_V",
+      "target": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MSTR_L"
+    },
+    {
+      "source": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MSTR_L_V",
+      "target": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MSTR_LS"
+    },
+    {
+      "source": "model.kumo.SDL_PAAR_001",
+      "target": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MSTR_L_V"
+    },
+    {
+      "source": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MTHR_L_V",
+      "target": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MTHR_L"
+    },
+    {
+      "source": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MTHR_L_V",
+      "target": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MTHR_LS"
+    },
+    {
+      "source": "model.kumo.SDL_PAAR_001",
+      "target": "model.kumo.EDV__PAAR_PGAR__PAAR_PGAR$MTHR_L_V"
+    },
+    {
+      "source": "model.kumo.SDL_PAAR_001",
+      "target": "model.kumo.EDV__PAAR_PGAR__PART_PAPR_L_V"
+    },
+    {
+      "source": "model.kumo.RAW_LIM_PAAR_001_V",
+      "target": "model.kumo.SDL_PAAR_001"
+    }
+  ],
+  "modelCount": 14,
+  "testCount": 8
+}

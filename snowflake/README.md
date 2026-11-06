@@ -76,6 +76,36 @@ the destination is configured and ready.
 
 ## Current DEV migrations
 
+The orchestration dependency editor uses `WORKFLOW` and `JOB` as definitions
+and `WORKFLOW_DEPENDENCY` for both workflow rows and job assignments. It no
+longer reads or writes `WORKFLOW_JOB`. That table is retained as migration
+source only. The Workflow catalog creates a workflow together with its entry
+job; subsequent assignments and parent/status/SQL/ALLOW rules are maintained
+in Orchestration / Dependencies. Run preview remains simulated.
+
+In the unified store, `CHILD_WORKFLOW_ID` identifies the containing workflow.
+`JOB_ID IS NULL` identifies its workflow configuration row; otherwise the row
+assigns that job. `PARENT_WORKFLOW_ID` or `PARENT_JOB_ID` identifies the parent,
+with job parents scoped to the same containing workflow. `TRIGGER_TYPE`, the
+nullable `SUCCESS`/`WARNING`/`ERROR` flags, `SQL_CONDITION`, and `ALLOW` hold the
+editable rules. The API validates membership uniqueness, parent types, cycles,
+and the single entry job before saving all edits in one transaction. A revision
+token rejects stale edits. SQL conditions are stored as text and are not
+executed by configuration saves.
+
+```bash
+python backend/migrations/unify_orchestration_dependencies.py
+python backend/migrations/unify_orchestration_dependencies.py --apply
+```
+
+This targeted migration was applied to DEV on 27 October 2026. It preserves
+multiple workflow parents and entry jobs for explicit resolution in the editor,
+rather than choosing new relationships. It does not execute SQL conditions,
+change schedules, or start tasks. Repeating it after migration is a no-op.
+For TST, use `--namespace KUMO_TST.MONITOR_META` when that promotion is requested.
+Only `WORKFLOW_DEPENDENCY` changes its definition; refresh only that object's
+saved DDL after applying the migration.
+
 `backend/migrations/` keeps the current DEV readiness, parameter and command
 template migrations, with `migration_support.py` providing shared helpers.
 The readiness migration verifies the three procedures it changes and reads
@@ -90,6 +120,27 @@ historical readiness logs, both in `[DATABASE].[META_SCHEMA]`
 The loader and readiness procedures resolve their database and schemas from the
 shared environment parameters. An explicit database argument must match the
 configured engine environment; omitted arguments use that environment.
+
+## Resetting a LIM sequence baseline
+
+`backend/migrations/apply_lim_sequence_reset.py --environment-table
+KUMO_TST.MONITOR_META.APPLICATION_PARAMETERS` checks only the two readiness
+procedures. Add `--apply` to deploy the saved corrections while preserving
+grants. It refuses unreviewed procedure drift or active/queued workflows; it
+does not change configuration rows, clear logs, or run workflows.
+
+With a NULL `DLVY_PKG_YEAR_SEQ_NO` in `RAW_LIM_PKG_GROUP_SOURCE`, sequence
+validation starts at the first unhandled delivery for that source/subject/package.
+Deliveries whose payloads are all already accepted remain visible but do not
+participate in sequence ordering. Partial deliveries still participate, and
+subsequent deliveries retain normal gap checks. Successful readiness saves the
+new year and sequence, including when only the sequence field was NULL.
+
+The explicit regression check
+`python3 backend/tests/live_lim_sequence_reset.py --database KUMO_TST` uses
+disposable synthetic fixtures and removes its schema afterward. It verifies
+baseline resets, preservation of processed registrations, later gaps, missing
+payloads, accepted empty deliveries, and row-count validation.
 
 ## Workflow environment parameters
 
@@ -187,6 +238,17 @@ command, but conflicting targets fail. Existing `--vars` must be a JSON object;
 the resolver preserves its values and always sets `runId` to the actual run ID.
 The optional leading `dbt` executable name is removed before constructing
 `EXECUTE DBT PROJECT`. DAG previews use the same resolution and variables.
+
+All app-generated dbt executions include `WRITEBACK = FALSE` outside `ARGS`,
+including DAG `list` requests. The resolved command preview displays the same
+clause. dbt arguments, target selection and run variables are preserved.
+
+`python backend/migrations/apply_dbt_writeback_default.py --environment-table
+KUMO_TST.MONITOR_META.APPLICATION_PARAMETERS` performs a read-only preflight;
+add `--apply` to update only that environment's shared command resolver while
+preserving grants. It rejects unrelated procedure drift and verifies SQL/dbt
+resolution without executing the returned commands. The DAG request change
+ships with the next app image through the normal Git release workflow.
 
 The editor, job editor and run dialog automatically show the complete resolved
 command as the definition changes. **Refresh** reads current parameter values

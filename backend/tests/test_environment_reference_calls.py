@@ -20,7 +20,7 @@ class EnvironmentReferenceCallsTests(unittest.TestCase):
     def settings(self, environment):
         return {key: value for key, value in load_config(KUMO_ENV=environment).items() if key.isupper()}
 
-    def test_scheduler_reads_metadata_calls_app_and_remains_suspended(self):
+    def test_enabled_scheduler_reads_metadata_calls_app_and_resumes(self):
         columns = {"SCHEDULE_CRON": "VARCHAR", "SCHEDULE_TIMEZONE": "VARCHAR", "IS_ENABLED": "BOOLEAN"}
         row = {"CRON": "0 0 * * *", "TZ": "UTC", "SCHEDULE_ENABLED": True, "WORKFLOW_ENABLED": True}
         for env in ("DEV", "TST"):
@@ -34,8 +34,29 @@ class EnvironmentReferenceCallsTests(unittest.TestCase):
                 create = next(sql for sql in statements if "CREATE OR REPLACE TASK" in sql)
                 self.assertIn(f"TASK KUMO_{env}.MONITOR_APP.", create)
                 self.assertIn(f"CALL KUMO_{env}.MONITOR_APP.SP_WORKFLOW_REQUEST_RUN", create)
-                self.assertTrue(statements[-1].endswith(" SUSPEND"))
-                self.assertFalse(any("RESUME" in sql for sql in statements))
+                self.assertTrue(statements[-1].endswith(" RESUME"))
+
+    def test_disabled_workflow_keeps_scheduler_suspended(self):
+        columns = {"SCHEDULE_CRON": "VARCHAR", "SCHEDULE_TIMEZONE": "VARCHAR", "IS_ENABLED": "BOOLEAN"}
+        row = {"CRON": "0 6 * * 1-5", "TZ": "UTC", "SCHEDULE_ENABLED": True, "WORKFLOW_ENABLED": False}
+        with patch.object(repo, "describe_table", return_value=columns), \
+                patch.object(repo, "_query", return_value=[row]), \
+                patch.object(repo, "_execute") as execute:
+            repo.create_or_replace_sf_task("workflow-1")
+        self.assertTrue(execute.call_args.args[0].endswith(" SUSPEND"))
+        self.assertFalse(any("RESUME" in call.args[0] for call in execute.call_args_list))
+
+    def test_disabled_schedule_removes_scheduler(self):
+        columns = {"SCHEDULE_CRON": "VARCHAR", "SCHEDULE_TIMEZONE": "VARCHAR", "IS_ENABLED": "BOOLEAN"}
+        row = {"CRON": "0 6 * * 1-5", "TZ": "UTC", "SCHEDULE_ENABLED": False, "WORKFLOW_ENABLED": True}
+        with patch.object(repo, "describe_table", return_value=columns), \
+                patch.object(repo, "_query", return_value=[row]), \
+                patch.object(repo, "_execute") as execute:
+            repo.create_or_replace_sf_task("workflow-1")
+        self.assertEqual(execute.call_args.args[0],
+                         f"DROP TASK IF EXISTS {repo.task_name_for_workflow('workflow-1')}_SCHEDULER")
+        self.assertFalse(any("CREATE" in call.args[0] or "RESUME" in call.args[0]
+                             for call in execute.call_args_list))
 
     def test_rule_verification_supplies_the_selected_database(self):
         for env in ("DEV", "TST"):

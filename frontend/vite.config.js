@@ -9,7 +9,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:5000'
+      '/api': process.env.KUMO_API_PROXY || 'http://localhost:5000'
     }
   }
 })

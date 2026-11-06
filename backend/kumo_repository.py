@@ -1674,7 +1674,8 @@ def create_or_replace_sf_task(workflow_id, warehouse=None):
       CALL {config.DB}.{config.SCHEMA}.SP_WORKFLOW_REQUEST_RUN('{sql_escape(workflow_id)}', 'SCHEDULED', NULL, 0, NULL)
     """
     _execute(ddl)
-    _execute(f"ALTER TASK {scheduler_fqn} {'RESUME' if workflow_enabled and config.AUTO_RESUME_TASKS else 'SUSPEND'}")
+    # Saving an enabled schedule must activate its native Snowflake task.
+    _execute(f"ALTER TASK {scheduler_fqn} {'RESUME' if workflow_enabled else 'SUSPEND'}")
 
 
 def _ensure_json_array_str(value):
@@ -2356,7 +2357,7 @@ def load_dag_preview(workflow_id, dbt_command_override=None):
         args.extend(["--target", target])
     args.extend(["--vars", json.dumps(resolved["dbtVars"])])
     args_text = shlex.join(args).replace("'", "''")
-    sql = f"EXECUTE DBT PROJECT {project_fqn} ARGS = '{args_text}'"
+    sql = f"EXECUTE DBT PROJECT {project_fqn} ARGS = '{args_text}' WRITEBACK = FALSE"
 
     with sf.connection(use_warehouse=True, include_context=True, force_service=True) as conn:
         cur = conn.cursor(DictCursor)
