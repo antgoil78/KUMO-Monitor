@@ -188,7 +188,7 @@ start tasks or reconcile state; explicit Run and Refresh status actions use POST
 The new engine does not automatically dispatch downstream workflows or
 write existing workflow history/queues, or reuse the old dispatcher,
 completion procedures, or locks. Known legacy engine/cleanup references in selected
-commands are rejected, including the migrated maintenance cleanup. Business
+commands are rejected. The retired cleanup call was removed from the migrated maintenance job. Business
 workload tables, loaders, and dbt targets remain shared resources.
 
 The explicit validation command creates disposable SELECT/dbt-parse jobs and
@@ -464,6 +464,72 @@ The 38 `RAW_LIM_PKG_GROUP_SOURCE` configuration rows were also copied unchanged
 from DEV into TST and verified by count and fingerprint. All 12 active subjects
 have their required TST RAW tables. `RAW_LIM_META` and readiness logs are derived
 from TST loads/refreshes rather than copied from DEV.
+
+## Reconcile missing TST workflows into DEV
+
+`python backend/migrations/add_missing_tst_workflows_to_dev.py` compares TST's
+legacy execution definitions (`WORKFLOWS`, `WORKFLOW_TASKS`) with DEV's current
+`WORKFLOW`, `JOB`, and `DEPENDENCIES` catalog. It resolves all resulting job
+commands using both environments' parameter stores without executing them.
+Existing command/dependency differences require review; the retired temporary
+task cleanup call is the only accepted SQL exception.
+
+Add `--apply` to insert complete missing workflows, jobs, dependency chains,
+and required package source mappings in DEV in one guarded transaction.
+Existing DEV configuration is preserved. New workflows and schedules remain
+disabled until their DEV prerequisites are verified. New package mappings
+start with NULL year/sequence checkpoints rather than
+copying TST processing state. No DDL, workloads, native tasks, or TST data are
+changed. Repeating the migration inserts nothing once the catalogs match.
+
+The CARD source named `CARD SDL EDV` currently selects SDL only; migration
+therefore creates `CARD LOAD` with readiness and SDL jobs, without adding an
+EDV execution. `RUN DEPENDENCIES` is old engine plumbing. The older TST
+`WORKFLOW`/`JOB` prototype entries (`AAAA`, `BBBB`, `MART1`, `MART2`, placeholder
+`dbr run xxx` commands, and the unassigned `TEST` SQL job) are outside the
+executable business catalog and are not imported by this migration.
+
+## TST promotion after DEV review
+
+Promote only after the user has checked DEV. Deploy the same approved Git/image
+release and its affected Snowflake objects together; changing the SPCS image
+alone does not migrate the engine. Prepare a targeted TST migration from the
+maintained DEV definitions, with all app/metadata bindings resolved to TST.
+The earlier provisioning and configuration-copy scripts are not an upgrade
+path for TST's populated, older catalog.
+
+The promotion must cover the current `WORKFLOW` and `JOB` definitions, the
+`DEPENDENCIES` parent chains, `WORKFLOW_EXECUTION_LOG`, all five `SP_ORCH_*`
+engine procedures listed in `apply_parallel_engine.py`, and static
+`TASK_ORCH_MAINTENANCE`. Review the shared command resolver and environment
+helper against that release too. Preserve TST's environment parameters,
+processing checkpoints, history and grants. Do not copy DEV execution state.
+
+Archive the legacy objects with the same `X_` names used in DEV:
+
+- `MONITOR_META.WORKFLOW_RUN_QUEUE` and
+  `MONITOR_META.WORKFLOW_EXECUTION_QUEUE_STREAM`.
+- The nine procedure overloads listed in `retire_legacy_engine_dev.py`:
+  `SP_WORKFLOW_REQUEST_RUN`, `SP_WORKFLOW_DISPATCH`, `SP_RUN_WORKFLOW`,
+  `SP_SQL_COMPLETE`, `SP_DBT_COMPLETE`, `SP_RULE_BASED_WORKFLOW_REQUEST_RUN`,
+  and `SP_CLEANUP_OLD_TMP_TASKS` in `MONITOR_APP`.
+- The old `TASK_WF_MASTER_DISPATCHER` and legacy workflow scheduler/run tasks
+  in `MONITOR_APP`. Tasks and streams need the same guarded clone/drop
+  treatment as DEV; native renames cover the queue and procedures.
+
+The DEV retirement script deliberately cannot target TST. Implement and review
+the TST cutover migration before applying these changes. Stop old admissions,
+drain old executions, and suspend the old tasks before archiving. Set TST's
+`ORCHESTRATION / LEGACY_ENGINE_RETIRED=true` only after the replacement engine
+and catalog are verified. Prepare generated schedulers suspended; activate
+only the schedules approved for TST after execution validation. Exclude these
+generated tasks from saved DDL.
+
+The reconciliation review records outstanding prerequisites: CARD's dbt files
+are missing from DEV, automatic downstream workflow dispatch is absent, and
+completion notification parity still needs integration/testing. Resolve these
+before treating the new engine as a replacement for TST's scheduled pipeline.
+The current DEV reconciliation and release do not change TST objects.
 
 ## DEV retirement of the old execution engine
 

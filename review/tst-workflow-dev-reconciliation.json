@@ -1,0 +1,232 @@
+{
+  "workflows": [
+    {
+      "workflow": "ADTX LOAD",
+      "jobs": [
+        "ADTX READY TO LOAD",
+        "ADTX SDL",
+        "ADTX EDV"
+      ]
+    },
+    {
+      "workflow": "ARAC LOAD",
+      "jobs": [
+        "ARAC READY TO LOAD",
+        "ARAC SDL",
+        "ARAC EDV"
+      ]
+    },
+    {
+      "workflow": "CACT LOAD",
+      "jobs": [
+        "CACT READY TO LOAD",
+        "CACT SDL",
+        "CACT EDV"
+      ]
+    },
+    {
+      "workflow": "CARD LOAD",
+      "jobs": [
+        "CARD READY TO LOAD",
+        "CARD SDL"
+      ]
+    },
+    {
+      "workflow": "CUAR LOAD",
+      "jobs": [
+        "CUAR READY TO LOAD",
+        "CUAR SDL",
+        "CUAR EDV"
+      ]
+    },
+    {
+      "workflow": "DISB LOAD",
+      "jobs": [
+        "DISB READY TO LOAD",
+        "DISB SDL",
+        "DISB EDV"
+      ]
+    },
+    {
+      "workflow": "GEOG LOAD",
+      "jobs": [
+        "GEOG READY TO LOAD",
+        "GEOG SDL",
+        "GEOG EDV"
+      ]
+    },
+    {
+      "workflow": "PAAR LOAD",
+      "jobs": [
+        "PAAR READY TO LOAD",
+        "PAAR SDL",
+        "PAAR EDV"
+      ]
+    },
+    {
+      "workflow": "POST LOAD",
+      "jobs": [
+        "POST READY TO LOAD",
+        "POST SDL",
+        "POST EDV"
+      ]
+    },
+    {
+      "workflow": "PROD LOAD",
+      "jobs": [
+        "PROD READY TO LOAD",
+        "PROD SDL",
+        "PROD EDV"
+      ]
+    },
+    {
+      "workflow": "PYMT LOAD",
+      "jobs": [
+        "PYMT READY TO LOAD",
+        "PYMT SDL",
+        "PYMT EDV"
+      ]
+    },
+    {
+      "workflow": "SEBK LOAD",
+      "jobs": [
+        "SEBK READY TO LOAD",
+        "SEBK SDL",
+        "SEBK EDV"
+      ]
+    },
+    {
+      "workflow": "TPAC LOAD",
+      "jobs": [
+        "TPAC READY TO LOAD",
+        "TPAC SDL",
+        "TPAC EDV"
+      ]
+    },
+    {
+      "workflow": "LOAD RAW DAILY",
+      "jobs": [
+        "LOAD RAW DAILY"
+      ]
+    },
+    {
+      "workflow": "MAINTENANCE - CLEANUP",
+      "jobs": [
+        "MAINTENANCE - CLEANUP"
+      ]
+    }
+  ],
+  "excluded": [
+    "RUN DEPENDENCIES"
+  ],
+  "source_workflows": 29,
+  "migrated_source_workflows": 28,
+  "target_counts": {
+    "WORKFLOW": 15,
+    "JOB": 40,
+    "DEPENDENCIES": 55
+  },
+  "missing_workflows": [
+    "CARD LOAD"
+  ],
+  "missing_jobs": [
+    "CARD READY TO LOAD",
+    "CARD SDL"
+  ],
+  "rows_to_insert": {
+    "WORKFLOW": 1,
+    "JOB": 2,
+    "DEPENDENCIES": 3,
+    "RAW_LIM_PKG_GROUP_SOURCE": 4
+  },
+  "sql_jobs_compared": 15,
+  "maintenance_exception": "Retired SP_CLEANUP_OLD_TMP_TASKS call omitted",
+  "tst_processing_checkpoints_copied": false,
+  "commands_resolved_without_execution": 80,
+  "applied": true,
+  "source": "KUMO_TST.MONITOR_META",
+  "target": "KUMO_DEV.MONITOR_META",
+  "existing_dev_configuration_preserved": true,
+  "tst_changed": false,
+  "new_workflows_enabled": false,
+  "schedules_enabled": false,
+  "job_commands_executed": false,
+  "ddl_changed": false,
+  "checked_at_utc": "2026-11-12T09:57:52.327737+00:00",
+  "postcheck": {
+    "counts": {
+      "WORKFLOW": 15,
+      "JOB": 40,
+      "DEPENDENCIES": 55,
+      "RAW_LIM_PKG_GROUP_SOURCE": 42
+    },
+    "repeat_plan_rows_to_insert": {
+      "WORKFLOW": 0,
+      "JOB": 0,
+      "DEPENDENCIES": 0,
+      "RAW_LIM_PKG_GROUP_SOURCE": 0
+    },
+    "catalog_chain_validation_passed": true,
+    "card_workflow_enabled": false,
+    "card_schedule_enabled": false,
+    "card_native_task_created": false,
+    "card_package_mappings": 4,
+    "card_checkpoints_empty": true
+  },
+  "sql_procedure_checks": [
+    {
+      "procedure": "SP_LOAD_RAW_LIM_INCREMENTAL_PERSIST",
+      "matches_after_database_normalization": true,
+      "normalized_sha256": "151fe3f07d30a8abf44f33724636317e6a931fbb0dc14d27458d649fb5164796"
+    },
+    {
+      "procedure": "SP_PURGE_LIM_BATCH",
+      "matches_after_database_normalization": true,
+      "normalized_sha256": "096d775e31604d9212187115f3d1dd8cf3f0b33b29f5dc07b1f803422085bc40"
+    },
+    {
+      "procedure": "SP_RAW_LIM_META_REFRESH",
+      "matches_after_database_normalization": true,
+      "normalized_sha256": "67e5ced5351334a725b30c2e4ac6acc337e361ddae43fe89b0177741ffa82e8e"
+    },
+    {
+      "procedure": "SP_RAW_LIM_SET_READY",
+      "matches_after_database_normalization": true,
+      "normalized_sha256": "fd5996d53e133590c54f35a257f2c368baea8dd66fa7dae7136b2b31d9721b52"
+    }
+  ],
+  "excluded_sandbox_workflows": [
+    "AAAA",
+    "BBBB",
+    "MART1",
+    "MART2"
+  ],
+  "excluded_sandbox_reason": "SANDBOX PROTOTYPE definitions use placeholder COMMAND jobs (dbr run xxx), with ambiguous workflow parents/branches. Not executable business workflows.",
+  "excluded_unassigned_sql_job": {
+    "name": "TEST",
+    "reason": "Placeholder SQL text TEST; no business execution definition"
+  },
+  "sql_job_comparison": {
+    "jobs": 15,
+    "exact_source_command_matches": 14,
+    "intentional_cleanup_exception": 1
+  },
+  "card_dbt_prerequisite": {
+    "dev_selector_sql_files": 0,
+    "tst_selector_sql_files": 42,
+    "selector": "models/data/SDL/CARD",
+    "project_source_kind": "Snowflake workspaces; no Git repository recorded",
+    "missing_input": "DEV dbt source repository/branch"
+  },
+  "remaining_tst_cutover_gaps": [
+    "CARD SDL files need migration into the DEV dbt project before enabling CARD",
+    "Automatic downstream workflow dispatch is not yet implemented in the new engine",
+    "Completion notification parity still needs integration and testing"
+  ],
+  "validation": {
+    "migration_unit_tests_passed": 14,
+    "git_diff_check_passed": true,
+    "business_sql_or_dbt_executed": false
+  },
+  "ready_for_tst_cutover": false
+}
