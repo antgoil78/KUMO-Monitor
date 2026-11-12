@@ -4,6 +4,7 @@ import { api } from '../api.js'
 import LoadingState from '../components/LoadingState.jsx'
 import PageHeader from '../components/PageHeader.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
+import { formatDateTime } from '../utils/time.js'
 import EditorDialog from '../components/EditorDialog.jsx'
 import HierarchyToggle from '../components/HierarchyToggle.jsx'
 import ActionIcon from '../components/ActionIcon.jsx'
@@ -13,7 +14,12 @@ import { RunWorkflowDialog } from './WorkflowExecution.jsx'
 import './OrchestrationMonitor.css'
 
 const statuses = ['RUNNING', 'CLAIMED', 'QUEUED', 'FAILED', 'SUCCESS', 'WARNING', 'SKIPPED', 'CANCELLED', 'NOT RUN']
-const summaryStatuses = ['RUNNING', 'FAILED', 'SUCCESS', 'QUEUED', 'NOT RUN']
+const summaryStatuses = [
+  ['SUCCESS', 'success', '✓', 'success'], ['FAILED', 'failed', '×', 'failed'],
+  ['RUNNING', 'running', '▶', 'running/init'], ['QUEUED', 'queued', '●', 'queued'],
+  ['NOT RUN', 'muted', '—', 'not run'], ['WARNING', 'warning', '!', 'warning'],
+  ['SKIPPED', 'skipped', '↷', 'skipped'], ['CANCELLED', 'muted', '—', 'cancelled']
+]
 const timeFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Stockholm', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 const dateFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Stockholm', day: '2-digit', month: 'short', year: 'numeric' })
 
@@ -231,6 +237,11 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
   const [notice, setNotice] = useState('')
   const savingRef = useRef(false)
   const rows = useMemo(() => (data?.rows || []).map(workflow => applySubmission(workflow, data?.submissions)), [data])
+  const summary = useMemo(() => rows.reduce((counts, workflow) => {
+    const state = ['SUBMITTING', 'INITIATING', 'CLAIMED'].includes(workflow.run.status) ? 'RUNNING' : workflow.run.status
+    counts[state] = (counts[state] || 0) + 1
+    return counts
+  }, {}), [rows])
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
@@ -295,7 +306,6 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
     {data?.submissions?.filter(row => row.error).map(row => <div className="alert error" role="alert" key={row.requestId}>{rows.find(workflow => workflow.WORKFLOW_ID === row.workflowId)?.WORKFLOW_NAME || 'Workflow'}: {row.error}</div>)}
     {loading && <LoadingState>Loading workflows and executions…</LoadingState>}
     {data && !data.warming && <>
-      <div className="om-notice"><strong>Live data</strong><span>Updated {timeFormatter.format(new Date(data.generatedAt))} Europe/Stockholm · SSE updates · Backend refresh {data.refreshSeconds}s</span><span>Times shown in Europe/Stockholm. Next Run comes from the workflow scheduler.</span></div>
       {data.warnings?.length > 0 && <details className="om-warnings"><summary>{data.warnings.length} {data.warnings.length === 1 ? 'issue' : 'issues'} to review</summary><ul>{data.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></details>}
       <div className="monitor-toolbar om-toolbar">
         <input className="search-input" type="search" aria-label="Search workflows, groups or jobs" placeholder="Search workflows, groups or jobs…" value={search} onChange={event => changeSearch(event.target.value)} />
@@ -305,9 +315,15 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
           <select className="status-select" aria-label="Filter workflow status" value={status} onChange={event => setStatus(event.target.value)}><option value="">All workflow statuses</option>{statuses.map(value => <option key={value}>{value}</option>)}</select>
         </div>
       </div>
-      <div className="om-summary" aria-label="Workflow summary">
-        {summaryStatuses.map(value => <span key={value}><StatusBadge status={value} /><strong>{visible.filter(workflow => workflow.run.status === value || (value === 'RUNNING' && workflow.run.status === 'CLAIMED')).length}</strong></span>)}
-        <span className="om-total" aria-live="polite">{visible.length} of {rows.length} workflows · {visible.reduce((total, workflow) => total + workflow.jobs.filter(job => !job.runOnly).length, 0)} job assignments</span>
+      <div className="monitor-system-strip om-summary" role="group" aria-label="Workflow summary">
+        <div className="system-counts">
+          {summaryStatuses.filter(([value], index) => index < 5 || summary[value]).map(([value, tone, icon, label]) => <span className={`summary-item ${tone}`} key={value}>
+            <span className="summary-icon" aria-hidden="true">{icon}</span><strong>{summary[value] || 0}</strong><span>{label}</span>
+          </span>)}
+          <span className="summary-total"><strong>{rows.length}</strong> total</span>
+          {visible.length !== rows.length && <span className="om-summary-filtered">{visible.length} shown</span>}
+        </div>
+        <span className="summary-updated" title="Europe/Stockholm">Updated {formatDateTime(data.generatedAt)}</span>
       </div>
       <div className="om-list-heading"><span>Workflow / Job hierarchy</span><div><button className="button" type="button" disabled={!visible.length} onClick={() => setExpanded(current => new Set([...current, ...visible.map(workflow => workflow.WORKFLOW_ID)]))}>Expand all</button><button className="button" type="button" disabled={!visible.length} onClick={() => setExpanded(new Set())}>Collapse all</button></div></div>
       {view === 'timeline' ? <OrchestrationTimeline workflows={visible} expanded={expanded} onToggle={toggle} now={now} liveGeneratedAt={data.generatedAt} refreshVersion={timelineRefresh} onNavigate={onNavigate} initialState={monitorState?.timeline} monitorFilters={{ search, status, group, expanded: [...expanded] }} onWorkflowControls={workflowId => { setView('table'); setExpanded(current => new Set([...current, workflowId])) }} /> : <div className="om-table-wrap">
