@@ -72,7 +72,7 @@ export default function EngineSettings() {
 
   const engine = data?.engine
   const running = ['STARTED', 'RESUMED'].includes(engine?.state)
-  const suspended = engine?.state === 'SUSPENDED'
+  const suspended = engine?.state === 'SUSPENDED' && !engine?.retired
 
   return (
     <div className="vision-card settings-engine-card" aria-busy={loading || saving}>
@@ -83,6 +83,7 @@ export default function EngineSettings() {
 
       {error && <div className="alert error" role="alert">{error}</div>}
       {notice && <div className="alert success" role="status">{notice}</div>}
+      {engine?.retired && <p className="settings-engine-note">The old engine is retired in this environment. Use Orchestration / Monitor to run workflows and jobs. Historical executions remain available in Workflow archive.</p>}
       {data?.source === 'mock' && <p className="settings-engine-note">Demo mode: these controls update simulated engine state.</p>}
 
       <dl className="settings-engine-details">
@@ -90,7 +91,7 @@ export default function EngineSettings() {
         <div><dt>Snowflake state</dt><dd>{engine?.state || 'Unknown'}</dd></div>
       </dl>
 
-      <p className="settings-engine-note">Resume enables dispatching queued workflow runs, including runs already waiting. Suspend pauses new dispatches; work already running can finish. Individual workflow schedules are managed separately.</p>
+      {!engine?.retired && <p className="settings-engine-note">Resume enables dispatching queued workflow runs, including runs already waiting. Suspend pauses new dispatches; work already running can finish. Individual workflow schedules are managed separately.</p>}
       {engine?.status === 'MISSING' && <p className="settings-engine-note">The master task was not found or is not visible to the application role in this environment.</p>}
 
       <div className="settings-engine-actions">

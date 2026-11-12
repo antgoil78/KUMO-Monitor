@@ -3,7 +3,7 @@ import queue
 import time
 import uuid
 from datetime import datetime, timezone
-from threading import RLock
+from threading import Event, RLock
 
 
 class RealtimeEventBroker:
@@ -18,6 +18,15 @@ class RealtimeEventBroker:
         self._lock = RLock()
         self._clients = {}
         self._client_count_callback = None
+        self._clients_available = Event()
+
+    def wait_for_clients(self):
+        """Pause background database work until this process has an SSE client."""
+        while True:
+            self._clients_available.wait()
+            with self._lock:
+                if self._clients:
+                    return
 
     def set_client_count_callback(self, callback):
         with self._lock:
@@ -72,6 +81,8 @@ class RealtimeEventBroker:
             with self._lock:
                 for client in stale:
                     self._clients.pop(client, None)
+                if not self._clients:
+                    self._clients_available.clear()
 
     def subscribe(self, metadata=None):
         client = queue.Queue(maxsize=100)
@@ -79,6 +90,7 @@ class RealtimeEventBroker:
         details = {**(metadata or {}), "connectedAt": now, "lastActivityAt": now}
         with self._lock:
             self._clients[client] = details
+            self._clients_available.set()
             count = len(self._clients)
         self._notify_client_count(count)
         return client
@@ -87,6 +99,8 @@ class RealtimeEventBroker:
         with self._lock:
             self._clients.pop(client, None)
             count = len(self._clients)
+            if not count:
+                self._clients_available.clear()
         self._notify_client_count(count)
 
     def stream(self, metadata=None, heartbeat_seconds=15):

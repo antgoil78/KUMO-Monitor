@@ -138,9 +138,12 @@ function layoutGraph(rawNodes, rawEdges, direction, highlightRunSelection = fals
   }
 }
 
-export default function DagView({ workflow, workflowId, workflowName, partialRun = null, historicalRunId = '', returnPage = 'monitor', onNavigate }) {
+export default function DagView({ workflow, workflowId, workflowName, partialRun = null, historicalRunId = '', returnPage = 'monitor', returnContext = null, onNavigate, orchestration = null }) {
   const id = workflow?.workflowId || workflowId
   const name = workflow?.workflowName || workflowName || 'DBT workflow'
+  const contextKey = `${id}:${orchestration?.jobId || ''}:${orchestration?.runId || historicalRunId}`
+  const currentContext = useRef(contextKey)
+  currentContext.current = contextKey
   const [dag, setDag] = useState(null)
   const [error, setError] = useState(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -156,7 +159,7 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
   const [includeUpstream, setIncludeUpstream] = useState(false)
   const [includeDownstream, setIncludeDownstream] = useState(false)
   const partialRunRef = useRef(partialRun)
-  const isHistorical = Boolean(historicalRunId && !partialRun)
+  const isHistorical = Boolean(orchestration?.historical || (historicalRunId && !partialRun && !orchestration))
   if (partialRun && partialRunRef.current?.requestId !== partialRun.requestId) {
     partialRunRef.current = partialRun
   }
@@ -198,15 +201,19 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
       return () => { cancelled = true }
     }
     setDag(null)
-    api.workflowDag(id, historicalRunId).then(data => {
+    setSelectedNode(null)
+    setSelectedModelId('')
+    const load = orchestration ? api.orchestrationDag(id, orchestration.runId, orchestration.jobId) : api.workflowDag(id, historicalRunId)
+    load.then(data => {
       if (!cancelled && !partialRunRef.current) setDag(data)
     }).catch(err => !cancelled && setError(err.message))
     return () => { cancelled = true }
-  }, [id, partialRun?.requestId, historicalRunId])
+  }, [id, partialRun?.requestId, historicalRunId, orchestration?.jobId, orchestration?.runId])
 
   async function refreshDag() {
     if (!id || refreshingRef.current) return
     refreshingRef.current = true
+    const requestedContext = currentContext.current
     setRefreshing(true)
     setError(null)
     try {
@@ -226,7 +233,8 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
         if (!match) return
         currentPartialRun.resolvedRunId = match.runId
       }
-      const data = await api.workflowDag(id, currentPartialRun?.resolvedRunId || '')
+      const data = await (orchestration ? api.orchestrationDag(id, orchestration.runId, orchestration.jobId) : api.workflowDag(id, currentPartialRun?.resolvedRunId || historicalRunId || ''))
+      if (requestedContext !== currentContext.current) return
       const nextDag = currentPartialRun ? mergePartialDag(currentPartialRun, data) : data
       setDag(nextDag)
       setSelectedNode(current => current ? (nextDag.nodes || []).find(node => String(node.id) === String(current.id)) || null : null)
@@ -242,7 +250,7 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
     if (!id || isHistorical) return undefined
     const timer = window.setInterval(refreshDag, 5000)
     return () => window.clearInterval(timer)
-  }, [id, partialRun?.requestId, isHistorical])
+  }, [id, partialRun?.requestId, isHistorical, orchestration?.jobId, orchestration?.runId])
 
   const allNodes = dag?.nodes || []
   const modelOptions = useMemo(() => [...allNodes]
@@ -360,26 +368,27 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
 
   if (!id) return <section className="page dag-page"><PageHeader breadcrumb="Pages / Workflow Monitor / DAG" title="Latest DAG Run" subtitle="No workflow was selected." actions={<button className="button" onClick={() => onNavigate('monitor')}>← Back to monitor</button>} /><div className="alert warning">Select a workflow from Workflow Monitor to view its DAG.</div></section>
 
-  const pageTitle = partialRun ? 'DAG Run - Partial' : isHistorical ? 'Historical DAG Run' : 'Latest DAG Run'
+  const pageTitle = orchestration?.historical ? (orchestration.jobId ? 'DAG Run' : 'Workflow DAG Run') : orchestration?.latest ? 'Latest DAG Run' : orchestration ? (dag?.kind === 'models' ? 'Job Model DAG' : 'Workflow DAG') : partialRun ? 'DAG Run - Partial' : isHistorical ? 'Historical DAG Run' : 'Latest DAG Run'
   const subtitle = partialRun
     ? `${name} · DAG Run Preview`
     : isHistorical
-      ? `${name} · Run ID ${historicalRunId}`
+      ? `${name} · Run ID ${orchestration?.runId || historicalRunId}`
       : `${name} · interactive DBT model dependencies`
-  const backPage = isHistorical ? returnPage : 'monitor'
-  const backLabel = isHistorical && returnPage === 'history' ? 'history' : 'monitor'
+  const backPage = orchestration ? (returnPage === 'monitor' ? 'orchestrationMonitor' : returnPage) : isHistorical ? returnPage : 'monitor'
+  const backLabel = ['history', 'orchestrationHistory'].includes(backPage) ? 'history' : 'monitor'
 
   return (
     <section className="page dag-page">
-      <PageHeader breadcrumb={isHistorical ? 'Pages / History / DAG' : 'Pages / Workflow Monitor / DAG'} title={pageTitle} subtitle={subtitle} actions={<div className="dag-header-actions"><span className={`dag-auto-refresh ${refreshing ? 'refreshing' : ''}`}><i />{isHistorical ? 'Pinned run · no refresh' : refreshing ? 'Updating…' : 'Auto refresh · 5s'}</span><button className="button" onClick={() => onNavigate(backPage, backPage === 'history' ? { workflowName: name, workflowId: id } : {})}>← Back to {backLabel}</button></div>} />
+      <PageHeader breadcrumb={orchestration?.historical ? 'Orchestration / History / DAG Run' : isHistorical ? 'Pages / History / DAG' : 'Pages / Workflow Monitor / DAG'} title={pageTitle} subtitle={subtitle} actions={<div className="dag-header-actions"><span className={`dag-auto-refresh ${refreshing ? 'refreshing' : ''}`}><i />{isHistorical ? 'Selected run · refresh on demand' : refreshing ? 'Updating…' : 'Auto refresh · 5s'}</span>{isHistorical && <button className="button" disabled={refreshing} onClick={refreshDag}>↻ Refresh</button>}<button className="button" onClick={() => onNavigate(backPage, returnContext || (backPage === 'history' ? { workflowName: name, workflowId: id } : {}))}>← Back to {backLabel}</button></div>} />
       {error && <div className="alert error">{error}</div>}
       {notice && <div className="alert info">{notice}</div>}
+      {dag?.warnings?.map((warning, index) => <div className="alert warning" key={index}>{warning}</div>)}
       {!dag && !error && <LoadingState>Loading DAG…</LoadingState>}
       {dag && <>
         <div className="dag-page-summary vision-card-flat">
           <StatusBadge status={dag.run?.STATUS || '—'} />
           <span>Run ID <code>{dag.run?.RUN_ID || '—'}</code></span>
-          <strong>{allNodes.length}</strong><span>models</span>
+          <strong>{allNodes.length}</strong><span>{dag.kind === 'jobs' ? 'workflow / jobs' : 'models'}</span>
           <strong className="success-text">{finished}</strong><span>finished</span>
           {warning > 0 && <><strong>{warning}</strong><span>warnings</span></>}
           {failed > 0 && <><strong className="failed-text">{failed}</strong><span>errors</span></>}
@@ -389,7 +398,7 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
         </div>
         <div className="dag-page-toolbar">
           <select className="dag-model-filter" value={selectedModelId} onChange={event => setSelectedModelId(event.target.value)} aria-label="Filter by model name">
-            <option value="">All model names</option>
+            <option value="">{dag.kind === 'jobs' ? 'All workflows / jobs' : 'All model names'}</option>
             {modelOptions.map(node => <option key={node.id} value={node.id}>{node.label || node.id}</option>)}
           </select>
           <label className={`dag-related-filter ${includeRelated ? 'active' : ''}`}>
@@ -414,7 +423,7 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
           </ReactFlow> : <div className="soft-empty">No models match the current filters.</div>}
           {selectedNode && <aside className="dag-model-popover">
             <button className="dag-model-close" onClick={() => setSelectedNode(null)} aria-label="Close model details">×</button>
-            <span className="modal-eyebrow">Selected model</span>
+            <span className="modal-eyebrow">Selected {dag.kind === 'jobs' ? 'workflow / job' : 'model'}</span>
             <h3>{selectedNode.label}</h3>
             <code>{selectedNode.id}</code>
             <StatusBadge status={selectedNode.status} />
@@ -424,7 +433,7 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
               <span>Model status <strong>{selectedNode.modelStatus || '—'}</strong></span>
               <span>Tests <strong className={selectedNode.testsFailed ? 'failed-text' : ''}>{selectedNode.testsTotal ? `${selectedNode.testsTotal - selectedNode.testsFailed - (selectedNode.testsWarning || 0)} success · ${selectedNode.testsWarning || 0} warning · ${selectedNode.testsFailed} error` : 'None'}</strong></span>
             </div>
-            <div className="dag-model-run-controls">
+            {!orchestration && <><div className="dag-model-run-controls">
               <label><span>Action</span><select value={modelAction} onChange={event => setModelAction(event.target.value)}><option value="run">Run</option><option value="build">Build</option><option value="test">Test</option></select></label>
               <div className="dag-model-direction-options">
                 <label className={includeUpstream ? 'active' : ''}><input type="checkbox" checked={includeUpstream} onChange={event => setIncludeUpstream(event.target.checked)} /><span>UPSTREAM</span></label>
@@ -436,7 +445,8 @@ export default function DagView({ workflow, workflowId, workflowName, partialRun
             <div className="dag-model-actions">
               <button className="button primary" onClick={startSelectedModel}>{`▶ ${modelAction[0].toUpperCase()}${modelAction.slice(1)} model`}</button>
             </div>
-            <small>This starts a new workflow run with child workflows disabled.</small>
+            <small>This starts a new workflow run with child workflows disabled.</small></>}
+            {orchestration && dag.kind === 'jobs' && selectedNode.type === 'DBT' && <button className="button" onClick={() => onNavigate('dag', { workflowId: id, workflowName: selectedNode.label, returnPage: backPage, returnContext, orchestration: { ...orchestration, jobId: selectedNode.id } })}>Open model DAG</button>}
           </aside>}
         </div>
         {dag.errors?.length > 0 && <div className="modal-table-wrap dag-error-table"><table className="workflow-table compact"><thead><tr><th>Time</th><th>Model</th><th>Error</th></tr></thead><tbody>{dag.errors.map((item, index) => <tr key={`${item.ORIGIN}-${index}`}><td>{item.LOG_DTTM || '—'}</td><td>{item.ORIGIN}</td><td>{String(item.MESSAGE || '').slice(0, 300)}</td></tr>)}</tbody></table></div>}

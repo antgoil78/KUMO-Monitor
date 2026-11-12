@@ -327,6 +327,30 @@ def query_one_service(sql, params=None, use_warehouse=True, include_context=True
     return query_one(sql, params=params, use_warehouse=use_warehouse, include_context=include_context, force_service=True)
 
 
+def submit_service_query(sql, params=None):
+    """Return a native query receipt, without waiting for the statement to finish."""
+    with connection(force_service=True) as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute('ALTER SESSION SET ABORT_DETACHED_QUERY = FALSE')
+            cur.execute_async(sql, params or {})
+            return cur.sfqid
+        finally:
+            cur.close()
+
+
+def service_query_result(query_id):
+    """Wait for a submitted query in a background worker, using service credentials."""
+    with connection(force_service=True) as conn:
+        cur = conn.cursor(DictCursor)
+        try:
+            cur.get_results_from_sfqid(query_id)
+            rows = cur.fetchall()
+            return dict(rows[0]) if rows else {}
+        finally:
+            cur.close()
+
+
 def execute_service(sql, params=None, use_warehouse=True, include_context=True):
     """Execute DML as the service context, even when caller-rights token is present."""
     return execute(sql, params=params, use_warehouse=use_warehouse, include_context=include_context, force_service=True)

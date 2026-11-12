@@ -40,7 +40,7 @@ export function validateConfiguration(rows) {
       workflowNames.add(name)
       if (row.workflowId !== row.id) add('Workflow identity is inconsistent.')
       const roots = rows.filter(job => job.jobId && job.workflowId === row.id && job.parentId === row.id)
-      if (roots.length !== 1) add('Exactly one job must have this workflow as its direct parent.')
+      if (rows.some(job => job.jobId && job.workflowId === row.id) && roots.length !== 1) add('Exactly one job must have this workflow as its direct parent.')
     } else {
       const workflow = byId.get(row.workflowId)
       if (!workflow || workflow.jobId) add('A containing workflow is required.')

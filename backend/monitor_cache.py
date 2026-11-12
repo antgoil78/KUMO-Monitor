@@ -35,6 +35,8 @@ class MonitorCache:
         self._enabled = False
 
     def start(self):
+        if not realtime_broker.client_count():
+            return
         with self._lock:
             self._enabled = True
             self._stop_event.clear()
@@ -48,21 +50,17 @@ class MonitorCache:
             self._thread.start()
 
     def _loop(self):
-        self.refresh(force=True)
         while True:
             with self._lock:
-                duration_seconds = float(self._last_duration_ms or 0) / 1000.0
+                if not self._enabled or not realtime_broker.client_count():
+                    self._enabled = False
+                    self._thread = None
+                    return
                 interval_seconds = float(self.refresh_seconds)
-            # Keep refresh starts on the configured cadence. Without subtracting
-            # query duration, a 10s query plus a 30s wait becomes a 40s cycle.
-            wait_seconds = max(0.5, interval_seconds - duration_seconds)
-            self._refresh_requested.wait(timeout=wait_seconds)
             self._refresh_requested.clear()
-            if self._stop_event.is_set() or not self.is_enabled():
-                break
+            started = time.monotonic()
             self.refresh(force=True)
-        with self._lock:
-            self._thread = None
+            self._refresh_requested.wait(timeout=max(0.5, interval_seconds - (time.monotonic() - started)))
 
     def stop(self):
         with self._lock:
@@ -123,6 +121,8 @@ class MonitorCache:
         return self.get()
 
     def refresh(self, force=False):
+        if not realtime_broker.client_count():
+            return self.get()
         with self._lock:
             if self._refreshing:
                 self._refresh_done.wait(timeout=max(10.0, self.refresh_seconds * 4.0))

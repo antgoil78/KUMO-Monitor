@@ -19,9 +19,11 @@ import EnvironmentSettings from './pages/EnvironmentSettings.jsx'
 import About from './pages/About.jsx'
 import WorkflowFlow from './pages/WorkflowFlow.jsx'
 import OrchestrationMonitor from './pages/OrchestrationMonitor.jsx'
+import OrchestrationHistory from './pages/OrchestrationHistory.jsx'
 import OrchestrationDependencies from './pages/OrchestrationDependencies.jsx'
 import { RuntimeConfigContext } from './RuntimeConfig.jsx'
-import { JobCatalog, WorkflowCatalog } from './pages/OrchestrationCatalog.jsx'
+import WorkflowAdministration from './pages/WorkflowAdministration.jsx'
+import { JobCatalog } from './pages/OrchestrationCatalog.jsx'
 
 const pages = {
   dashboard: Dashboard,
@@ -39,9 +41,10 @@ const pages = {
   dependencies: Dependencies,
   environmentSettings: EnvironmentSettings,
   about: About,
-  orchestrationWorkflow: WorkflowCatalog,
+  orchestrationWorkflow: WorkflowAdministration,
   orchestrationJob: JobCatalog,
   orchestrationMonitor: OrchestrationMonitor,
+  orchestrationHistory: OrchestrationHistory,
   orchestrationDependencies: OrchestrationDependencies,
   orchestrationFlow: WorkflowFlow
 }
@@ -65,6 +68,11 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('kumoSidebarCollapsed') === 'true')
   const Page = pages[page] || Dashboard
   const serviceEnvironment = buildInfo?.deploymentEnvironment ?? buildInfo?.environment
+
+  useEffect(() => {
+    if (buildInfo?.legacyEngineRetired && (['monitor', 'dependencies'].includes(page)
+      || (!requestedPage && page === 'dashboard'))) setPage('orchestrationMonitor')
+  }, [buildInfo?.legacyEngineRetired, page, requestedPage])
 
   // Keep one presence connection open for the lifetime of the application,
   // including pages that do not otherwise consume realtime status events.
@@ -119,6 +127,7 @@ export default function App() {
   }, [identityReady])
 
   function navigate(nextPage, context = {}) {
+    if (nextPage !== page && !window.dispatchEvent(new CustomEvent('kumo:before-navigate', { cancelable: true }))) return
     setPageContext(context)
     setPage(nextPage)
     if (stylePreview) {

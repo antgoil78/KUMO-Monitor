@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { api } from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
@@ -14,6 +14,7 @@ const sourceDefinitions = [
 ]
 
 const preferredColumns = {
+  jobExecutions: ['JOB_POSITION', 'JOB_NAME', 'STATUS', 'STARTED_AT', 'ENDED_AT', 'ERROR_MESSAGE', 'QUERY_ID'],
   runLog: ['LOG_DTTM', 'ORIGIN', 'TYPE', 'MESSAGE'],
   modelProgress: ['MODEL_NAME', 'TYPE', 'STATUS', 'PROGRESS', 'STARTED_DTTM', 'START_DTTM', 'FINISHED_DTTM', 'FINISH_DTTM', 'MODEL_NAME_PARENT'],
   testProgress: ['MODEL_NAME', 'TYPE', 'STATUS', 'PROGRESS', 'STARTED_DTTM', 'START_DTTM', 'FINISHED_DTTM', 'FINISH_DTTM', 'MODEL_NAME_PARENT']
@@ -210,9 +211,9 @@ function LogTable({ rows, sourceKey, onViewValue }) {
   )
 }
 
-export default function ExecutionLog({ runId = '', workflowId = '', workflowName = '', workflow = null, returnPage = 'monitor', onNavigate }) {
+export default function ExecutionLog({ runId = '', workflowId = '', workflowName = '', workflow = null, returnPage = 'monitor', returnContext = null, onNavigate, orchestration = null }) {
   const workflowType = String(workflow?.workflowType || '').toUpperCase()
-  const localData = workflow && workflowType && workflowType !== 'DBT' ? {
+  const localData = !orchestration && workflow && workflowType && workflowType !== 'DBT' ? {
     history: {
       RUN_ID: runId,
       WORKFLOW_ID: workflowId,
@@ -232,11 +233,12 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
   const [data, setData] = useState(localData)
   const [loading, setLoading] = useState(!localData)
   const [error, setError] = useState(null)
-  const [activeSource, setActiveSource] = useState('modelProgress')
+  const [activeSource, setActiveSource] = useState(orchestration ? 'jobExecutions' : 'modelProgress')
   const [search, setSearch] = useState('')
   const [nowMs, setNowMs] = useState(Date.now())
   const [valueDetail, setValueDetail] = useState(null)
   const [runIdCopied, setRunIdCopied] = useState(false)
+  const loadingRef = useRef(false)
 
   async function copyRunId() {
     const value = String(runId || '')
@@ -259,24 +261,31 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
   }
 
   async function load() {
-    if (!runId) return
+    if (!runId || loadingRef.current) return
     if (localData) {
       setData(localData)
       setLoading(false)
       return
     }
+    loadingRef.current = true
     try {
       setLoading(true)
       setError(null)
-      setData(await api.executionLog(runId, workflowId))
+      setData(await (orchestration ? api.orchestrationLog(workflowId, runId, orchestration.jobId) : api.executionLog(runId, workflowId)))
     } catch (err) {
       setError(err.message)
     } finally {
+      loadingRef.current = false
       setLoading(false)
     }
   }
 
-  useEffect(() => { load() }, [runId, workflowId, workflowType])
+  useEffect(() => { load() }, [runId, workflowId, workflowType, orchestration?.jobId])
+  useEffect(() => {
+    if (!orchestration || orchestration.historical) return undefined
+    const timer = window.setInterval(load, 5000)
+    return () => window.clearInterval(timer)
+  }, [runId, workflowId, orchestration?.jobId, orchestration?.historical])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000)
@@ -300,6 +309,7 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
   }, { queued: 0, started: 0, finished: 0, skipped: 0, success: 0, warnings: 0, errors: 0 })
   const modelCounts = progressCounts(modelProgress)
   const testCounts = progressCounts(testProgress)
+  const sources = orchestration ? [{ key: 'jobExecutions', label: 'Jobs' }, ...sourceDefinitions] : sourceDefinitions
   const visibleRows = useMemo(() => {
     const rows = data?.[activeSource] || []
     const query = search.trim().toLowerCase()
@@ -315,7 +325,7 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
     <section className="page execution-log-page">
       <PageHeader breadcrumb="Pages / Execution Log" title={resolvedName} subtitle={<span className="execution-run-id">Run ID <code>{runId}</code><button type="button" className={runIdCopied ? 'copied' : ''} onClick={copyRunId} aria-label="Copy run ID" title={runIdCopied ? 'Copied' : 'Copy run ID'}><span className="execution-copy-icon" aria-hidden="true" />{runIdCopied ? 'Copied' : 'Copy'}</button></span>} actions={<div className="execution-log-header-actions">
           <button className="button" onClick={load} disabled={loading}>↻ Refresh</button>
-          <button className="button" onClick={() => onNavigate(returnPage, returnPage === 'history' ? { workflowName, workflowId } : {})}>← Back</button>
+          <button className="button" onClick={() => onNavigate(returnPage, returnContext || (returnPage === 'history' ? { workflowName, workflowId } : {}))}>← Back</button>
         </div>} />
 
       {error && <div className="alert error">{error}</div>}
@@ -337,10 +347,10 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
           <p>{historyMessage || 'No message recorded in workflow history.'}</p>
         </div>
 
-        {isDbtWorkflow && <div className="execution-log-source-card vision-card-flat">
+        {(isDbtWorkflow || orchestration) && <div className="execution-log-source-card vision-card-flat">
           <div className="execution-log-toolbar">
             <div className="view-switch execution-log-tabs">
-              {sourceDefinitions.map(source => (
+              {sources.map(source => (
                 <button key={source.key} className={activeSource === source.key ? 'active' : ''} onClick={() => setActiveSource(source.key)}>
                   {source.label} <span>{data[source.key]?.length || 0}</span>
                 </button>

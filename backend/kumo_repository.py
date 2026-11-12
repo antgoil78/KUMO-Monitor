@@ -1143,6 +1143,10 @@ def upstream_workflows_for(workflow_id):
 def get_engine_state(refresh=False, raise_on_error=False):
     global _engine_state_cache, _engine_state_cache_monotonic
 
+    if config.LEGACY_ENGINE_RETIRED:
+        return dict(task='X_TASK_WF_MASTER_DISPATCHER', taskFqn=config.APP_NAMESPACE + '.X_TASK_WF_MASTER_DISPATCHER',
+                    state='SUSPENDED', status='RETIRED', retired=True)
+
     now = time.monotonic()
     if not refresh and _engine_state_cache and now - _engine_state_cache_monotonic < 30:
         return dict(_engine_state_cache)
@@ -2167,6 +2171,11 @@ def load_dag_run(workflow_id, run_id=None):
         except Exception:
             errors = []
 
+    return build_progress_dag(workflow_id, dbt_command, run, progress_rows, test_rows, errors)
+
+
+def build_progress_dag(workflow_id, dbt_command, run, progress_rows, test_rows, errors):
+    """Render supplied run-scoped telemetry without reading engine state."""
     error_models = {str(e.get("ORIGIN")) for e in errors if e.get("ORIGIN")}
     terminal_progress_states = {"FINISHED", "SKIPPED"}
     model_dag_complete = bool(progress_rows) and all(
@@ -2340,7 +2349,11 @@ def load_dag_preview(workflow_id, dbt_command_override=None):
     ))
     if not rows:
         raise ValueError("Workflow not found.")
-    workflow = rows[0]
+    return preview_dbt_definition(rows[0], dbt_command_override)
+
+
+def preview_dbt_definition(workflow, dbt_command_override=None):
+    """Resolve a saved DBT definition with dbt list; never execute its models."""
     if str(workflow.get("WORKFLOW_TYPE") or "").upper() != "DBT":
         raise ValueError("DAG preview is only available for DBT workflows.")
 
@@ -2399,7 +2412,7 @@ def load_dag_preview(workflow_id, dbt_command_override=None):
                 seen_edges.add(edge_key)
                 edges.append({"source": edge_key[0], "target": edge_key[1]})
     return {
-        "workflowId": workflow_id,
+        "workflowId": workflow.get("WORKFLOW_ID"),
         "workflowName": workflow.get("WORKFLOW_NAME"),
         "selection": selectors,
         "projectFqn": project_fqn,

@@ -4,6 +4,7 @@ import { api } from '../api.js'
 import LoadingState from '../components/LoadingState.jsx'
 import CommandPreview from '../components/CommandPreview.jsx'
 import PageHeader from '../components/PageHeader.jsx'
+import EditorDialog from '../components/EditorDialog.jsx'
 import './OrchestrationCatalog.css'
 
 function EnabledState({ enabled }) {
@@ -14,76 +15,6 @@ function formatAuditDate(value) {
   if (!value) return '—'
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-}
-
-const WORKFLOW_SORT_COLUMNS = [
-  ['WORKFLOW_NAME', 'Name'],
-  ['WORKFLOW_GROUP', 'Workflow group'],
-  ['SCHEDULE', 'Schedule'],
-  ['CREATED_AT', 'Created at'],
-  ['CREATED_BY', 'Created by'],
-  ['UPDATED_AT', 'Updated at'],
-  ['UPDATED_BY', 'Updated by']
-]
-
-function workflowSortValue(workflow, key) {
-  if (key === 'CREATED_AT' || key === 'UPDATED_AT') {
-    const value = new Date(workflow[key] || 0).getTime()
-    return Number.isNaN(value) ? 0 : value
-  }
-  return String(workflow[key] || '').toLocaleLowerCase()
-}
-
-function WorkflowCatalogTable({ workflows, onEdit, onCreate }) {
-  const [search, setSearch] = useState('')
-  const [sort, setSort] = useState({ key: 'WORKFLOW_NAME', direction: 'asc' })
-  const visibleWorkflows = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase()
-    const filtered = query
-      ? workflows.filter(workflow => WORKFLOW_SORT_COLUMNS.some(([key]) => String(workflow[key] || '').toLocaleLowerCase().includes(query)))
-      : workflows
-    return [...filtered].sort((left, right) => {
-      const leftValue = workflowSortValue(left, sort.key)
-      const rightValue = workflowSortValue(right, sort.key)
-      const comparison = typeof leftValue === 'number' ? leftValue - rightValue : leftValue.localeCompare(rightValue)
-      return (sort.direction === 'asc' ? comparison : -comparison) || String(left.WORKFLOW_NAME).localeCompare(String(right.WORKFLOW_NAME))
-    })
-  }, [search, sort, workflows])
-
-  function changeSort(key) {
-    setSort(current => current.key === key
-      ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
-      : { key, direction: 'asc' })
-  }
-
-  return <div className="orchestration-workflow-list">
-    <div className="orchestration-list-toolbar">
-      <input className="search-input" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search workflows or groups…" aria-label="Search workflows" />
-      <span>{visibleWorkflows.length} of {workflows.length} workflows</span>
-      <button className="button primary" type="button" onClick={onCreate}>+ Workflow</button>
-    </div>
-    <div className="orchestration-table-wrap">
-      <table className="orchestration-table orchestration-workflow-table">
-        <thead><tr>
-          {WORKFLOW_SORT_COLUMNS.map(([key, label]) => <th key={key} aria-sort={sort.key === key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-            <button className="orchestration-sort-button" type="button" onClick={() => changeSort(key)}>{label}<span aria-hidden="true">{sort.key === key ? (sort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button>
-          </th>)}
-          <th className="orchestration-actions-cell">Actions</th>
-        </tr></thead>
-        <tbody>{visibleWorkflows.map(workflow => <tr key={workflow.WORKFLOW_ID}>
-          <td><strong>{workflow.WORKFLOW_NAME}</strong></td>
-          <td><span className="orchestration-type">{workflow.WORKFLOW_GROUP || 'Ungrouped'}</span></td>
-          <td>{workflow.SCHEDULE ? <><strong>{workflow.SCHEDULE}</strong><small>{workflow.SCHEDULE_TIMEZONE || 'UTC'}{workflow.IS_SCHEDULE_ENABLED ? '' : ' · Disabled'}</small></> : <span className="orchestration-muted">Not scheduled</span>}</td>
-          <td>{formatAuditDate(workflow.CREATED_AT)}</td>
-          <td>{workflow.CREATED_BY || '—'}</td>
-          <td>{formatAuditDate(workflow.UPDATED_AT)}</td>
-          <td>{workflow.UPDATED_BY || '—'}</td>
-          <td className="orchestration-actions-cell"><button className="orchestration-edit" type="button" onClick={() => onEdit(workflow)}>Edit</button></td>
-        </tr>)}</tbody>
-      </table>
-      {!visibleWorkflows.length && <div className="soft-empty">No workflows match your search.</div>}
-    </div>
-  </div>
 }
 
 function JobCatalogTable({ jobs, onEdit, onCreate }) {
@@ -146,7 +77,7 @@ function JobCatalogTable({ jobs, onEdit, onCreate }) {
   </div>
 }
 
-function WorkflowEditor({ workflow, groups, jobs, assignments, saving, error, onClose, onSave, onDelete }) {
+export function WorkflowEditor({ workflow, groups, jobs, assignments, saving, error, onClose, onSave, onDelete }) {
   const existingJobs = workflow ? assignments.filter(item => item.WORKFLOW_ID === workflow.WORKFLOW_ID).sort((a, b) => a.JOB_SEQUENCE - b.JOB_SEQUENCE).map(item => item.JOB_ID) : []
   const initialGroup = String(workflow?.WORKFLOW_GROUP || '')
   const [form, setForm] = useState({
@@ -184,21 +115,20 @@ function WorkflowEditor({ workflow, groups, jobs, assignments, saving, error, on
     onDelete()
   }
 
-  return <div className="modal-backdrop" role="dialog" aria-modal="true" onMouseDown={event => event.target === event.currentTarget && onClose()}>
+  return <EditorDialog title={workflow ? 'Edit workflow' : 'Create workflow'} busy={saving} onClose={onClose}>
     <form className="vision-modal wide edit-form" onSubmit={event => { event.preventDefault(); onSave(form) }}>
-      <div className="modal-header"><div><h2>{workflow ? 'Edit workflow' : 'Create workflow'}</h2><p>Configuration only. This will not create or alter a Snowflake task.</p></div><button className="modal-close" type="button" onClick={onClose}>×</button></div>
+      <div className="modal-header"><div><h2>{workflow ? 'Edit workflow' : 'Create workflow'}</h2><p>Workflow settings and trigger configuration.</p></div><button className="modal-close" type="button" disabled={saving} aria-label="Close dialog" onClick={onClose}>×</button></div>
       {error && <div className="alert error">{error}</div>}
       {deleteWarning && <div className={`alert ${existingJobs.length ? 'warning' : 'error'}`}>{deleteWarning}</div>}
       <div className="form-grid two">
-        <div className="form-field"><label>Workflow name</label><input required value={form.workflowName} onChange={event => update('workflowName', event.target.value)} /></div>
-        <div className="form-field"><label>Workflow group</label><select required value={groupSelection} onChange={event => selectGroup(event.target.value)}>
-          {!workflow && <option value="" disabled>Select workflow group</option>}
-          {workflow && !initialGroup && <option value="">Ungrouped</option>}
+        <div className="form-field"><label htmlFor="workflow-name">Workflow name</label><input id="workflow-name" required value={form.workflowName} onChange={event => update('workflowName', event.target.value)} /></div>
+        <div className="form-field"><label htmlFor="workflow-group">Workflow group</label><select id="workflow-group" value={groupSelection} onChange={event => selectGroup(event.target.value)}>
+          <option value="">Ungrouped</option>
           {groups.map(group => <option key={group} value={group}>{group}</option>)}
-          {!workflow && <option value="__new_group__">+ Create new group</option>}
+          <option value="__new_group__">+ Create new group</option>
         </select></div>
       </div>
-      {!workflow && groupSelection === '__new_group__' && <div className="form-field orchestration-new-group"><label>New workflow group</label><input required autoFocus value={form.workflowGroup} onChange={event => update('workflowGroup', event.target.value)} placeholder="Enter a new group name" /></div>}
+      {groupSelection === '__new_group__' && <div className="form-field orchestration-new-group"><label htmlFor="new-workflow-group">New workflow group</label><input id="new-workflow-group" required autoFocus value={form.workflowGroup} onChange={event => update('workflowGroup', event.target.value)} placeholder="Enter a new group name" /></div>}
       <div className="form-field"><label>Description</label><textarea rows="2" value={form.description} onChange={event => update('description', event.target.value)} /></div>
       <div className="form-grid two">
         <div className="form-field"><label>Schedule cron</label><input placeholder="0 6 * * 1-5" value={form.schedule} onChange={event => update('schedule', event.target.value)} /></div>
@@ -210,14 +140,14 @@ function WorkflowEditor({ workflow, groups, jobs, assignments, saving, error, on
         <label><input type="checkbox" checked={form.allowExternalTrigger} onChange={event => update('allowExternalTrigger', event.target.checked)} /> External trigger</label>
         <label><input type="checkbox" checked={form.enabled} onChange={event => update('enabled', event.target.checked)} /> Workflow enabled</label>
       </div>
-      {!workflow && <div className="form-field"><label>Entry job</label><select required value={form.entryJobId} onChange={event => update('entryJobId', event.target.value)}><option value="">Select an existing job</option>{jobs.map(job => <option key={job.JOB_ID} value={job.JOB_ID}>{job.JOB_NAME}</option>)}</select><small className="form-help">The workflow is created together with its entry job assignment.</small></div>}
-      {workflow && <div className="form-field"><label>Assigned jobs</label><div className="orchestration-fixed-value">{existingJobs.length} jobs</div><small className="form-help">Maintain job assignments, parents and execution rules in Orchestration / Dependencies.</small></div>}
-      <div className="modal-actions">{workflow && <button className="button danger orchestration-delete" type="button" disabled={saving} onClick={requestDelete}>{confirmDelete ? 'Confirm delete' : 'Delete'}</button>}<button className="button" type="button" onClick={onClose}>Cancel</button><button className="button primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save workflow'}</button></div>
+      {!workflow && <div className="form-field"><label>Entry job</label><select value={form.entryJobId} onChange={event => update('entryJobId', event.target.value)}><option value="">Add the first job later</option>{jobs.map(job => <option key={job.JOB_ID} value={job.JOB_ID}>{job.JOB_NAME}</option>)}</select><small className="form-help">Optional. The first assigned job always has this workflow as its parent.</small></div>}
+      {workflow && <div className="form-field"><label>Assigned jobs</label><div className="orchestration-fixed-value">{existingJobs.length} jobs</div><small className="form-help">Add jobs and change their order directly on the Workflow page.</small></div>}
+      <div className="modal-actions">{workflow && <button className="button danger orchestration-delete" type="button" disabled={saving} onClick={requestDelete}>{confirmDelete ? 'Confirm delete' : 'Delete'}</button>}<button className="button" type="button" disabled={saving} onClick={onClose}>Cancel</button><button className="button primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save workflow'}</button></div>
     </form>
-  </div>
+  </EditorDialog>
 }
 
-function JobEditor({ job, defaultLayer, assignments, saving, error, onClose, onSave, onDelete }) {
+export function JobEditor({ job, defaultLayer, workflowName, assignments, saving, error, onClose, onSave, onDelete }) {
   const [form, setForm] = useState({
     jobName: job?.JOB_NAME || '', description: job?.DESCRIPTION || '', jobType: job?.JOB_TYPE || 'SQL', jobLayer: job?.JOB_LAYER || defaultLayer || 'GENERAL',
     sqlCommand: job?.SQL_COMMAND || '', dbtCommand: job?.DBT_COMMAND || '', commandLine: job?.COMMAND_LINE || '',
@@ -241,25 +171,25 @@ function JobEditor({ job, defaultLayer, assignments, saving, error, onClose, onS
     }
     onDelete()
   }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true" onMouseDown={event => event.target === event.currentTarget && onClose()}>
+  return <EditorDialog title={job ? 'Edit job' : 'Create job'} busy={saving} onClose={onClose}>
     <form className="vision-modal edit-form" onSubmit={event => { event.preventDefault(); onSave(form) }}>
-      <div className="modal-header"><div><h2>{job ? 'Edit job' : 'Create job'}</h2><p>Reusable executable configuration. No Snowflake task will be created.</p></div><button className="modal-close" type="button" onClick={onClose}>×</button></div>
+      <div className="modal-header"><div><h2>{job ? 'Edit job' : 'Create job'}</h2><p>{workflowName ? `Create and append to ${workflowName}.` : 'Reusable executable configuration.'}{job && jobAssignments.length > 1 ? ` Changes apply to all ${jobAssignments.length} workflows using this job.` : ''}</p></div><button className="modal-close" type="button" disabled={saving} aria-label="Close dialog" onClick={onClose}>×</button></div>
       {error && <div className="alert error">{error}</div>}
       {deleteWarning && <div className={`alert ${jobAssignments.length ? 'warning' : 'error'}`}>{deleteWarning}</div>}
-      <div className="form-grid two"><div className="form-field"><label>Job name</label><input required value={form.jobName} onChange={event => update('jobName', event.target.value)} /></div><div className="form-field"><label>Job type</label><select value={form.jobType} onChange={event => update('jobType', event.target.value)}><option value="SQL">SQL</option><option value="DBT">DBT</option><option value="COMMAND">Command</option></select></div></div>
-      <div className="form-field"><label>Job layer</label><div className="orchestration-fixed-value">{form.jobLayer}</div></div>
+      <div className="form-grid two"><div className="form-field"><label htmlFor="job-name">Job name</label><input id="job-name" required value={form.jobName} onChange={event => update('jobName', event.target.value)} /></div><div className="form-field"><label htmlFor="job-type">Job type</label><select id="job-type" value={form.jobType} onChange={event => update('jobType', event.target.value)}><option value="SQL">SQL</option><option value="DBT">DBT</option><option value="COMMAND">Command</option></select></div></div>
+      <div className="form-field"><label htmlFor="job-layer">Job layer</label><select id="job-layer" value={form.jobLayer} onChange={event => update('jobLayer', event.target.value)}>{['RAW', 'SDL', 'EDV', 'BDL', 'GENERAL'].map(layer => <option key={layer}>{layer}</option>)}</select></div>
       <div className="form-field"><label>Description</label><textarea rows="2" value={form.description} onChange={event => update('description', event.target.value)} /></div>
-      {form.jobType === 'SQL' && <div className="form-field"><label>SQL command</label><textarea required rows="5" value={form.sqlCommand} onChange={event => update('sqlCommand', event.target.value)} /></div>}
+      {form.jobType === 'SQL' && <div className="form-field"><label htmlFor="job-sql">SQL command</label><textarea id="job-sql" required rows="5" value={form.sqlCommand} onChange={event => update('sqlCommand', event.target.value)} /></div>}
       {form.jobType === 'COMMAND' && <div className="form-field"><label>Command line</label><textarea required rows="4" value={form.commandLine} onChange={event => update('commandLine', event.target.value)} /></div>}
       {form.jobType === 'DBT' && <><div className="form-field"><label>DBT command</label><textarea required rows="4" value={form.dbtCommand} onChange={event => update('dbtCommand', event.target.value)} /></div><div className="form-grid two"><div className="form-field"><label>DBT target</label><input value={form.dbtTarget} onChange={event => update('dbtTarget', event.target.value)} /></div><div className="form-field"><label>DBT workspace</label><input value={form.dbtWorkspace} onChange={event => update('dbtWorkspace', event.target.value)} /></div></div><div className="form-field"><label>DBT project FQN</label><input value={form.dbtProjectFqn} onChange={event => update('dbtProjectFqn', event.target.value)} /></div></>}
       {form.jobType !== 'COMMAND' && <CommandPreview definition={form} />}
       <div className="form-grid two"><div className="form-field"><label>Timeout seconds</label><input type="number" min="1" value={form.timeoutSeconds} onChange={event => update('timeoutSeconds', event.target.value)} /></div><div className="toggle-row"><label><input type="checkbox" checked={form.enabled} onChange={event => update('enabled', event.target.checked)} /> Job enabled</label></div></div>
-      <div className="modal-actions">{job && <button className="button danger orchestration-delete" type="button" disabled={saving} onClick={requestDelete}>{confirmDelete ? 'Confirm delete' : 'Delete'}</button>}<button className="button" type="button" onClick={onClose}>Cancel</button><button className="button primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save job'}</button></div>
+      <div className="modal-actions">{job && <button className="button danger orchestration-delete" type="button" disabled={saving} onClick={requestDelete}>{confirmDelete ? 'Confirm delete' : 'Delete'}</button>}<button className="button" type="button" disabled={saving} onClick={onClose}>Cancel</button><button className="button primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save job'}</button></div>
     </form>
-  </div>
+  </EditorDialog>
 }
 
-function OrchestrationCatalog({ section }) {
+export function JobCatalog() {
   const [catalog, setCatalog] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -268,7 +198,6 @@ function OrchestrationCatalog({ section }) {
   const [editorDefaults, setEditorDefaults] = useState({})
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
-  const workflowSection = section === 'workflow'
 
   async function load() {
     setLoading(true)
@@ -295,10 +224,7 @@ function OrchestrationCatalog({ section }) {
     setSaving(true)
     setSaveError('')
     try {
-      if (workflowSection) {
-        if (editing) await api.updateOrchestrationWorkflow(editing.WORKFLOW_ID, payload)
-        else await api.createOrchestrationWorkflow(payload)
-      } else if (editing) await api.updateOrchestrationJob(editing.JOB_ID, payload)
+      if (editing) await api.updateOrchestrationJob(editing.JOB_ID, payload)
       else await api.createOrchestrationJob(payload)
       setEditorOpen(false)
       setEditing(null)
@@ -316,8 +242,7 @@ function OrchestrationCatalog({ section }) {
     setSaving(true)
     setSaveError('')
     try {
-      if (workflowSection) await api.deleteOrchestrationWorkflow(editing.WORKFLOW_ID)
-      else await api.deleteOrchestrationJob(editing.JOB_ID)
+      await api.deleteOrchestrationJob(editing.JOB_ID)
       setEditorOpen(false)
       setEditing(null)
       setEditorDefaults({})
@@ -329,32 +254,19 @@ function OrchestrationCatalog({ section }) {
     }
   }
 
-  const rows = workflowSection ? catalog?.workflows || [] : catalog?.jobs || []
-  const workflowGroups = useMemo(() => [...new Set((catalog?.workflows || [])
-    .map(workflow => String(workflow.WORKFLOW_GROUP || '').trim())
-    .filter(Boolean))].sort((left, right) => left.localeCompare(right)), [catalog?.workflows])
+  const rows = catalog?.jobs || []
   return <section className="page orchestration-page">
     <PageHeader
-      breadcrumb={`Orchestration / ${workflowSection ? 'Workflow' : 'Job'}`}
-      title={workflowSection ? 'Workflow' : 'Job'}
-      subtitle={workflowSection ? 'Workflow containers, triggers and ordered job assignments in the new orchestration model.' : 'Reusable executable jobs and the workflows that currently use them.'}
-      actions={<div className="page-header-actions"><button className="button" type="button" onClick={load} disabled={loading}>↻ Refresh</button></div>}
+      breadcrumb="Workflow / Job"
+      title="Job"
+      subtitle="Reusable executable jobs and the workflows that currently use them."
+      actions={<div className="page-header-actions"><button className="button" type="button" onClick={load} disabled={loading}>↻ Refresh</button><button className="button primary" type="button" disabled={loading} onClick={() => openEditor()}>+ Job</button></div>}
     />
     <div className="orchestration-context"><span>New orchestration model</span><strong>{catalog?.source || 'Loading catalog…'}</strong><small>Configuration only · Snowflake tasks are not created yet</small></div>
     {error && <div className="alert error">{error}</div>}
     {loading && !catalog && <LoadingState>Loading orchestration catalog…</LoadingState>}
-    {catalog && workflowSection && <WorkflowCatalogTable workflows={catalog.workflows} onEdit={record => openEditor(record)} onCreate={() => openEditor()} />}
-    {catalog && !workflowSection && rows.length === 0 && <div className="soft-empty">No jobs have been created.</div>}
-    {catalog && !workflowSection && rows.length > 0 && <JobCatalogTable jobs={catalog.jobs} onEdit={record => openEditor(record)} onCreate={layer => openEditor(null, { jobLayer: layer })} />}
-    {editorOpen && workflowSection && <WorkflowEditor key={editing?.WORKFLOW_ID || 'new-workflow'} workflow={editing} groups={workflowGroups} jobs={catalog?.jobs || []} assignments={catalog?.assignments || []} saving={saving} error={saveError} onClose={() => setEditorOpen(false)} onSave={save} onDelete={remove} />}
-    {editorOpen && !workflowSection && <JobEditor key={editing?.JOB_ID || `new-job-${editorDefaults.jobLayer || 'general'}`} job={editing} defaultLayer={editorDefaults.jobLayer} assignments={catalog?.assignments || []} saving={saving} error={saveError} onClose={() => setEditorOpen(false)} onSave={save} onDelete={remove} />}
+    {catalog && rows.length === 0 && <div className="soft-empty">No jobs have been created.</div>}
+    {catalog && rows.length > 0 && <JobCatalogTable jobs={catalog.jobs} onEdit={record => openEditor(record)} onCreate={layer => openEditor(null, { jobLayer: layer })} />}
+    {editorOpen && <JobEditor key={editing?.JOB_ID || `new-job-${editorDefaults.jobLayer || 'general'}`} job={editing} defaultLayer={editorDefaults.jobLayer} assignments={catalog?.assignments || []} saving={saving} error={saveError} onClose={() => setEditorOpen(false)} onSave={save} onDelete={remove} />}
   </section>
-}
-
-export function WorkflowCatalog() {
-  return <OrchestrationCatalog section="workflow" />
-}
-
-export function JobCatalog() {
-  return <OrchestrationCatalog section="job" />
 }

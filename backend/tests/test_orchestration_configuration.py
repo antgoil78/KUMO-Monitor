@@ -96,7 +96,7 @@ class ConfigurationTests(unittest.TestCase):
         statements = []
         def execute(sql, params=None):
             statements.append(sql)
-            if 'UPDATED_AT = CURRENT_TIMESTAMP()' in sql:
+            if 'SET "PARENT_ID"' in sql:
                 raise RuntimeError('write failure')
         with patch.object(model, 'read_catalog', return_value=self.catalog), patch.object(model.sf, 'execute_service', side_effect=execute):
             with self.assertRaisesRegex(RuntimeError, 'write failure'):
@@ -111,9 +111,9 @@ class ConfigurationTests(unittest.TestCase):
         with patch.object(model, 'read_catalog', return_value=self.catalog), patch.object(model.sf, 'execute_service') as execute:
             model.save(self.rows, model.revision(self.catalog))
         self.assertEqual(execute.call_args_list[-1].args[0], 'COMMIT')
-        writes = [call for call in execute.call_args_list if 'UPDATED_AT = CURRENT_TIMESTAMP()' in call.args[0]]
+        writes = [call for call in execute.call_args_list if 'SET "PARENT_ID"' in call.args[0]]
         self.assertEqual(len(writes), 1)
-        self.assertEqual(writes[0].args[1]['SQL_CONDITION'], 'SELECT TRUE; -- stored text')
+        self.assertEqual(writes[0].args[1]['SQL'], 'SELECT TRUE; -- stored text')
         self.assertIs(writes[0].args[1]['ERROR'], False)
         self.assertTrue(all('WORKFLOW_JOB' not in call.args[0] for call in execute.call_args_list))
 
