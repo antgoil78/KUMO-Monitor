@@ -5,6 +5,7 @@ import os
 import socket
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from threading import Event, Lock, RLock, Thread
 from flask import Flask, Response, jsonify, request, send_from_directory, g, stream_with_context, has_request_context
@@ -27,15 +28,22 @@ if not config.USE_MOCK and sf.is_configured():
         "WHERE INSTANCE_NAME = 'DEFAULT' AND PARAMETER_GROUP = 'ENVIRONMENT'",
         force_service=True, include_context=False,
     ))
+    config.apply_orchestration_settings(sf.query(
+        f"SELECT PARAMETER_KEY, PARAMETER_VALUE, VALUE_TYPE, ACTIVE_FL FROM {config.PARAMETER_STORE} "
+        "WHERE INSTANCE_NAME = 'DEFAULT' AND PARAMETER_GROUP = 'ORCHESTRATION'",
+        force_service=True, include_context=False,
+    ))
 
 from notification_admin import notification_admin_bp
 from file_ingestion import file_ingestion_bp
 from batch_control import batch_control_bp
+from orchestration_engine import orchestration_engine_bp
 
 from workflow_commands import DBT_PROJECT_TEMPLATE, DBT_TARGET_TEMPLATE, validate_definition
 import kumo_repository as repo
 import orchestration_configuration as orchestration
 from monitor_cache import monitor_cache
+from orchestration_cache import orchestration_cache
 from mock_data import MOCK_HISTORY, MOCK_MONITOR
 from realtime_events import realtime_broker
 from activity_log import activity_journal
@@ -47,6 +55,7 @@ CORS(app)
 app.register_blueprint(notification_admin_bp)
 app.register_blueprint(file_ingestion_bp)
 app.register_blueprint(batch_control_bp)
+app.register_blueprint(orchestration_engine_bp)
 
 
 logging.basicConfig(level=logging.INFO)
@@ -112,7 +121,7 @@ _dashboard_refresh_seconds = max(5, int(config.KUMO_DASHBOARD_CACHE_SECONDS or 3
 _activity_lease_lock = Lock()
 _activity_lease_last_seen = 0.0
 _activity_lease_last_seen_at = None
-_activity_supervisor_thread = None
+_background_services_lock = RLock()
 
 
 def _build_info():
@@ -157,6 +166,7 @@ def _backend_cache_snapshot():
     monitor_payload = monitor_cache.get()
     dashboard_payload = _dashboard_cache_snapshot()
     return {
+        "orchestration": orchestration_cache.diagnostics(),
         "monitor": {
             **monitor_cache.diagnostics(),
             "source": monitor_payload.get("source"),
@@ -393,6 +403,8 @@ class StatusCoordinator:
         self._wake.set()
 
     def _ensure_thread_locked(self):
+        if config.LEGACY_ENGINE_RETIRED:
+            return
         if self._thread and self._thread.is_alive():
             return
         if self._client_count <= 0:
@@ -621,7 +633,7 @@ status_coordinator = StatusCoordinator()
 
 def _set_realtime_client_count(count):
     count = max(0, int(count or 0))
-    status_coordinator.set_client_count(count)
+    _ensure_background_services()
     try:
         realtime_broker.publish("realtime_state", _realtime_runtime_state())
     except Exception as exc:
@@ -1072,8 +1084,12 @@ def _refresh_dashboard_cache_once():
 
 def _dashboard_cache_loop():
     global _dashboard_cache_thread
-    _refresh_dashboard_cache_once()
     while True:
+        with _dashboard_cache_lock:
+            if not _dashboard_cache_enabled or not realtime_broker.client_count():
+                _dashboard_cache_thread = None
+                return
+        _refresh_dashboard_cache_once()
         with _runtime_settings_lock:
             interval = max(5, int(_dashboard_refresh_seconds or config.REFRESH_SECONDS))
         _dashboard_cache_wake.wait(timeout=interval)
@@ -1082,11 +1098,12 @@ def _dashboard_cache_loop():
             if not _dashboard_cache_enabled:
                 _dashboard_cache_thread = None
                 return
-        _refresh_dashboard_cache_once()
 
 
 def _start_dashboard_cache():
     global _dashboard_cache_enabled, _dashboard_cache_thread
+    if not realtime_broker.client_count():
+        return
     with _dashboard_cache_lock:
         _dashboard_cache_enabled = True
         if _dashboard_cache_thread and _dashboard_cache_thread.is_alive():
@@ -1159,6 +1176,7 @@ def _runtime_refresh_settings():
 def _set_runtime_refresh_seconds(seconds):
     seconds = max(5, min(int(seconds or config.REFRESH_SECONDS), 300))
     monitor_cache.set_refresh_seconds(seconds)
+    orchestration_cache.set_refresh_seconds(seconds)
     return _runtime_refresh_settings()
 
 
@@ -1167,17 +1185,16 @@ def _realtime_runtime_state():
     monitor_state = monitor_cache.diagnostics()
     dashboard_state = _dashboard_cache_diagnostics()
     lease_state = _activity_lease_diagnostics()
-    polling_active = bool(lease_state.get("active")) and (
-        bool(monitor_state.get("threadAlive"))
-        or bool(monitor_state.get("refreshing"))
-        or bool(dashboard_state.get("threadAlive"))
-        or bool(dashboard_state.get("refreshing"))
-    )
+    orchestration_state = orchestration_cache.diagnostics()
+    polling_active = client_count > 0 and any(
+        bool(state.get('enabled')) and (bool(state.get('threadAlive')) or bool(state.get('refreshing')))
+        for state in (monitor_state, dashboard_state, orchestration_state))
     return {
         "clientCount": client_count,
         "clients": realtime_broker.client_details(),
         "pollingActive": polling_active,
         "monitorCache": monitor_state,
+        "orchestrationCache": orchestration_state,
         "dashboardCache": dashboard_state,
         "activityLease": lease_state,
         "coordinator": status_coordinator.diagnostics(),
@@ -1286,38 +1303,28 @@ def _request_activity_actor():
 
 
 def _ensure_background_services():
-    global _activity_supervisor_thread
-    monitor_cache.start()
-    _start_dashboard_cache()
-    with _activity_lease_lock:
-        if _activity_supervisor_thread and _activity_supervisor_thread.is_alive():
-            return
-        _activity_supervisor_thread = Thread(target=_activity_lease_loop, name="kumo-activity-lease", daemon=True)
-        thread = _activity_supervisor_thread
-    thread.start()
+    # Re-read the broker count under one lifecycle lock: concurrent connects and
+    # disconnects can deliver their notifications in a different order.
+    with _background_services_lock:
+        count = realtime_broker.client_count()
+        status_coordinator.set_client_count(count)
+        if count:
+            monitor_cache.start()
+            orchestration_cache.start()
+            _start_dashboard_cache()
+        else:
+            monitor_cache.stop()
+            orchestration_cache.stop()
+            _stop_dashboard_cache()
 
 
 def _renew_activity_lease():
+    # HTTP activity is diagnostic only. It must not start database pollers when
+    # this instance has no connected SSE clients (including health/API polling).
     global _activity_lease_last_seen, _activity_lease_last_seen_at
     with _activity_lease_lock:
         _activity_lease_last_seen = time.monotonic()
         _activity_lease_last_seen_at = _now_iso()
-    _ensure_background_services()
-
-
-def _activity_lease_loop():
-    global _activity_supervisor_thread
-    lease_seconds = max(30, int(config.KUMO_ACTIVITY_LEASE_SECONDS or 90))
-    while True:
-        time.sleep(min(5, max(1, lease_seconds // 6)))
-        with _activity_lease_lock:
-            age = time.monotonic() - float(_activity_lease_last_seen or 0)
-            if age < lease_seconds:
-                continue
-            monitor_cache.stop()
-            _stop_dashboard_cache()
-            _activity_supervisor_thread = None
-            return
 
 
 @app.before_request
@@ -1328,6 +1335,13 @@ def bind_request_context():
     if request.path.startswith("/api/") and request.path != "/api/health":
         _renew_activity_lease()
     g.activity_log_id = None
+    if config.LEGACY_ENGINE_RETIRED and (
+        (request.method not in ('GET', 'HEAD', 'OPTIONS') and (
+            request.path.startswith('/api/workflows/') or request.path.startswith('/api/dependencies/')
+            or request.path == '/api/settings/engine'))
+        or request.path.endswith('/run-fallback')
+    ):
+        return _json_error('The old workflow engine is retired. Use Orchestration / Monitor or Workflow.', 410)
     if request.path not in ("/api/admin/activity-log", "/api/admin/activity-log/download", "/api/session"):
         category = "SYSTEM" if request.path in ("/api/health", "/api/activity") else "USER"
         g.activity_log_id = activity_journal.start(
@@ -1347,6 +1361,9 @@ def bind_request_context():
 
 @app.after_request
 def log_response(response):
+    if (request.path.startswith('/api/orchestration/') and request.method in ('POST', 'PUT', 'PATCH', 'DELETE')
+            and response.status_code < 400 and not request.path.endswith('/dag-preview')):
+        orchestration_cache.refresh_async()
     if request.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store"
     elif response.mimetype == "text/html":
@@ -1441,6 +1458,7 @@ def _health_snapshot():
         "schema": config.SCHEMA,
         "environment": config.ENVIRONMENT or None,
         "deploymentEnvironment": config.DEPLOYMENT_ENVIRONMENT or None,
+        "legacyEngineRetired": config.LEGACY_ENGINE_RETIRED,
         "objectContext": {
             "environment": config.ENVIRONMENT or None,
             "environmentTable": config.T_APPLICATION_PARAMETERS,
@@ -1648,7 +1666,8 @@ def orchestration_catalog():
             workflows = [{**row, 'JOB_COUNT': sum(item['WORKFLOW_ID'] == row['WORKFLOW_ID'] for item in assignments)} for row in catalog['workflows']]
             jobs = [{**row, 'WORKFLOW_COUNT': sum(item['JOB_ID'] == row['JOB_ID'] for item in assignments)} for row in catalog['jobs']]
         return jsonify(dict(ok=True, source=config.ORCHESTRATION_NAMESPACE, workflows=workflows,
-                            jobs=jobs, assignments=assignments, generatedAt=_now_iso()))
+                            jobs=jobs, assignments=assignments, revision=orchestration.revision(catalog),
+                            warnings=catalog.get('warnings', []), generatedAt=_now_iso()))
     except Exception as exc:
         return _json_error(exc, 500)
 
@@ -1671,6 +1690,37 @@ def orchestration_configuration():
         return _json_error(exc, 400)
     except Exception as exc:
         return _json_error(exc, 500)
+
+
+@app.route('/api/orchestration/job-order', methods=['PUT'])
+def orchestration_job_order():
+    if config.USE_MOCK or not sf.is_configured():
+        return _json_error('Connect to Snowflake to edit workflow jobs.', 503)
+    try:
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            raise ValueError('A JSON object is required')
+        with sf.connection_scope(force_service=True):
+            return jsonify(orchestration.save_orders(body.get('orders'), body.get('revision')))
+    except orchestration.ConfigurationConflict as exc:
+        return _json_error(exc, 409)
+    except ValueError as exc:
+        return _json_error(exc, 400)
+    except Exception as exc:
+        return _json_error(exc, 500)
+
+
+@contextmanager
+def _orchestration_write_scope():
+    with sf.connection_scope(force_service=True):
+        sf.execute_service('BEGIN')
+        try:
+            orchestration.lock_configuration()
+            yield
+            sf.execute_service('COMMIT')
+        except Exception:
+            sf.execute_service('ROLLBACK')
+            raise
 
 
 def _orchestration_workflow_values(payload):
@@ -1741,40 +1791,45 @@ def create_orchestration_workflow():
         values = _orchestration_workflow_values(payload)
         workflow_id = str(uuid.uuid4())
         entry_job_id = str(payload.get('entryJobId') or '').strip()
-        if not entry_job_id:
-            raise ValueError('Choose an entry job from the Job catalog')
         with sf.connection_scope(force_service=True):
-            job = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE JOB_ID = %(job_id)s", {'job_id': entry_job_id})
-            if int(job.get('CNT') or 0) != 1:
-                raise ValueError('Entry job was not found in the Job catalog')
+            if entry_job_id:
+                job = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE JOB_ID = %(job_id)s", {'job_id': entry_job_id})
+                if int(job.get('CNT') or 0) != 1:
+                    raise ValueError('Entry job was not found in the Job catalog')
             duplicate = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_WORKFLOW} WHERE UPPER(WORKFLOW_NAME) = UPPER(%(name)s)", values)
             if int(duplicate.get("CNT") or 0):
                 raise ValueError("A workflow with this name already exists")
             sf.execute_service("BEGIN")
             try:
                 orchestration.lock_configuration()
+                if entry_job_id:
+                    job = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE JOB_ID = %(job_id)s", {'job_id': entry_job_id})
+                    if int(job.get('CNT') or 0) != 1:
+                        raise ValueError('Entry job was not found in the Job catalog')
                 sf.execute_service(f"""
                     INSERT INTO {config.T_ORCHESTRATION_WORKFLOW} (
                         WORKFLOW_ID, WORKFLOW_NAME, WORKFLOW_GROUP, DESCRIPTION,
                         SCHEDULE, SCHEDULE_TIMEZONE, IS_SCHEDULE_ENABLED,
                         ALLOW_MANUAL_TRIGGER, ALLOW_EXTERNAL_TRIGGER, IS_ENABLED,
-                        EXTERNAL_TRIGGERS
-                    ) VALUES (
+                        EXTERNAL_TRIGGERS, WAREHOUSE_NAME
+                    ) SELECT
                         %(workflow_id)s, %(name)s, %(group)s, %(description)s,
                         %(schedule)s, %(timezone)s, %(schedule_enabled)s,
                         %(manual)s, %(external)s, %(enabled)s,
                         ARRAY_CONSTRUCT_COMPACT(
                             IFF(%(schedule_enabled)s, 'SCHEDULE', NULL),
                             IFF(%(external)s, 'EXTERNAL', NULL)
-                        )
-                    )
-                """, {**values, "workflow_id": workflow_id})
+                        ), %(task_warehouse)s
+
+                """, {**values, "workflow_id": workflow_id, "task_warehouse": config.DEFAULT_TASK_WAREHOUSE})
                 orchestration.add_workflow(workflow_id, entry_job_id)
                 sf.execute_service("COMMIT")
             except Exception:
                 sf.execute_service("ROLLBACK")
                 raise
-        return jsonify({"ok": True, "workflowId": workflow_id})
+            from orchestration_schedules import after_catalog_write
+            schedule_result = after_catalog_write(workflow_id)
+        return jsonify({"ok": True, "workflowId": workflow_id, **schedule_result})
     except ValueError as exc:
         return _json_error(exc, 400)
     except Exception as exc:
@@ -1795,6 +1850,7 @@ def update_orchestration_workflow(workflow_id):
                 raise ValueError("A workflow with this name already exists")
             sf.execute_service("BEGIN")
             try:
+                orchestration.lock_configuration()
                 sf.execute_service(f"""
                     UPDATE {config.T_ORCHESTRATION_WORKFLOW} SET
                         WORKFLOW_NAME = %(name)s,
@@ -1818,7 +1874,9 @@ def update_orchestration_workflow(workflow_id):
             except Exception:
                 sf.execute_service("ROLLBACK")
                 raise
-        return jsonify({"ok": True, "workflowId": workflow_id})
+            from orchestration_schedules import after_catalog_write
+            schedule_result = after_catalog_write(workflow_id)
+        return jsonify({"ok": True, "workflowId": workflow_id, **schedule_result})
     except ValueError as exc:
         return _json_error(exc, 400)
     except Exception as exc:
@@ -1829,26 +1887,34 @@ def update_orchestration_workflow(workflow_id):
 def delete_orchestration_workflow(workflow_id):
     try:
         with sf.connection_scope(force_service=True):
-            exists = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_WORKFLOW} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
-            if int(exists.get("CNT") or 0) != 1:
-                return _json_error("Workflow not found", 404)
-            assigned = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_DEPENDENCY} WHERE CHILD_WORKFLOW_ID = %(workflow_id)s AND JOB_ID IS NOT NULL", {"workflow_id": workflow_id})
-            assigned_count = int(assigned.get("CNT") or 0)
-            if assigned_count:
-                return _json_error(f"This workflow cannot be deleted because it contains {assigned_count} job{'s' if assigned_count != 1 else ''}", 409)
-            children = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_DEPENDENCY} WHERE PARENT_WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
-            if int(children.get('CNT') or 0):
-                return _json_error('Remove dependent workflow relationships before deleting this workflow', 409)
-            sf.execute_service("BEGIN")
-            try:
-                orchestration.lock_configuration()
-                sf.execute_service(f"DELETE FROM {config.T_ORCHESTRATION_DEPENDENCY} WHERE CHILD_WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
+            with _orchestration_write_scope():
+                exists = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_WORKFLOW} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
+                if int(exists.get("CNT") or 0) != 1:
+                    return _json_error("Workflow not found", 404)
+                assigned = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_DEPENDENCY} WHERE WORKFLOW_ID = %(workflow_id)s AND JOB_ID IS NOT NULL", {"workflow_id": workflow_id})
+                assigned_count = int(assigned.get("CNT") or 0)
+                if assigned_count:
+                    return _json_error(f"This workflow cannot be deleted because it contains {assigned_count} job{'s' if assigned_count != 1 else ''}", 409)
+                children = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_DEPENDENCY} WHERE PARENT_ID = %(workflow_id)s AND JOB_ID IS NULL", {"workflow_id": workflow_id})
+                if int(children.get('CNT') or 0):
+                    return _json_error('Remove dependent workflow relationships before deleting this workflow', 409)
+                from orchestration_engine import installed
+                if installed():
+                    pending = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_EXECUTION_LOG} WHERE WORKFLOW_ID = %(workflow_id)s AND JOB_ID IS NULL AND STATUS IN ('QUEUED','CLAIMED','RUNNING')", {'workflow_id': workflow_id})
+                    if int(pending.get('CNT') or 0):
+                        return _json_error('Wait for queued or active executions before deleting this workflow', 409)
+                sf.execute_service(f"DELETE FROM {config.T_ORCHESTRATION_DEPENDENCY} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
                 sf.execute_service(f"DELETE FROM {config.T_ORCHESTRATION_WORKFLOW} WHERE WORKFLOW_ID = %(workflow_id)s", {"workflow_id": workflow_id})
-                sf.execute_service("COMMIT")
-            except Exception:
-                sf.execute_service("ROLLBACK")
-                raise
-        return jsonify({"ok": True, "workflowId": workflow_id, "deleted": True})
+            cleanup = {}
+            if config.ORCHESTRATION_RUNS_ENABLED and not config.USE_MOCK:
+                from orchestration_schedules import remove_scheduler
+                try:
+                    with sf.connection_scope(force_service=True):
+                        remove_scheduler(workflow_id)
+                except Exception as exc:
+                    cleanup['warning'] = 'Workflow deleted, but its scheduler needs cleanup: ' + str(exc)
+            return jsonify({"ok": True, "workflowId": workflow_id, "deleted": True, **cleanup})
+
     except Exception as exc:
         return _json_error(exc, 500)
 
@@ -1858,22 +1924,34 @@ def create_orchestration_job():
     payload = request.get_json(silent=True) or {}
     try:
         values = _orchestration_job_values(payload)
-        duplicate = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE UPPER(JOB_NAME) = UPPER(%(name)s)", values)
-        if int(duplicate.get("CNT") or 0):
-            raise ValueError("A job with this name already exists")
         job_id = str(uuid.uuid4())
-        sf.execute_service(f"""
-            INSERT INTO {config.T_ORCHESTRATION_JOB} (
-                JOB_ID, JOB_NAME, DESCRIPTION, JOB_TYPE, JOB_LAYER, COMMAND_LINE,
-                SQL_COMMAND, DBT_COMMAND, DBT_TARGET, DBT_WORKSPACE,
-                DBT_PROJECT_FQN, TIMEOUT_SECONDS, IS_ENABLED
-            ) VALUES (
-                %(job_id)s, %(name)s, %(description)s, %(job_type)s, %(job_layer)s, %(command_line)s,
-                %(sql_command)s, %(dbt_command)s, %(dbt_target)s, %(dbt_workspace)s,
-                %(dbt_project_fqn)s, %(timeout)s, %(enabled)s
-            )
-        """, {**values, "job_id": job_id})
+        with _orchestration_write_scope():
+            duplicate = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE UPPER(JOB_NAME) = UPPER(%(name)s)", values)
+            if int(duplicate.get("CNT") or 0):
+                raise ValueError("A job with this name already exists")
+            workflow_id = payload.get('workflowId')
+            catalog = None
+            if workflow_id:
+                catalog = orchestration.read_catalog()
+                orchestration.check_revision(catalog, payload.get('revision'))
+            sf.execute_service(f"""
+                INSERT INTO {config.T_ORCHESTRATION_JOB} (
+                    JOB_ID, JOB_NAME, DESCRIPTION, JOB_TYPE, JOB_LAYER, COMMAND_LINE,
+                    SQL_COMMAND, DBT_COMMAND, DBT_TARGET, DBT_WORKSPACE,
+                    DBT_PROJECT_FQN, TIMEOUT_SECONDS, IS_ENABLED
+                ) VALUES (
+                    %(job_id)s, %(name)s, %(description)s, %(job_type)s, %(job_layer)s, %(command_line)s,
+                    %(sql_command)s, %(dbt_command)s, %(dbt_target)s, %(dbt_workspace)s,
+                    %(dbt_project_fqn)s, %(timeout)s, %(enabled)s
+                )
+            """, {**values, "job_id": job_id})
+            if catalog is not None:
+                members = [row['JOB_ID'] for row in orchestration.assignments(catalog) if row['WORKFLOW_ID'] == workflow_id]
+                catalog['jobs'].append({'JOB_ID': job_id})
+                orchestration.apply_orders(catalog, [{'workflowId': workflow_id, 'jobIds': members + [job_id]}])
         return jsonify({"ok": True, "jobId": job_id})
+    except orchestration.ConfigurationConflict as exc:
+        return _json_error(exc, 409)
     except ValueError as exc:
         return _json_error(exc, 400)
     except Exception as exc:
@@ -1885,29 +1963,31 @@ def update_orchestration_job(job_id):
     payload = request.get_json(silent=True) or {}
     try:
         values = _orchestration_job_values(payload)
-        exists = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE JOB_ID = %(job_id)s", {"job_id": job_id})
-        if int(exists.get("CNT") or 0) != 1:
-            return _json_error("Job not found", 404)
-        duplicate = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE UPPER(JOB_NAME) = UPPER(%(name)s) AND JOB_ID <> %(job_id)s", {**values, "job_id": job_id})
-        if int(duplicate.get("CNT") or 0):
-            raise ValueError("A job with this name already exists")
-        sf.execute_service(f"""
-            UPDATE {config.T_ORCHESTRATION_JOB} SET
-                JOB_NAME = %(name)s,
-                DESCRIPTION = %(description)s,
-                JOB_TYPE = %(job_type)s,
-                COMMAND_LINE = %(command_line)s,
-                SQL_COMMAND = %(sql_command)s,
-                DBT_COMMAND = %(dbt_command)s,
-                DBT_TARGET = %(dbt_target)s,
-                DBT_WORKSPACE = %(dbt_workspace)s,
-                DBT_PROJECT_FQN = %(dbt_project_fqn)s,
-                TIMEOUT_SECONDS = %(timeout)s,
-                IS_ENABLED = %(enabled)s,
-                UPDATED_AT = CURRENT_TIMESTAMP(),
-                UPDATED_BY = CURRENT_USER()
-            WHERE JOB_ID = %(job_id)s
-        """, {**values, "job_id": job_id})
+        with _orchestration_write_scope():
+            exists = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE JOB_ID = %(job_id)s", {"job_id": job_id})
+            if int(exists.get("CNT") or 0) != 1:
+                return _json_error("Job not found", 404)
+            duplicate = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE UPPER(JOB_NAME) = UPPER(%(name)s) AND JOB_ID <> %(job_id)s", {**values, "job_id": job_id})
+            if int(duplicate.get("CNT") or 0):
+                raise ValueError("A job with this name already exists")
+            sf.execute_service(f"""
+                UPDATE {config.T_ORCHESTRATION_JOB} SET
+                    JOB_NAME = %(name)s,
+                    DESCRIPTION = %(description)s,
+                    JOB_TYPE = %(job_type)s,
+                    JOB_LAYER = %(job_layer)s,
+                    COMMAND_LINE = %(command_line)s,
+                    SQL_COMMAND = %(sql_command)s,
+                    DBT_COMMAND = %(dbt_command)s,
+                    DBT_TARGET = %(dbt_target)s,
+                    DBT_WORKSPACE = %(dbt_workspace)s,
+                    DBT_PROJECT_FQN = %(dbt_project_fqn)s,
+                    TIMEOUT_SECONDS = %(timeout)s,
+                    IS_ENABLED = %(enabled)s,
+                    UPDATED_AT = CURRENT_TIMESTAMP(),
+                    UPDATED_BY = CURRENT_USER()
+                WHERE JOB_ID = %(job_id)s
+            """, {**values, "job_id": job_id})
         return jsonify({"ok": True, "jobId": job_id})
     except ValueError as exc:
         return _json_error(exc, 400)
@@ -1918,14 +1998,14 @@ def update_orchestration_job(job_id):
 @app.route("/api/orchestration/jobs/<job_id>", methods=["DELETE"])
 def delete_orchestration_job(job_id):
     try:
-        with sf.connection_scope(force_service=True):
+        with _orchestration_write_scope():
             exists = sf.query_one_service(f"SELECT COUNT(*) AS CNT FROM {config.T_ORCHESTRATION_JOB} WHERE JOB_ID = %(job_id)s", {"job_id": job_id})
             if int(exists.get("CNT") or 0) != 1:
                 return _json_error("Job not found", 404)
             assigned = sf.query_one_service(f"""
                 SELECT COUNT(*) AS CNT
                 FROM {config.T_ORCHESTRATION_DEPENDENCY}
-                WHERE JOB_ID = %(job_id)s OR PARENT_JOB_ID = %(job_id)s
+                WHERE JOB_ID = %(job_id)s OR (PARENT_ID = %(job_id)s AND JOB_ID IS NOT NULL)
             """, {"job_id": job_id})
             assigned_count = int(assigned.get("CNT") or 0)
             if assigned_count:
@@ -2102,6 +2182,9 @@ def _actor_context():
             "roleName": "Unknown role",
             "callerRightsActive": sf.connection_mode() == "spcs-caller-oauth",
         }
+
+
+app.extensions['orchestration_actor_context'] = _actor_context
 
 
 @app.route("/api/workflows/<workflow_id>/run", methods=["POST"])

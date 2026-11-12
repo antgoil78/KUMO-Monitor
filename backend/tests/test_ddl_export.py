@@ -88,6 +88,8 @@ class DdlExportTests(unittest.TestCase):
         for item in [("TABLE", "KUMO_DEV.META.LIM_BATCH_CTRL"),
                      ("TABLE", "KUMO_TST.MONITOR_META.WORKFLOWS"),
                      ("TASK", "KUMO_DEV.MONITOR_APP.TMP_WF_EXAMPLE"),
+                     ("TASK", "KUMO_DEV.MONITOR_APP.TMP_ORCH_WF_1234ABCD_1234"),
+                     ("TASK", "KUMO_DEV.MONITOR_APP.TASK_ORCH_WF_1234ABCD_1234_1234_1234_123456789ABC"),
                      ("TASK", "KUMO_DEV.MONITOR_APP.TASK_WF_1234ABCD_SCHEDULER"),
                      ("PROCEDURE", "KUMO_DEV.MONITOR_APP.SP_TEST")]:
             with self.subTest(item=item), self.assertRaises(ValueError):

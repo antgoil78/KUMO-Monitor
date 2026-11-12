@@ -34,7 +34,8 @@ class OrchestrationServiceContextTests(unittest.TestCase):
         for name, table in (
             ("T_ORCHESTRATION_WORKFLOW", "WORKFLOW"),
             ("T_ORCHESTRATION_JOB", "JOB"),
-            ("T_ORCHESTRATION_DEPENDENCY", "WORKFLOW_DEPENDENCY"),
+            ("T_ORCHESTRATION_DEPENDENCY", "DEPENDENCIES"),
+            ("T_ORCHESTRATION_EXECUTION_LOG", "WORKFLOW_EXECUTION_LOG"),
         ):
             patches.append(patch.object(config, name, f"KUMO_DEV.MONITOR_META.{table}"))
         patches.append(patch.object(config, "ORCHESTRATION_NAMESPACE", "KUMO_DEV.MONITOR_META"))
@@ -53,7 +54,7 @@ class OrchestrationServiceContextTests(unittest.TestCase):
         sql = self.statements[-1]
         if sql.startswith("SELECT COUNT(*) AS CNT"):
             # Existing IDs are valid; names and assignments are available.
-            count = 0 if "UPPER(" in sql or "FROM KUMO_DEV.MONITOR_META.WORKFLOW_DEPENDENCY" in sql else 1
+            count = 0 if "UPPER(" in sql or "FROM KUMO_DEV.MONITOR_META.DEPENDENCIES" in sql else 1
             return [{"CNT": count}]
         return []
 
@@ -72,6 +73,7 @@ class OrchestrationServiceContextTests(unittest.TestCase):
         self.assertTrue(any("KUMO_DEV.MONITOR_META." in sql for sql in self.statements))
         self.assertFalse(any("KUMO_TST." in sql or "KUMO_ADMIN." in sql for sql in self.statements))
         self.assertFalse(any("WORKFLOW_JOB" in sql for sql in self.statements))
+        self.assertFalse(any("WORKFLOW_DEPENDENCY" in sql for sql in self.statements))
         return response
 
     def test_catalog_and_flow_use_service_credentials_with_browser_caller(self):
@@ -125,6 +127,47 @@ class OrchestrationServiceContextTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn('ROLLBACK', self.statements)
 
+    def test_job_order_uses_one_service_transaction_and_dependencies_parent_ids(self):
+        catalog = dict(workflows=[{'WORKFLOW_ID': 'workflow-1', 'WORKFLOW_NAME': 'One'}],
+                       jobs=[{'JOB_ID': 'job-1', 'JOB_NAME': 'First', 'IS_ENABLED': True}],
+                       records=[], raw_records=[])
+        with patch.object(application.orchestration, 'read_catalog', return_value=catalog):
+            self.request('PUT', '/api/orchestration/job-order', {
+                'revision': application.orchestration.revision(catalog),
+                'orders': [{'workflowId': 'workflow-1', 'jobIds': ['job-1']}],
+            })
+        self.assertEqual(self.connect.call_count, 1)
+        self.assertIn('COMMIT', self.statements)
+        insert = next(call for call in self.cursor.execute.call_args_list
+                      if call.args[0].startswith('INSERT INTO KUMO_DEV.MONITOR_META.DEPENDENCIES'))
+        self.assertEqual(insert.args[1]['PARENT_ID'], 'workflow-1')
+
+    def test_inline_job_creation_and_assignment_commit_or_rollback_together(self):
+        for fail in (False, True):
+            with self.subTest(fail=fail):
+                self.connect.reset_mock()
+                self.statements.clear()
+                self.cursor.execute.reset_mock()
+                catalog = dict(workflows=[{'WORKFLOW_ID': 'workflow-1', 'WORKFLOW_NAME': 'One'}],
+                               jobs=[], records=[], raw_records=[])
+                body = dict(jobName='New job', jobType='SQL', sqlCommand='SELECT 1',
+                            workflowId='workflow-1', revision=application.orchestration.revision(catalog))
+                with patch.object(application.orchestration, 'read_catalog', return_value=catalog):
+                    if fail:
+                        with patch.object(application.orchestration, 'apply_orders', side_effect=ValueError('Invalid assignment')):
+                            response = self.client.post('/api/orchestration/jobs', json=body)
+                        self.assertEqual(response.status_code, 400)
+                        self.assertIn('ROLLBACK', self.statements)
+                        self.assertNotIn('COMMIT', self.statements)
+                    else:
+                        self.request('POST', '/api/orchestration/jobs', body)
+                        self.assertIn('COMMIT', self.statements)
+                        insert = next(call for call in self.cursor.execute.call_args_list
+                                      if call.args[0].startswith('INSERT INTO KUMO_DEV.MONITOR_META.DEPENDENCIES'))
+                        self.assertEqual(insert.args[1]['PARENT_ID'], 'workflow-1')
+                self.assertEqual(self.connect.call_count, 1)
+                self.assertTrue(any(sql.startswith('INSERT INTO KUMO_DEV.MONITOR_META.JOB') for sql in self.statements))
+
     def test_unknown_entry_job_is_rejected_before_writing(self):
         original_query_rows = self.query_rows
 
@@ -144,6 +187,14 @@ class OrchestrationServiceContextTests(unittest.TestCase):
         self.assertEqual(self.connect.call_args.kwargs["token"], "service-token")
         self.assertNotIn("BEGIN", self.statements)
         self.assertFalse(any(sql.startswith("INSERT") for sql in self.statements))
+
+    def test_workflow_can_be_created_before_its_first_job(self):
+        response = self.request('POST', '/api/orchestration/workflows', {'workflowName': 'Empty workflow'})
+        inserts = [call for call in self.cursor.execute.call_args_list
+                   if call.args[0].startswith('INSERT INTO KUMO_DEV.MONITOR_META.DEPENDENCIES')]
+        self.assertEqual(len(inserts), 1)
+        self.assertIsNone(inserts[0].args[1]['JOB_ID'])
+        self.assertEqual(inserts[0].args[1]['WORKFLOW_ID'], response.get_json()['workflowId'])
 
     def test_user_session_still_uses_caller_credentials(self):
         handle = sf.set_ingress_user_token("browser-token")

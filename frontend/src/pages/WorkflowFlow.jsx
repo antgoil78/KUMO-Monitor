@@ -249,7 +249,7 @@ export default function WorkflowFlow() {
 
   return (
     <section className="page workflow-flow-page">
-      <PageHeader breadcrumb="Orchestration / Flow" title="Flow" subtitle={`Live workflow and job relationships from ${graph?.source || 'the configured orchestration catalog'}.`} actions={<button className="button" type="button" onClick={load} disabled={loading}>↻ Refresh</button>} />
+      <PageHeader breadcrumb="Workflow / Flow" title="Flow" subtitle={`Live workflow and job relationships from ${graph?.source || 'the configured orchestration catalog'}.`} actions={<button className="button" type="button" onClick={load} disabled={loading}>↻ Refresh</button>} />
       {error && <div className="alert error">{error}</div>}
       {loading && !graph && <LoadingState>Loading workflow graph…</LoadingState>}
       {graph && <>

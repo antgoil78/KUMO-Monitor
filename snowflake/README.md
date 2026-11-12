@@ -76,12 +76,160 @@ the destination is configured and ready.
 
 ## Current DEV migrations
 
-The orchestration dependency editor uses `WORKFLOW` and `JOB` as definitions
-and `WORKFLOW_DEPENDENCY` for both workflow rows and job assignments. It no
-longer reads or writes `WORKFLOW_JOB`. That table is retained as migration
-source only. The Workflow catalog creates a workflow together with its entry
-job; subsequent assignments and parent/status/SQL/ALLOW rules are maintained
-in Orchestration / Dependencies. Run preview remains simulated.
+The current orchestration administration uses `WORKFLOW`, `JOB` and
+`DEPENDENCIES`. `DEPENDENCIES` stores `WORKFLOW_ID`, nullable `JOB_ID`,
+`PARENT_ID`, `TRIGGER_TYPE`, `SUCCESS`, `WARNING`, `ERROR`, `SQL` and `ALLOW`.
+Workflow rows have no job ID. Assignment rows identify a job within a workflow;
+their parent IDs form the job order, starting with the containing workflow.
+The Workflow page saves order changes in one transaction and rejects stale
+revisions. Reordering preserves existing rules. Unmatched sample references
+are reported and preserved. The page itself does not import older configuration.
+The old `WORKFLOWS` / `WORKFLOW_TASKS` definitions remain available for historical reads. DEV retirement is described below; TST retains its existing engine.
+
+## Parallel orchestration engine
+
+`backend/migrations/apply_parallel_engine.py` deploys the parallel engine alongside
+the existing engine. Default is a read-only preflight; `--apply` updates only
+this engine's objects, removes its old suspended persistent manual tasks, and
+prepares configured workflow schedulers suspended:
+
+```bash
+python backend/migrations/apply_parallel_engine.py
+python backend/migrations/apply_parallel_engine.py --apply
+```
+
+Use `--environment-table DATABASE.SCHEMA.TABLE` for another explicitly selected
+environment. Routing comes from its environment parameters. Workflow warehouse
+selection uses `WORKFLOW.WAREHOUSE_NAME`, initialized from the deployment setting
+or `--warehouse`. New workflows created in the app receive that deployment default.
+Credentials and table contents are not saved with the definitions.
+
+| Object | Responsibility |
+| --- | --- |
+| `MONITOR_META.WORKFLOW_EXECUTION_LOG` | Durable requests and workflow/job results |
+| `MONITOR_APP.SP_ORCH_REQUEST_RUN` | Validate scope and atomically snapshot enabled jobs and resolved commands |
+| `MONITOR_APP.SP_ORCH_START_RUN` | Serialize workflow requests and create/start a task for one recorded run |
+| `MONITOR_APP.SP_ORCH_EXECUTE_WORKFLOW` | Execute only that run's selected jobs in order |
+| `MONITOR_APP.SP_ORCH_RUN_SCHEDULED` | Snapshot and execute a full workflow inside its persistent scheduler |
+| `MONITOR_APP.SP_ORCH_RECONCILE` | Recover interrupted runs, clean temporary tasks, and advance queues |
+| `MONITOR_APP.TASK_ORCH_MAINTENANCE` | Run recovery/cleanup every minute, independently of browsers |
+
+An idle unscheduled workflow has no native task. Every manual request, including
+manual runs of a scheduled workflow, receives one
+`MONITOR_APP.TMP_ORCH_WF_<workflow UUID>_<run UUID>` task. Its fixed body calls the
+runner with that execution ID, so a one-job request cannot drain another request
+or execute unrelated jobs. Jobs never own tasks. The task is created on demand
+with automatic retries disabled and dropped after the workflow result is saved.
+[Snowflake permits a running task to finish when it is dropped](https://docs.snowflake.com/en/sql-reference/sql/drop-task).
+
+Scheduled workflows are the exception: their persistent
+`TASK_ORCH_WF_<workflow UUID>_SCHEDULER` calls the scheduled wrapper. Each occurrence
+snapshots all currently enabled jobs. A manual partial run creates a separate
+temporary task and does not alter the scheduled task. The deployment prepares
+configured schedulers suspended. The Monitor and Workflow editors now synchronize
+schedule changes directly with their native workflow scheduler.
+Activate or pause individual schedules explicitly through the new Monitor.
+The initial deployment still prepares schedulers suspended. The static housekeeping task is resumed
+by deployment and handles only requests already accepted into the new log.
+Generated workflow run/scheduler tasks are excluded from saved DDL; the static
+housekeeping definition is retained.
+
+`WORKFLOW.TASK_NAME` stores only the optional persistent scheduler address.
+Temporary task addresses belong to their execution rows. The caller-rights
+runner validates the native task context and uses the existing command resolver
+unchanged. The scheduled wrapper also uses caller's rights so both paths can
+execute dbt without entering an owner-rights workload call chain.
+
+The log has one workflow row (`JOB_ID IS NULL`) per request and one row per
+configured job, including explicitly skipped jobs, linked by `WORKFLOW_RUN_ID` and `PARENT_EXECUTION_ID`.
+`QUEUED` is durable waiting work, `CLAIMED` reserves a workflow while its task
+is provisioned, and `RUNNING` begins when the native task claims the execution.
+Requests for the same workflow are serialized. A completed run launches the
+oldest waiting request; housekeeping resumes interrupted provisioning and queue
+advancement. Repeated request IDs return the original run. Task creation is
+idempotent and checks the existing task body before issuing `EXECUTE TASK`.
+
+Supported manual scopes are `WORKFLOW`, `JOB_ONLY`, and `FROM_JOB`. Partial runs
+bypass earlier jobs without inventing successful records for them. Disabled and out-of-scope jobs
+are recorded as `SKIPPED` before command resolution and do not block later enabled jobs.
+The first runnable job starts `INITIATING`, becomes `QUEUED` during task provisioning,
+and then `RUNNING`. Later selected jobs remain `PENDING` until their turn.
+ALLOW=false and false Boolean SQL conditions produce skipped results. Subsequent
+selected jobs follow snapshotted parent-result rules. Each job has its own
+execution ID, query context, and resolved dbt `runId`. A workflow fails if any
+selected job fails. dbt warning/artifact classification remains a later integration.
+
+Recovery uses matching native task history, never heartbeat age, to close failed
+or cancelled executions. Unstarted jobs become skipped. It does not replay a
+running/finished workload. Terminal temporary tasks are removed, including tasks
+left behind by timeouts; persistent workflow schedulers are retained.
+
+```text
+GET       /api/orchestration/engine
+GET       /api/orchestration/monitor
+GET, POST /api/orchestration/workflows/<workflow_id>/runs
+POST      /api/orchestration/workflows/<workflow_id>/reconcile
+```
+
+POST run requests specify `mode`, optional `jobId`, and a stable `requestId`.
+Actor identity comes from the backend session. Both Workflow and Monitor pages
+preview and run the selected scope and display execution history. Manual API
+requests require `KUMO_ORCHESTRATION_RUNS_ENABLED=true` in the running backend;
+the code default remains false for environments not yet enabled.
+
+The Monitor GET reads the three catalog tables and execution log on one service
+connection. It selects an active run, otherwise the oldest queued request,
+otherwise the latest result. Job statuses/progress belong to that same run;
+removed jobs remain visible using their snapshot names. Model and test counts are read from the existing data-platform progress tables,
+keyed by the job execution ID passed to dbt as `runId`. Missing telemetry is shown
+as waiting for progress. Monitoring GET does not
+start tasks or reconcile state; explicit Run and Refresh status actions use POST.
+
+The new engine does not automatically dispatch downstream workflows or
+write existing workflow history/queues, or reuse the old dispatcher,
+completion procedures, or locks. Known legacy engine/cleanup references in selected
+commands are rejected, including the migrated maintenance cleanup. Business
+workload tables, loaders, and dbt targets remain shared resources.
+
+The explicit validation command creates disposable SELECT/dbt-parse jobs and
+checks full/only/from temporary tasks, idempotency, queue advancement, enabled-job
+order, the scheduled exception, cleanup, and timeout recovery:
+
+```bash
+python backend/tests/live_parallel_engine.py --run
+```
+
+It removes its own fixture rows/tasks and checks unchanged existing-engine DDL
+and row fingerprints. It is not a routine startup or deployment step.
+
+## Catalog migration history
+
+On 10 November 2026, `backend/migrations/migrate_workflow_catalog.py --apply`
+rebuilt DEV's three new catalog tables from `WORKFLOWS` and `WORKFLOW_TASKS`:
+14 workflows, 38 jobs and 52 dependency rows. Twelve subject workflows contain
+readiness → SDL → EDV jobs; `LOAD RAW DAILY` and `MAINTENANCE - CLEANUP` each
+contain one job. `RUN DEPENDENCIES` is excluded. SQL text and dbt deployment
+parameters are preserved; each original SDL/EDV dbt command is split into its
+two path selectors. Existing success callbacks become parent links. The entry
+step's schedule is retained, with all DEV schedules still disabled.
+
+```bash
+python backend/migrations/migrate_workflow_catalog.py
+python backend/migrations/migrate_workflow_catalog.py --apply
+```
+
+The default previews the mapping. `--apply` deliberately clears and repopulates
+only `WORKFLOW`, `JOB` and `DEPENDENCIES` in one transaction, replacing any later
+catalog edits if rerun. It verifies all inserted values and unchanged source
+definitions before committing. It changes no DDL, native tasks or execution
+history and executes no workflow commands. No DDL export is needed.
+
+The earlier orchestration dependency editor used `WORKFLOW` and `JOB` as definitions
+and `WORKFLOW_DEPENDENCY` for both workflow rows and job assignments. It did
+not read or write `WORKFLOW_JOB`. Both earlier dependency tables are retained;
+the current application reads and writes `DEPENDENCIES`. Run preview remains
+simulated. The migration below documents that earlier model and is not required
+to use the current Workflow page.
 
 In the unified store, `CHILD_WORKFLOW_ID` identifies the containing workflow.
 `JOB_ID IS NULL` identifies its workflow configuration row; otherwise the row
@@ -316,3 +464,82 @@ The 38 `RAW_LIM_PKG_GROUP_SOURCE` configuration rows were also copied unchanged
 from DEV into TST and verified by count and fingerprint. All 12 active subjects
 have their required TST RAW tables. `RAW_LIM_META` and readiness logs are derived
 from TST loads/refreshes rather than copied from DEV.
+
+## DEV retirement of the old execution engine
+
+`python backend/migrations/retire_legacy_engine_dev.py` performs a targeted
+read-only preflight. `--apply` retires DEV only after the old engine has no
+pending executions and unfinished new jobs have no references to retired procedures.
+Independent new executions continue running. It suspends and `X_`-renames the old dispatcher and generated
+execution tasks, nine procedure overloads, the old run queue, and its stream.
+Tables/procedures use native renames. Tasks and the stream use clone/drop because
+Snowflake does not support their renaming; the clones retain definitions, grants,
+and the stream offset, and tasks remain suspended. Old native task history
+remains associated with the former task identities. TST is never addressed by this migration.
+Old catalog tables, history, and logs remain available for historical reads.
+
+The migration stores `ORCHESTRATION / LEGACY_ENGINE_RETIRED=true` in DEV's
+application parameters. Restart the local backend to load it. The maintained
+app then blocks old run/configuration/engine-control writes with HTTP 410,
+disables its old recovery worker, routes historical queue reads to the archive,
+and opens the new Monitor by default. The sidebar groups the current pages under
+Workflow; the legacy navigation group has been removed.
+The old temporary-task cleanup invocation is removed from the new maintenance
+job; new temporary tasks are already handled by `TASK_ORCH_MAINTENANCE`.
+
+No business workloads or new schedules are activated by retirement. Automatic
+downstream workflow dispatch and notification parity still need integration
+and testing in the new engine. Schedule controls are now available in the Monitor. Source changes reach
+SPCS through the normal Git/image release process; this migration does not deploy
+an image or change a service.
+
+`apply_execution_states.py --apply` updates only the four new engine procedures
+changed for complete per-job state tracking. The disposable
+`backend/tests/live_execution_states.py` checks full/only/from scopes, live states,
+temporary task cleanup, and job-scoped model/test progress; `--progress-only`
+checks the telemetry reader without running any jobs.
+
+## Monitor controls and execution details
+
+The Monitor provides direct DAG and Log shortcuts and quick workflow, global job,
+and schedule enable/disable actions. Quick writes change only the selected flag,
+check the previously displayed state, and preserve concurrent definition edits.
+Accepted executions retain their snapshotted jobs and commands. Disabling a
+workflow pauses its scheduler without changing its schedule-enabled preference;
+reenabling the workflow resumes that schedule. Disabling a schedule suspends its
+native scheduler, retaining it for reuse. Future accepted runs use the new flags.
+
+Schedule editing creates or updates only the containing workflow's persistent
+scheduler, validates its expected body and engine comment, and resumes it only
+when both the workflow and schedule are enabled. Manual runs continue to create
+temporary workflow tasks. Jobs never own native tasks. Catalog changes commit
+before scheduler DDL; synchronization errors are reported and the Monitor reads
+the actual native state. Saved intent is checked again after DDL to converge on
+concurrent changes. Only generated tasks are affected; no DDL export is required.
+
+Last Run and Duration describe each row's latest actually started execution,
+independently of a newer skipped/queued request. Schedule hides stored cron text
+when disabled. Next Run uses the selected scheduler's Snowflake TASK_HISTORY,
+scoped by task, database and schema. Snowflake reports future occurrences within
+its eight-day window; absent native timestamps are shown as not reported, never
+as a locally guessed date. Disabled workflows/jobs have no displayed Next Run.
+
+Workflow DAGs show the selected execution's frozen job chain and statuses, or
+configured jobs before the first execution. DBT job DAGs use that job's own model
+and test progress. Workflow logs include all job results and their model, test
+and event sources; job logs restrict those sources to that job execution ID.
+The maintained DAG and log components serve both new orchestration and archived
+views through explicitly selected APIs. New execution details never read old
+workflow history or use a parent workflow run ID to fetch job telemetry.
+
+```text
+PATCH /api/orchestration/workflows/<workflow_id>/state
+PATCH /api/orchestration/workflows/<workflow_id>/schedule
+PATCH /api/orchestration/jobs/<job_id>/state
+GET   /api/orchestration/workflows/<workflow_id>/dag?runId=...&jobId=...
+GET   /api/orchestration/workflows/<workflow_id>/log?runId=...&jobId=...
+```
+
+`backend/tests/live_monitor_controls.py` creates one disposable future-scheduled
+SELECT job/workflow, checks the native scheduler lifecycle and Next Run through
+the API, and removes its rows and scheduler. It never executes the job.

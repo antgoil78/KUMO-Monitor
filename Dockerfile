@@ -1,5 +1,5 @@
 # Multi-stage build: Node for React, Python for backend
-FROM node:18-alpine AS react-builder
+FROM node:22-alpine AS react-builder
 
 WORKDIR /app/frontend
 

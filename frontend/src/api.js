@@ -78,7 +78,20 @@ export const api = {
   orchestrationFlow: () => requestJson('/api/orchestration/flow', { timeoutMs: 120000 }),
   orchestrationCatalog: () => requestJson('/api/orchestration/catalog', { timeoutMs: 120000 }),
   orchestrationConfiguration: () => requestJson('/api/orchestration/configuration', { timeoutMs: 120000 }),
+  orchestrationEngine: () => requestJson('/api/orchestration/engine'),
+  orchestrationMonitor: (refresh = false) => requestJson(`/api/orchestration/monitor${refresh ? '?refresh=1' : ''}`),
+  setOrchestrationWorkflowState: (workflowId, enabled, expectedEnabled) => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/state`, { method: 'PATCH', body: JSON.stringify({ enabled, expectedEnabled }), timeoutMs: 120000 }),
+  setOrchestrationJobState: (jobId, enabled, expectedEnabled) => requestJson(`/api/orchestration/jobs/${encodeURIComponent(jobId)}/state`, { method: 'PATCH', body: JSON.stringify({ enabled, expectedEnabled }), timeoutMs: 120000 }),
+  setOrchestrationSchedule: (workflowId, payload) => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/schedule`, { method: 'PATCH', body: JSON.stringify(payload), timeoutMs: 120000 }),
+  previewOrchestrationJobDag: jobId => requestJson(`/api/orchestration/jobs/${encodeURIComponent(jobId)}/dag-preview`, { method: 'POST', timeoutMs: 210000 }),
+  orchestrationDag: (workflowId, runId = '', jobId = '') => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/dag?${new URLSearchParams({ ...(runId ? { runId } : {}), ...(jobId ? { jobId } : {}) })}`),
+  orchestrationLog: (workflowId, runId, jobId = '') => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/log?${new URLSearchParams({ runId, ...(jobId ? { jobId } : {}) })}`),
+  orchestrationHistory: (filters, refresh = false) => requestJson(`/api/orchestration/history?${new URLSearchParams({ ...filters, ...(refresh ? { refresh: '1' } : {}) })}`, { timeoutMs: 120000 }),
+  orchestrationRuns: workflowId => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/runs`),
+  runOrchestrationWorkflow: (workflowId, payload) => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/runs`, { method: 'POST', body: JSON.stringify(payload), timeoutMs: 120000 }),
+  reconcileOrchestrationWorkflow: workflowId => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/reconcile`, { method: 'POST' }),
   saveOrchestrationConfiguration: payload => requestJson('/api/orchestration/configuration', { method: 'PUT', body: JSON.stringify(payload), timeoutMs: 120000 }),
+  saveOrchestrationJobOrder: payload => requestJson('/api/orchestration/job-order', { method: 'PUT', body: JSON.stringify(payload), timeoutMs: 120000 }),
   createOrchestrationWorkflow: payload => requestJson('/api/orchestration/workflows', { method: 'POST', body: JSON.stringify(payload), timeoutMs: 120000 }),
   updateOrchestrationWorkflow: (workflowId, payload) => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}`, { method: 'PATCH', body: JSON.stringify(payload), timeoutMs: 120000 }),
   deleteOrchestrationWorkflow: workflowId => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}`, { method: 'DELETE', timeoutMs: 120000 }),
@@ -166,7 +179,7 @@ export function createKumoEventSource(onEvent, onError, options = {}) {
   const clientId = kumoClientId()
   const params = new URLSearchParams({ clientId, page: options.page || 'Unknown page' })
   const source = new window.EventSource(`/api/events?${params.toString()}`)
-  const eventTypes = ['connected', 'heartbeat', 'realtime_state', 'monitor_update', 'monitor_refresh_started', 'monitor_refresh_completed', 'workflow_run_requested', 'workflow_run_queued', 'workflow_run_status', 'workflow_run_failed']
+  const eventTypes = ['connected', 'heartbeat', 'orchestration_update', 'realtime_state', 'monitor_update', 'monitor_refresh_started', 'monitor_refresh_completed', 'workflow_run_requested', 'workflow_run_queued', 'workflow_run_status', 'workflow_run_failed']
   function handle(event) {
     try {
       const payload = event.data ? JSON.parse(event.data) : null

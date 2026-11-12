@@ -379,7 +379,6 @@ export default function Dashboard({ onNavigate }) {
   const snowflakeOk = Boolean(ping?.ok)
   const connectedClients = Number(realtime?.clientCount || 0)
   const pollingActive = Boolean(realtime?.pollingActive)
-  const activityLease = realtime?.activityLease || {}
   const engineKind = statusKind(engine.status)
   const engineOk = ['success', 'running'].includes(engineKind)
 
@@ -480,7 +479,7 @@ export default function Dashboard({ onNavigate }) {
             <HealthCheck label="Backend API" detail={health?.app || 'KUMO Monitor'} ok={Boolean(health?.ok)} />
             <HealthCheck label="Snowflake session" detail={ping?.mode || health?.snowflakeConnectionMode || 'unknown'} ok={snowflakeOk || mockMode} tone={mockMode ? 'queued' : undefined} />
             <HealthCheck label="Workflow engine" detail={engine.status || 'UNKNOWN'} ok={engineOk} tone={engineKind} />
-            <HealthCheck label="Backend polling" detail={`${pollingActive ? 'Active' : 'Stopped'} · activity lease ${Math.ceil(Number(activityLease.remainingSeconds || 0))}s`} ok={pollingActive} />
+            <HealthCheck label="Backend polling" detail={`${pollingActive ? 'Active' : 'Stopped'} · ${connectedClients} connected client${connectedClients === 1 ? '' : 's'}`} ok={pollingActive} />
           </div>
         </div>
 

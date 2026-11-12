@@ -2,16 +2,11 @@ import { useEffect, useState } from 'react'
 
 const navItems = [
   { key: 'dashboard', label: 'Dashboard', icon: '⌂' },
-  { key: 'workflow', label: 'Workflow', icon: '◫', children: [
-    { key: 'monitor', label: 'Monitor', icon: '◫' },
-    { key: 'history', label: 'History', icon: '↺' },
-    { key: 'dependencies', label: 'Dependencies', icon: '⌘' }
-  ] },
-  { key: 'orchestration', label: 'Orchestration', icon: '◇', children: [
+  { key: 'orchestration', label: 'Workflow', icon: '◇', children: [
     { key: 'orchestrationMonitor', label: 'Monitor', icon: '◫' },
+    { key: 'orchestrationHistory', label: 'History', icon: '↺' },
     { key: 'orchestrationDependencies', label: 'Dependencies', icon: '⌘' },
     { key: 'orchestrationWorkflow', label: 'Workflow', icon: '◇' },
-    { key: 'orchestrationJob', label: 'Job', icon: '▪' },
     { key: 'orchestrationFlow', label: 'Flow', icon: '⌁' }
   ] },
   { key: 'lim', label: 'LIM', icon: '⇩', children: [

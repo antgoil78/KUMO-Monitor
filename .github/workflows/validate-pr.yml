@@ -1,0 +1,56 @@
+name: Validate pull request
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      KUMO_USE_MOCK: 'true'
+      KUMO_ORCHESTRATION_RUNS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          npm ci --prefix frontend
+      - name: Backend unit tests
+        run: python -m unittest discover -s backend/tests -p 'test_*.py'
+      - name: Frontend unit tests and build
+        working-directory: frontend
+        run: |
+          npm test
+          npm run build
+      - name: Validate Compose configuration
+        run: docker compose --env-file .env.example config --quiet
+      - name: Install browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Browser regression tests with fixture API
+        working-directory: frontend
+        run: npm run test:e2e
+      - name: Upload browser failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-diagnostics
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7

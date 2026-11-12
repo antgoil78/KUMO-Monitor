@@ -6,6 +6,7 @@ import { api } from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
 import LoadingState from '../components/LoadingState.jsx'
 import CommandPreview from '../components/CommandPreview.jsx'
+import DagPreviewDialog from '../components/DagPreviewDialog.jsx'
 import StatusBadge, { isWorkflowBusy, statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import { elapsedDuration, formatDateTime } from '../utils/time.js'
@@ -931,74 +932,6 @@ function DagModal({ workflow, onClose }) {
     </Modal>
   )
 }
-function PreviewDagModal({ workflow, onClose }) {
-  const [preview, setPreview] = useState(null)
-  const [error, setError] = useState(null)
-  useEffect(() => {
-    let cancelled = false
-    api.previewWorkflowDag(workflow.workflowId)
-      .then(data => !cancelled && setPreview(data))
-      .catch(err => !cancelled && setError(err.message))
-    return () => { cancelled = true }
-  }, [workflow.workflowId])
-  const graph = useMemo(() => {
-    const nodes = preview?.nodes || []
-    const nodeWidth = 205
-    const nodeHeight = 68
-    const layout = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}))
-    layout.setGraph({ rankdir: 'LR', ranksep: 95, nodesep: 38, marginx: 30, marginy: 30 })
-    const nodeIds = new Set(nodes.map(node => String(node.id)))
-    const edges = (preview?.edges || []).filter(edge => nodeIds.has(String(edge.source)) && nodeIds.has(String(edge.target)))
-    nodes.forEach(node => layout.setNode(String(node.id), { width: nodeWidth, height: nodeHeight }))
-    edges.forEach(edge => layout.setEdge(String(edge.source), String(edge.target)))
-    dagre.layout(layout)
-    return {
-      nodes: nodes.map(node => {
-        const position = layout.node(String(node.id))
-        return {
-          id: String(node.id),
-          position: { x: position.x - nodeWidth / 2, y: position.y - nodeHeight / 2 },
-          data: { label: <><span className="dag-graph-dot running" /><span title={node.path}>{node.label}</span><small>{node.materialization}{node.tests ? ` · ${node.tests} test${node.tests === 1 ? '' : 's'}` : ''}</small></> },
-          className: 'dag-graph-node preview',
-          sourcePosition: 'right',
-          targetPosition: 'left',
-          style: { width: nodeWidth, height: nodeHeight }
-        }
-      }),
-      edges: edges.map((edge, index) => ({
-        id: `preview-edge-${edge.source}-${edge.target}-${index}`,
-        source: String(edge.source),
-        target: String(edge.target),
-        type: 'smoothstep',
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#4779c9' },
-        style: { stroke: '#4779c9', strokeWidth: 1.6 }
-      }))
-    }
-  }, [preview])
-  return (
-    <Modal title="Preview DAG" subtitle={workflow.workflowName} onClose={onClose} wide>
-      {error && <div className="alert error">{error}</div>}
-      {!preview && !error && <div className="empty-state">Resolving the DBT selection from the project. This can take about a minute...</div>}
-      {preview && <>
-        <div className="dag-summary">
-          <span><strong>{preview.modelCount}</strong> models</span>
-          <span><strong>{preview.testCount}</strong> tests</span>
-          {preview.target && <span>Target <code>{preview.target}</code></span>}
-        </div>
-        <div className="preview-selection"><span>Selection</span>{(preview.selection || []).map(item => <code key={item}>{item}</code>)}</div>
-        {(preview.nodes || []).length ? (
-          <div className="dag-graph" aria-label="DBT selection dependency preview">
-            <ReactFlow nodes={graph.nodes} edges={graph.edges} fitView fitViewOptions={{ padding: 0.18 }} minZoom={0.12} maxZoom={1.8} nodesDraggable={false} nodesConnectable={false}>
-              <Background color="rgba(105, 139, 255, 0.18)" gap={22} size={1} />
-              <MiniMap pannable zoomable nodeColor="#0075ff" maskColor="rgba(3, 9, 31, 0.72)" />
-              <Controls showInteractive={false} />
-            </ReactFlow>
-          </div>
-        ) : <div className="soft-empty">The saved selection did not resolve any models.</div>}
-      </>}
-    </Modal>
-  )
-}
 function EmbeddedDagPreview({ preview }) {
   const graph = useMemo(() => {
     const nodes = preview?.nodes || []
@@ -1690,7 +1623,7 @@ export default function Monitor({ onNavigate }) {
       </div>
       {modal?.type === 'actions' && <ActionsModal workflow={modal.workflow} pendingRun={pendingRuns[modal.workflow.workflowId]} onClose={() => setModal(null)} onAction={handleAction} />}
       {modal?.type === 'dag' && <DagModal workflow={modal.workflow} onClose={() => setModal(null)} />}
-      {modal?.type === 'preview-dag' && <PreviewDagModal workflow={modal.workflow} onClose={() => setModal(null)} />}
+      {modal?.type === 'preview-dag' && <DagPreviewDialog definitionId={modal.workflow.workflowId} name={modal.workflow.workflowName} onClose={() => setModal(null)} />}
       {modal?.type === 'run' && <RunWorkflowModal workflow={modal.workflow} pendingRun={pendingRuns[modal.workflow.workflowId]} onClose={() => setModal(null)} onRun={(workflow, options) => handleAction('run', workflow, options)} />}
       {modal?.type === 'edit' && <EditModal workflowId={modal.workflow.workflowId} onClose={() => setModal(null)} onSaved={() => load(true)} notify={notify} />}
     </section>

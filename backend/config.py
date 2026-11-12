@@ -73,7 +73,8 @@ def _configure_routes(values, verified=False):
         "T_APPLICATION_PARAMETERS": "APPLICATION_PARAMETERS", "T_EMAIL_GROUPS": "EMAIL_GROUPS",
         "T_WORKFLOW_TMP_TASKS": "WORKFLOW_TMP_TASKS", "T_RAW_LIM_PKG_GROUP_SOURCE": "RAW_LIM_PKG_GROUP_SOURCE",
         "T_ORCHESTRATION_WORKFLOW": "WORKFLOW", "T_ORCHESTRATION_JOB": "JOB",
-        "T_ORCHESTRATION_DEPENDENCY": "WORKFLOW_DEPENDENCY",
+        "T_ORCHESTRATION_DEPENDENCY": "DEPENDENCIES",
+        "T_ORCHESTRATION_EXECUTION_LOG": "WORKFLOW_EXECUTION_LOG",
         "RAW_LIM_META_TABLE": "RAW_LIM_META", "SET_READY_HISTORY_TABLE": "_SET_READY_LOG",
         "SET_READY_LATEST_TABLE": "_TMP_SET_READY_LOG",
         "T_APP_USER_SESSIONS": "APP_USER_SESSIONS", "T_APP_USER_INTERACTIONS": "APP_USER_INTERACTIONS",
@@ -130,6 +131,17 @@ SNOWFLAKE_STATEMENT_TIMEOUT_SECONDS = int(os.getenv("SNOWFLAKE_STATEMENT_TIMEOUT
 KUMO_SESSION_CACHE_SECONDS = int(os.getenv("KUMO_SESSION_CACHE_SECONDS", "300"))
 KUMO_ACTIVITY_LEASE_SECONDS = int(os.getenv("KUMO_ACTIVITY_LEASE_SECONDS", "90"))
 KUMO_LOOKUP_USER_PROFILE = os.getenv("KUMO_LOOKUP_USER_PROFILE", "false").strip().lower() in ("1", "true", "yes", "y")
+ORCHESTRATION_RUNS_ENABLED = os.getenv("KUMO_ORCHESTRATION_RUNS_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+LEGACY_ENGINE_RETIRED = False
+
+
+def apply_orchestration_settings(rows):
+    """Retirement is persisted per environment, so TST keeps its current engine."""
+    global LEGACY_ENGINE_RETIRED, T_QUEUE
+    LEGACY_ENGINE_RETIRED = any(row.get('PARAMETER_KEY') == 'LEGACY_ENGINE_RETIRED'
+                                and row.get('ACTIVE_FL') and row.get('VALUE_TYPE') == 'BOOLEAN'
+                                and str(row.get('PARAMETER_VALUE')).lower() == 'true' for row in rows)
+    T_QUEUE = METADATA_NAMESPACE + ('.X_WORKFLOW_RUN_QUEUE' if LEGACY_ENGINE_RETIRED else '.WORKFLOW_RUN_QUEUE')
 
 # Manual run behavior:
 # queue = direct Streamlit-compatible path: insert WORKFLOW_HISTORY + WORKFLOW_RUN_QUEUE rows.

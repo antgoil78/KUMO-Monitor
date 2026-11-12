@@ -91,7 +91,7 @@ specifications. Starting the app does not activate copied schedules or resume
 the persistent master dispatcher. Generated execution tasks inside procedures
 retain their own lifecycle.
 
-Use **Settings → Engine** to inspect, resume or suspend the persistent
+In environments retaining the old engine (currently TST), use **Settings → Engine** to inspect, resume or suspend the persistent
 `TASK_WF_MASTER_DISPATCHER` in the configured engine namespace. Resuming allows
 queued runs to dispatch, including existing requests. Suspending pauses new
 dispatches while work already running can finish; individual workflow schedules
@@ -102,8 +102,10 @@ resuming. Status refreshes every 15 seconds while the Engine tab is open.
 Demo mode simulates the controls; an unconfigured Snowflake connection disables
 them. App startup never resumes the master task automatically.
 
-DEV definitions and workflow configuration have been copied: 27 engine
-workflows, 29 catalog workflows and 44 jobs, plus their dependent configuration.
+DEV has 27 existing execution workflows. The new catalog was rebuilt from
+26 of them, excluding `RUN DEPENDENCIES`: 14 workflows, 38 jobs and 52 dependency
+rows. Each subject's readiness, SDL and EDV steps form one `… LOAD` workflow;
+`LOAD RAW DAILY` and `MAINTENANCE - CLEANUP` each contain one job.
 Workflow/job command fields use parameter templates; DEV parameter values resolve
 to the `KUMO_DEV.DBT_APP.KUMO_DEV` project and `kumo_DEV` target. Copied schedules are disabled and the dispatcher is suspended.
 Workflow execution validation remains; `META.WORKFLOW_DEP_RULE` is intentionally
@@ -206,6 +208,42 @@ security policy.
 
 ## Local development run
 
+### Checks before opening a PR
+
+Run these checks from the repository root after installing the backend and
+frontend dependencies. Use Node 22, matching the image builder and PR CI:
+
+```bash
+KUMO_USE_MOCK=true python -m unittest discover -s backend/tests -p 'test_*.py'
+npm --prefix frontend test
+npm --prefix frontend run build
+docker compose --env-file .env.example config --quiet
+cd frontend
+npx playwright install chromium
+npm run test:e2e
+```
+
+The browser suite starts its own Vite server on port 3100 and intercepts API
+requests with fixtures. It needs no backend, Snowflake credentials, or running
+workloads. It checks timeline scrolling, relationship lines, selected-run
+actions, history retention across refresh/navigation, and dependency draft
+protection. On machines with a system Chrome installation, you can use
+`PLAYWRIGHT_CHANNEL=chrome npm run test:e2e` instead of installing Chromium.
+Pull requests to `main` run these checks in `validate-pr.yml`.
+That workflow does not publish images or change a service; the existing image
+workflow continues to publish on merges to `main`.
+
+The new monitor and engine still have three known legacy parity gaps:
+automatic downstream workflow dispatch, completion notifications, and dbt
+warning/artifact classification. This change does not implement those engine
+features. Before promoting the new engine for workloads relying on them,
+complete their integration and DEV validation. Fixture browser tests also do
+not replace live DEV checks for accepted run IDs, task permissions, workload
+execution, and schedule controls. See the
+[engine validation instructions](snowflake/README.md).
+
+### Start the application
+
 Backend:
 
 ```bash
@@ -278,5 +316,97 @@ on the configured `SNOWFLAKE_WAREHOUSE`, as for the other admin pages.
 After deployment, check `/api/orchestration/catalog` and
 `/api/orchestration/flow` from the signed-in application. If an object cannot
 be found, check the `orchestrationNamespace` reported by `/api/health` and
-verify that `WORKFLOW`, `JOB`, `WORKFLOW_JOB` and `WORKFLOW_DEPENDENCY` exist
+verify that `WORKFLOW`, `JOB` and `DEPENDENCIES` exist
 there and are accessible to the service owner.
+
+**Workflow → Workflow** administers these three tables using the same
+expandable workflow/job layout as the Monitor reference. Create or edit
+workflow and job definitions, assign existing jobs, and drag jobs or use the
+arrow buttons to change their order. Save changes to persist assignments and
+parent links together. The first job's `PARENT_ID` is its workflow's ID; each
+following job points to the preceding job. Existing status, SQL and ALLOW rules
+are preserved when reordering. A job can be reused across workflows.
+
+The page reports unmatched dependency references without deleting them or
+importing assignments from `WORKFLOW_DEPENDENCY`. It does not change the
+existing execution engine, schedules or tasks.
+
+The parallel execution engine uses `WORKFLOW_EXECUTION_LOG` for both pending
+requests and workflow/job results. Each manual run creates one temporary
+workflow task bound to that execution and removes it afterward. Idle unscheduled
+workflows have no task; scheduled workflows keep a persistent scheduler. Jobs
+never own tasks. Workflow and Monitor pages both include Run controls.
+Job Run offers **Run only this job** and **Run from this job**. Definitions,
+conditions and commands are snapshotted when the request is accepted.
+
+**Workflow → Monitor** reads the real `WORKFLOW`, `JOB`, `DEPENDENCIES`,
+and `WORKFLOW_EXECUTION_LOG` tables through a read-only endpoint. It refreshes
+automatically and keeps one execution's workflow/job statuses together: active
+first, otherwise the oldest queued request, otherwise the latest result.
+Each configured job receives a status. Disabled and out-of-scope jobs are
+`SKIPPED`; later selected jobs are `PENDING` while the first goes through
+`INITIATING`, `QUEUED` and `RUNNING`. Progress includes run-scoped dbt model/test
+counts. Older partial executions can still show `NOT SELECTED`. Workflows without execution records show
+`NOT RUN`. Click a workflow name for its execution history. Workflow Run executes
+all enabled jobs in order; a job Run offers only that job or from that job onward.
+Disabled jobs are omitted from the execution preview and recorded as skipped.
+Right-aligned green play buttons and three-dot actions are in the Workflow / Job
+column. Live activity indicators identify the workflow and current job.
+
+Manual API execution requires `KUMO_ORCHESTRATION_RUNS_ENABLED=true` in the
+running backend; the code default is false. Initial deployment prepares workflow
+schedulers suspended; enable individual schedules from the Monitor. A static housekeeping task advances accepted
+requests, recovers interrupted runs, and removes leftover temporary tasks.
+TST retains its existing engine until the new engine has been tested and accepted. See the [parallel engine guide](snowflake/README.md#parallel-orchestration-engine).
+
+DEV now uses the new Workflow Monitor for manual workflow/job runs. The old
+execution tasks, procedures, queue and stream are suspended/archived with `X_`
+names; old history remains available. DEV's environment-specific retirement
+parameter blocks the old controls and recovery worker. TST is unchanged.
+See [DEV retirement](snowflake/README.md#dev-retirement-of-the-old-execution-engine)
+for the targeted migration and remaining dispatch/notification integration.
+
+The new Monitor includes Log shortcuts on workflow/job rows and Latest DAG Run
+for DBT jobs, quick enable/disable controls, and a schedule editor. Latest DAG Run
+uses the job's latest started execution, even when a newer workflow run skipped
+that job. DAG Preview belongs to DBT jobs under Workflow configuration and uses
+the saved selection with `dbt list` and `WRITEBACK = FALSE` without running models.
+Last Run/Duration show the latest
+started execution for each row. Schedule hides cron text when disabled; Next Run
+comes from the active native workflow scheduler. Workflow disabling pauses its
+schedule; enabling it resumes the configured schedule. Accepted executions keep
+their saved selection. Job enable/disable applies globally wherever that job is
+assigned. DAGs and logs read only the selected new workflow/job execution IDs.
+
+The orchestration Monitor reads one shared Python snapshot. Python refreshes the
+Snowflake execution/progress data once per backend process and pushes snapshots
+through the existing `/api/events` SSE stream (`orchestration_update`). Initial
+load, reconnect, and a disconnected-stream fallback read the shared cache; they
+do not query Snowflake per browser. Manual refresh wakes the shared reader.
+
+Manual Run returns HTTP 202 with a native Snowflake query receipt, request ID,
+and `INITIATING` status. Snapshot preparation and temporary workflow task startup
+continue in the background; SSE reports validation errors and execution states.
+The idempotent request ID prevents duplicate executions on retry. Reconciliation
+is handled by the static maintenance task, outside the submission path. Run
+controls for the workflow and its jobs are disabled while submitting, queued,
+initiating, or running and become available again after completion. No database
+DDL changes are required for this transport/lifecycle change.
+
+Background monitor/dashboard refreshes follow the instance's live SSE client
+count: the first connection starts the shared readers and the last disconnect
+stops them. Health checks, activity requests and cached snapshot reads do not
+start polling. A refresh already in progress can finish; no further refresh
+batches begin while the client count is zero. Reconnecting resumes fresh data.
+Submission-confirmation workers also wait for a connected client before their
+next Snowflake call. Accepted workflows and native scheduled tasks continue
+independently in Snowflake, including recovery by the static maintenance task.
+
+Workflow / History reads `WORKFLOW_EXECUTION_LOG`, with workflow/job,
+status, period and text filters and cursor pagination. Workflow and job Actions
+open the corresponding history scope. Each run expands into its saved job
+order; Log and DAG Run open that exact execution and return to the same filters
+and expanded rows. DBT jobs link to their model DAG; workflow rows link to the
+executed job chain. History loads on demand, coalesces identical requests in a
+bounded 15-second cache, and uses the Monitor's existing SSE snapshots for live
+statuses. Historical Log/DAG views refresh on demand rather than polling.

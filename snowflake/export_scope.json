@@ -15,9 +15,14 @@
   ],
   "exclude_task_patterns": [
     "^TMP_WF_",
-    "^TASK_WF_[0-9A-F]{8}(?:_SCHEDULER)?$"
+    "^TMP_ORCH_WF_",
+    "^TASK_ORCH_WF_",
+    "^TASK_WF_[0-9A-F]{8}(?:_SCHEDULER)?$",
+    "^X_TMP_WF_",
+    "^X_TASK_WF_[0-9A-F]{8}(?:_|$)"
   ],
   "keep_tasks": [
-    "KUMO_DEV.MONITOR_APP.TASK_WF_MASTER_DISPATCHER"
+    "KUMO_DEV.MONITOR_APP.TASK_ORCH_MAINTENANCE",
+    "KUMO_DEV.MONITOR_APP.X_TASK_WF_MASTER_DISPATCHER"
   ]
 }

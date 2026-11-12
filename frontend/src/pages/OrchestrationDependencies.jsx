@@ -108,7 +108,7 @@ function RunPreview({ rows, runs, setRuns, sqlResults, setSqlResults }) {
   </div>
 }
 
-export default function OrchestrationDependencies({ onNavigate }) {
+export default function OrchestrationDependencies({ onNavigate, workflowName = '', returnContext = null }) {
   const [rows, setRows] = useState([])
   const [saved, setSaved] = useState([])
   const [catalog, setCatalog] = useState(null)
@@ -116,7 +116,7 @@ export default function OrchestrationDependencies({ onNavigate }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(workflowName)
   const [view, setView] = useState('configuration')
   const [dialog, setDialog] = useState(null)
   const [message, setMessage] = useState('')
@@ -124,6 +124,16 @@ export default function OrchestrationDependencies({ onNavigate }) {
   const [sqlResults, setSqlResults] = useState({})
   const errors = useMemo(() => rows.length ? validateConfiguration(rows) : [], [rows])
   const dirty = JSON.stringify(rows) !== JSON.stringify(saved)
+  useEffect(() => {
+    if (!dirty) return undefined
+    const guard = event => { event.preventDefault(); event.returnValue = '' }
+    const navigate = event => {
+      if (!window.confirm('Discard unsaved dependency changes and leave this page?')) event.preventDefault()
+    }
+    window.addEventListener('beforeunload', guard)
+    window.addEventListener('kumo:before-navigate', navigate)
+    return () => { window.removeEventListener('beforeunload', guard); window.removeEventListener('kumo:before-navigate', navigate) }
+  }, [dirty])
   const workflowCount = rows.filter(row => !row.jobId).length
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -160,7 +170,7 @@ export default function OrchestrationDependencies({ onNavigate }) {
   }
   function remove(row) { setRows(current => current.filter(item => item.id !== row.id)); setDialog(null); setMessage('') }
   return <section className="page od-page">
-    <PageHeader breadcrumb="Orchestration / Dependencies" title="Dependency configuration" subtitle="Maintain workflow parents, job relationships and the conditions that allow execution." actions={<div className="od-actions"><button className="button" type="button" disabled={loading || saving || dirty} onClick={load}>↻ Refresh</button><button className="button primary" type="button" disabled={loading || saving || !dirty || errors.length > 0} onClick={save}>{saving ? 'Saving…' : 'Save changes'}</button></div>} />
+    <PageHeader breadcrumb="Workflow / Dependencies" title="Dependency configuration" subtitle="Maintain workflow parents, job relationships and the conditions that allow execution." actions={<div className="od-actions">{returnContext && <button className="button" type="button" disabled={saving || dirty} onClick={() => onNavigate('orchestrationMonitor', returnContext)}>← Monitor</button>}<button className="button" type="button" disabled={loading || saving || dirty} onClick={load}>↻ Refresh</button><button className="button primary" type="button" disabled={loading || saving || !dirty || errors.length > 0} onClick={save}>{saving ? 'Saving…' : 'Save changes'}</button></div>} />
     {error && <div className="alert error" role="alert">{error}</div>}
     {loading && !catalog && <LoadingState>Loading workflow and job configuration…</LoadingState>}
     {catalog && <>
