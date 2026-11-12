@@ -3,14 +3,15 @@
 .om-workflow-link:hover strong { color: #8fc2ff; text-decoration: underline; }
 .om-warnings { margin-bottom: 16px; padding: 12px 15px; border: 1px solid #6b5639; border-radius: 4px; color: #dec49d; font-size: 12px; line-height: 1.6; }
 .om-warnings summary { cursor: pointer; }
-.om-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 15px; margin-bottom: 16px; border: 1px dashed #3b4657; border-radius: 4px; background: #151b25; color: #969cab; font-size: 12px; }
-.om-notice strong { color: #8fc2ff; }
 .om-page .om-toolbar { max-width: none; grid-template-columns: minmax(230px, 1fr) auto; gap: 12px; }
 .om-page .om-toolbar :is(input, select) { border-radius: 4px; }
-.om-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 20px; padding: 14px 2px; font-size: 12px; }
-.om-summary > span { display: inline-flex; align-items: center; gap: 8px; }
-.om-summary strong { color: #fff; font-size: 14px; }
-.om-summary .om-total { margin-left: auto; color: #9699a4; }
+.om-page .om-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-height: 0; margin: 0 0 14px; padding: 9px; border: 1px solid #2c2e33; border-radius: 4px; background: #191c24; box-shadow: none; }
+.om-summary .system-counts { gap: 7px; }
+.om-page .om-summary :is(.summary-item, .summary-total) { min-height: 32px; padding: 0 11px; border-color: #2c2e33; border-radius: 3px; background: #20232d; color: #9a9ca5; }
+.om-summary .summary-updated { font-size: 11px; }
+.om-summary .summary-item.warning .summary-icon { color: var(--amber); }
+.om-summary .summary-item.skipped .summary-icon, .om-summary .summary-item.muted .summary-icon { color: var(--muted2); }
+.om-summary-filtered { color: #9699a4; font-size: 11px; }
 .om-list-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 0; font-size: 12px; }
 .om-list-heading > span { color: #9699a4; }
 .om-list-heading > div { display: flex; gap: 8px; }
@@ -79,7 +80,6 @@
 .om-footnote { margin-top: 12px; color: #7f8494; font-size: 11px; line-height: 1.6; }
 @media (max-width: 1000px) {
   .om-page .om-toolbar { grid-template-columns: 1fr; }
-  .om-summary .om-total { width: 100%; margin-left: 0; }
 }
 
 .om-shortcut { display: grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: #8b9ab2; cursor: pointer; }
