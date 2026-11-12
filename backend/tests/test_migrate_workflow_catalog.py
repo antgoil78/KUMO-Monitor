@@ -75,6 +75,14 @@ class WorkflowCatalogMigrationTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]['PARENT_ID'], workflows[workflow_name]['WORKFLOW_ID'])
 
+    def test_sdl_only_source_does_not_invent_an_edv_job(self):
+        self.workflows[1]['DBT_COMMAND'] = 'dbt build -s models/data/SDL/PYMT'
+        plan, _ = migration.build_plan(self.workflows, self.tasks)
+        jobs = {row['JOB_NAME'] for row in plan['JOB']}
+        self.assertIn('PYMT SDL', jobs)
+        self.assertNotIn('PYMT EDV', jobs)
+        self.assertEqual(len(plan['JOB']), 4)
+
     def test_ambiguous_commands_callbacks_or_active_intermediate_schedules_fail_before_writes(self):
         for mutate in (
             lambda workflows, tasks: workflows[1].update(DBT_COMMAND='dbt build -s models/data/SDL/PYMT+ --full-refresh'),

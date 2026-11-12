@@ -83,8 +83,13 @@ def build_plan(workflows, tasks, namespace='KUMO_DEV.MONITOR_META'):
         if not transform or str(ready.get('WORKFLOW_TYPE')).upper() != 'SQL' or str(transform.get('WORKFLOW_TYPE')).upper() != 'DBT':
             raise ValueError('Expected a readiness SQL and SDL/EDV dbt pair for ' + subject)
         steps = dbt_steps(transform['DBT_COMMAND'])
-        if [(step['layer'], step['subject']) for step in steps] != [('SDL', subject), ('EDV', subject)]:
-            raise ValueError('Expected ordered SDL then EDV selectors for ' + subject)
+        # Some source definitions (CARD in TST) deliberately select SDL only,
+        # even though their display name still ends in "SDL EDV". Preserve
+        # the actual command rather than inventing an EDV execution.
+        if [(step['layer'], step['subject']) for step in steps] not in (
+            [('SDL', subject)], [('SDL', subject), ('EDV', subject)],
+        ):
+            raise ValueError('Expected SDL, optionally followed by EDV, for ' + subject)
         # Only the entry schedule belongs to the combined workflow. Never silently
         # discard a separately enabled schedule on a later source step.
         if task_by_id.get(transform['WORKFLOW_ID'], {}).get('IS_ENABLED'):
