@@ -81,6 +81,9 @@ def request_run(workflow_id, payload, requested_by):
     mode = payload.get('mode', 'WORKFLOW')
     job_id = payload.get('jobId')
     request_id = payload.get('requestId')
+    full_refresh = payload.get('fullRefresh', False)
+    if not isinstance(full_refresh, bool) or (full_refresh and mode == 'WORKFLOW'):
+        raise ValueError('Full refresh must be a boolean and requires a selected dbt job')
     if mode not in MODES or (mode == 'WORKFLOW' and job_id) or (mode != 'WORKFLOW' and not job_id):
         raise ValueError('Choose WORKFLOW, JOB_ONLY or FROM_JOB and a matching job selection')
     if job_id:
@@ -88,18 +91,21 @@ def request_run(workflow_id, payload, requested_by):
     if not isinstance(request_id, str) or not request_id.strip() or len(request_id) > 128:
         raise ValueError('A request ID of at most 128 characters is required')
     request_id = request_id.strip()
-    previous = orchestration_cache.reserve(workflow_id, dict(mode=mode, jobId=job_id, requestId=request_id), requested_by)
+    previous = orchestration_cache.reserve(workflow_id, dict(mode=mode, jobId=job_id, requestId=request_id, fullRefresh=full_refresh), requested_by)
     if previous:
         return previous
     try:
+        arguments = dict(workflow=workflow_id, mode=mode, job=job_id, request=request_id, actor=requested_by)
+        extra = ',%(full_refresh)s' if full_refresh else ''
+        if full_refresh:
+            arguments['full_refresh'] = True
         query_id = sf.submit_service_query(
-            f'CALL {config.APP_NAMESPACE}.SP_ORCH_REQUEST_RUN(%(workflow)s,%(mode)s,%(job)s,%(request)s,%(actor)s)',
-            dict(workflow=workflow_id, mode=mode, job=job_id, request=request_id, actor=requested_by))
+            f'CALL {config.APP_NAMESPACE}.SP_ORCH_REQUEST_RUN(%(workflow)s,%(mode)s,%(job)s,%(request)s,%(actor)s{extra})', arguments)
     except Exception as exc:
         orchestration_cache.update_submission(workflow_id, request_id, status='FAILED', error=str(exc))
         raise
     receipt = dict(ok=True, accepted=True, workflowId=workflow_id, requestId=request_id, queryId=query_id,
-                   status='INITIATING', mode=mode, jobId=job_id, requestedBy=requested_by)
+                   status='INITIATING', mode=mode, jobId=job_id, fullRefresh=full_refresh, requestedBy=requested_by)
     orchestration_cache.update_submission(workflow_id, request_id, status='INITIATING', queryId=query_id)
     threading.Thread(target=complete_submission, args=(workflow_id, request_id, query_id),
                      name='kumo-orchestration-submit', daemon=True).start()

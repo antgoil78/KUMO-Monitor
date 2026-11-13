@@ -1,3 +1,20 @@
+const stockholmDay = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Stockholm', year: 'numeric', month: '2-digit', day: '2-digit' })
+const lastRunDate = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Stockholm', day: '2-digit', month: 'short', year: 'numeric' })
+
+export function lastRunDay(value, now = Date.now()) {
+  if (!value) return { label: '—', tone: '' }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return { label: '—', tone: '' }
+  // Compare calendar dates in Stockholm, including across DST and year boundaries.
+  const day = stockholmDay.format(date)
+  const today = stockholmDay.format(new Date(now))
+  const previous = new Date(`${today}T12:00:00Z`)
+  previous.setUTCDate(previous.getUTCDate() - 1)
+  if (day === today) return { label: 'Today', tone: 'today' }
+  if (day === stockholmDay.format(previous)) return { label: 'Yesterday', tone: 'yesterday' }
+  return { label: lastRunDate.format(date), tone: '' }
+}
+
 export function formatDateTime(value) {
   if (!value) return '-'
   const date = new Date(value)

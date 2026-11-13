@@ -70,6 +70,21 @@ class ClientLifecycleTests(unittest.TestCase):
         application.status_coordinator.set_client_count.assert_called_with(1)
         self.broker.unsubscribe(client)
 
+    def test_dashboard_reads_the_shared_workflow_cache_without_legacy_queries(self):
+        snapshot = dict(ok=True, rows=[dict(WORKFLOW_ID='new-workflow', jobs=[])], submissions=[], runsEnabled=True)
+        application.orchestration_cache.get.return_value = snapshot
+        with patch.object(application, '_health_snapshot', return_value={}), \
+             patch.object(application, '_runtime_refresh_settings', return_value={}), \
+             patch.object(application, '_live_active_users', return_value=[]), \
+             patch.object(application, '_renew_activity_lease'), \
+             patch.object(application, '_reconcile_live_run_locks') as reconcile, \
+             patch.object(application.sf, 'query_service') as query:
+            response = application.app.test_client().get('/api/dashboard')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['monitor'], snapshot)
+        application.monitor_cache.get.assert_not_called()
+        reconcile.assert_not_called(); query.assert_not_called()
+
 
 class ReaderDemandTests(unittest.TestCase):
     def test_refresh_and_manual_wake_never_read_snowflake_without_clients(self):

@@ -78,7 +78,7 @@ class OrchestrationCache:
         with self._lock:
             previous = self._submissions.get(key)
             if previous and previous['status'] in ACTIVE:
-                if (previous['mode'], previous.get('jobId'), previous['requestedBy']) != (payload['mode'], payload.get('jobId'), actor):
+                if (previous['mode'], previous.get('jobId'), previous.get('fullRefresh', False), previous['requestedBy']) != (payload['mode'], payload.get('jobId'), payload.get('fullRefresh', False), actor):
                     raise SubmissionConflict('Request ID already belongs to a different request.')
                 if previous.get('queryId'):
                     return dict(previous, ok=True, accepted=True, reused=True)
@@ -89,7 +89,7 @@ class OrchestrationCache:
             if workflow and workflow['run']['status'] in {'INITIATING', 'QUEUED', 'CLAIMED', 'RUNNING'}:
                 raise SubmissionConflict('Workflow is already queued or running.')
             self._submissions[key] = dict(workflowId=workflow_id, requestId=payload['requestId'], mode=payload['mode'],
-                                         jobId=payload.get('jobId'), requestedBy=actor, status='SUBMITTING', submittedAt=now())
+                                         jobId=payload.get('jobId'), fullRefresh=payload.get('fullRefresh', False), requestedBy=actor, status='SUBMITTING', submittedAt=now())
             self._publish()
         return None
 

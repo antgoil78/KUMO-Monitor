@@ -5,6 +5,7 @@ import StatusBadge, { statusKind } from '../components/StatusBadge.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import LoadingState, { LoadingSpinner } from '../components/LoadingState.jsx'
 import { formatDateTime } from '../utils/time.js'
+import { dashboardOverview } from '../utils/dashboard.js'
 
 function percent(value, total) {
   if (!total) return 0
@@ -227,7 +228,7 @@ export default function Dashboard({ onNavigate }) {
 
     try {
       const data = await api.dashboard()
-      const monitorData = data.monitor || dashboardCache?.payload || null
+      const monitorData = data.monitor ? dashboardOverview(data.monitor) : dashboardCache?.payload || null
       const healthData = data.health || dashboardCache?.health || null
       const pingData = data.ping || dashboardCache?.ping || null
       const sessionData = data.session || dashboardCache?.session || null
@@ -286,6 +287,11 @@ export default function Dashboard({ onNavigate }) {
   useEffect(() => {
     function handleRealtime(browserEvent) {
       const event = browserEvent.detail
+      if (event?.type === 'orchestration_update') {
+        const monitorData = dashboardOverview(event.data)
+        dashboardCache = { ...(dashboardCache || {}), payload: monitorData }
+        setPayload(monitorData)
+      }
       if (event?.type === 'connected') {
         load({ silent: Boolean(dashboardCache) })
       }
@@ -371,6 +377,7 @@ export default function Dashboard({ onNavigate }) {
   const failedWorkflows = workflows.filter(w => statusKind(w.lastStatus) === 'failed')
   const runningWorkflows = workflows.filter(w => ['running', 'queued'].includes(statusKind(w.lastStatus)))
   const recent = workflows
+    .filter(workflow => workflow.lastStartTime)
     .slice()
     .sort((a, b) => String(b.lastStartTime || '').localeCompare(String(a.lastStartTime || '')))
     .slice(0, 6)
@@ -379,7 +386,7 @@ export default function Dashboard({ onNavigate }) {
   const snowflakeOk = Boolean(ping?.ok)
   const connectedClients = Number(realtime?.clientCount || 0)
   const pollingActive = Boolean(realtime?.pollingActive)
-  const engineKind = statusKind(engine.status)
+  const engineKind = engine.status === 'READY' ? 'success' : statusKind(engine.status)
   const engineOk = ['success', 'running'].includes(engineKind)
 
   return (
@@ -404,6 +411,7 @@ export default function Dashboard({ onNavigate }) {
 
       {error && <div className="alert error">{error}</div>}
       {payload?.error && <div className="alert warning">Backend fallback: {payload.error}</div>}
+      {payload?.warming && <LoadingState>Loading workflows and jobs…</LoadingState>}
       {loading && !payload && <LoadingState>Loading dashboard…</LoadingState>}
 
       <div className="metric-grid vision-grid-4">
@@ -413,7 +421,7 @@ export default function Dashboard({ onNavigate }) {
           delta={`${successRate}% OK`}
           tone="success"
           icon="▦"
-          footer="Configured monitor objects"
+          footer={`${summary.jobs || 0} assigned jobs · ${summary.enabledJobs || 0} enabled`}
         />
         <MetricCard
           label="Currently active"
@@ -424,12 +432,12 @@ export default function Dashboard({ onNavigate }) {
           footer={`${summary.queued || 0} queued / pending`}
         />
         <MetricCard
-          label="Failed latest runs"
+          label="Failed workflow runs"
           value={loading ? '—' : summary.failed}
           delta={summary.failed ? 'Needs attention' : 'Clean' }
           tone={summary.failed ? 'failed' : 'success'}
           icon="!"
-          footer="Based on latest workflow status"
+          footer={`${summary.failedJobs || 0} failed jobs in displayed runs`}
         />
         <MetricCard
           label="Successful latest runs"
@@ -437,7 +445,7 @@ export default function Dashboard({ onNavigate }) {
           delta={`${successRate}% success`}
           tone="success"
           icon="✓"
-          footer="Based on the current shared snapshot"
+          footer={`${summary.scheduled || 0} workflows with schedules enabled`}
         />
       </div>
 
@@ -490,7 +498,7 @@ export default function Dashboard({ onNavigate }) {
           <div className="card-title-row">
             <div>
               <h3>Workflow Distribution</h3>
-              <span>Groups from current monitor payload</span>
+              <span>Configured workflow groups</span>
             </div>
           </div>
           <TinyBarChart workflows={workflows} />
@@ -506,7 +514,7 @@ export default function Dashboard({ onNavigate }) {
           <div className="card-title-row">
             <div>
               <h3>Active Workflows</h3>
-              <span>Running and queued jobs</span>
+              <span>Running and queued workflows with job progress</span>
             </div>
           </div>
           {runningWorkflows.length === 0 ? (

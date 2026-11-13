@@ -1,7 +1,7 @@
--- Source: KUMO_DEV.MONITOR_APP.SP_ORCH_REQUEST_RUN(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR)
+-- Source: KUMO_DEV.MONITOR_APP.SP_ORCH_REQUEST_RUN(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, BOOLEAN)
 CREATE OR REPLACE PROCEDURE KUMO_DEV.MONITOR_APP.SP_ORCH_REQUEST_RUN(
     P_WORKFLOW_ID VARCHAR, P_RUN_MODE VARCHAR, P_JOB_ID VARCHAR,
-    P_REQUEST_ID VARCHAR, P_REQUESTED_BY VARCHAR
+    P_REQUEST_ID VARCHAR, P_REQUESTED_BY VARCHAR, P_FULL_REFRESH BOOLEAN DEFAULT FALSE
 )
 RETURNS VARIANT
 LANGUAGE JAVASCRIPT
@@ -32,10 +32,12 @@ var log = ns + '.WORKFLOW_EXECUTION_LOG';
 var requestedMode = String(P_RUN_MODE || 'WORKFLOW').toUpperCase();
 var scheduled = requestedMode === 'SCHEDULED';
 var mode = scheduled ? 'WORKFLOW' : requestedMode;
+var fullRefresh = P_FULL_REFRESH === true;
 var requestId = String(P_REQUEST_ID || '').trim();
 if (['WORKFLOW', 'JOB_ONLY', 'FROM_JOB'].indexOf(mode) < 0) fail('Choose WORKFLOW, JOB_ONLY or FROM_JOB');
 if (!requestId || requestId.length > 128) fail('A request ID of at most 128 characters is required');
 if ((mode === 'WORKFLOW' && P_JOB_ID) || (mode !== 'WORKFLOW' && !P_JOB_ID)) fail('Job selection does not match the run mode');
+if (fullRefresh && (scheduled || mode === 'WORKFLOW')) fail('Full refresh requires a selected dbt job');
 var started = false;
 try {
     execute('BEGIN'); started = true;
@@ -44,10 +46,11 @@ try {
     execute('UPDATE ' + ns + '.DEPENDENCIES SET ALLOW = ALLOW');
     var lock = execute('UPDATE ' + ns + '.WORKFLOW SET TASK_NAME = TASK_NAME WHERE WORKFLOW_ID = ?', [P_WORKFLOW_ID]);
     if (lock.getNumRowsAffected() !== 1) fail('Workflow not found or duplicate workflow ID');
-    var previous = rows('SELECT WORKFLOW_RUN_ID, RUN_MODE, REQUESTED_JOB_ID, STATUS, TASK_FQN FROM ' + log +
+    var previous = rows('SELECT WORKFLOW_RUN_ID, RUN_MODE, REQUESTED_JOB_ID, STATUS, TASK_FQN, CONFIG_SNAPSHOT FROM ' + log +
         ' WHERE WORKFLOW_ID = ? AND JOB_ID IS NULL AND REQUEST_ID = ?', [P_WORKFLOW_ID, requestId]);
     if (previous.length) {
-        if (previous.length !== 1 || previous[0].RUN_MODE !== mode || previous[0].REQUESTED_JOB_ID !== (P_JOB_ID || null))
+        if (previous.length !== 1 || previous[0].RUN_MODE !== mode || previous[0].REQUESTED_JOB_ID !== (P_JOB_ID || null) ||
+            !!object(previous[0].CONFIG_SNAPSHOT).fullRefresh !== fullRefresh)
             fail('Request ID already belongs to a different request');
         execute('COMMIT'); started = false;
         return {ok: true, runId: previous[0].WORKFLOW_RUN_ID, status: previous[0].STATUS,
@@ -96,6 +99,9 @@ try {
         var definitions = rows('SELECT * FROM ' + ns + '.JOB WHERE JOB_ID = ?', [dependency.JOB_ID]);
         if (definitions.length !== 1) fail('Missing or duplicate job definition: ' + dependency.JOB_ID);
         var definition = definitions[0];
+        var refreshJob = fullRefresh && definition.JOB_ID === P_JOB_ID;
+        if (refreshJob && (definition.JOB_TYPE !== 'DBT' || definition.IS_ENABLED === false || dependency.ALLOW === false))
+            fail('Full refresh requires an enabled dbt job with ALLOW enabled');
         var included = !!selectedIds[dependency.JOB_ID] && definition.IS_ENABLED !== false;
         var skipReason = !selectedIds[dependency.JOB_ID] ? 'Not selected for this execution' :
             definition.IS_ENABLED === false ? 'Job is disabled' : dependency.ALLOW === false ? 'ALLOW is false' : null;
@@ -104,7 +110,7 @@ try {
         var resolution = skipReason ? {} : object(rows('CALL ' + app + '.SP_RESOLVE_WORKFLOW_COMMAND(PARSE_JSON(?), ?)', [JSON.stringify({
             jobType: definition.JOB_TYPE, sqlCommand: definition.SQL_COMMAND,
             dbtCommand: definition.DBT_COMMAND, dbtProjectFqn: definition.DBT_PROJECT_FQN,
-            dbtTarget: definition.DBT_TARGET
+            dbtTarget: definition.DBT_TARGET, fullRefresh: refreshJob
         }), executionId])[0].SP_RESOLVE_WORKFLOW_COMMAND);
         if (!skipReason && (!resolution || !resolution.ok)) fail('Command resolution failed: ' + (resolution && resolution.error));
         if (legacy.test(resolution.execSql)) fail('This job references the existing execution engine and requires review: ' + definition.JOB_NAME);
@@ -127,7 +133,7 @@ try {
     if (!executions.some(function(job) { return job.selected; })) fail('No enabled jobs in the selected scope');
     var requestedBy = String(P_REQUESTED_BY || rows('SELECT CURRENT_USER() AS NAME')[0].NAME).slice(0, 256);
     var snapshot = {workflow: workflow, workflowRule: headers[0] || null, runMode: mode,
-        requestedJobId: P_JOB_ID || null, selectedJobIds: executions.filter(function(job) { return job.selected; }).map(function(job) { return job.jobId; }),
+        requestedJobId: P_JOB_ID || null, fullRefresh: fullRefresh, selectedJobIds: executions.filter(function(job) { return job.selected; }).map(function(job) { return job.jobId; }),
         upstreamBypassed: mode !== 'WORKFLOW', downstreamWorkflows: false, taskWarehouse: String(warehouse).toUpperCase(), taskLifecycle: 'TEMPORARY'};
     execute('INSERT INTO ' + log + ' (EXECUTION_ID, WORKFLOW_RUN_ID, WORKFLOW_ID, REQUEST_ID, RUN_MODE, REQUESTED_JOB_ID, TRIGGER_SOURCE, STATUS, REQUESTED_BY, TASK_FQN, CONFIG_SNAPSHOT)' +
         " SELECT ?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, PARSE_JSON(?)",

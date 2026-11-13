@@ -37,7 +37,7 @@
       "type": "PROCEDURE",
       "name": "KUMO_DEV.MONITOR_APP.SP_ORCH_REQUEST_RUN",
       "file": "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_REQUEST_RUN.sql",
-      "signature": "(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR)"
+      "signature": "(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, BOOLEAN)"
     },
     {
       "type": "PROCEDURE",

@@ -68,6 +68,8 @@
 .om-sequence { flex-shrink: 0; color: #6e8fb5; font: 10px ui-monospace, monospace; }
 .om-kind { color: #9fb4cc; font-size: 11px; }
 .om-time { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.om-table small.om-day-today { color: #72b4ff; }
+.om-table small.om-day-yesterday { color: #f4cc63; }
 .om-progress { display: grid; gap: 7px; color: #9699a4; font-size: 10px; }
 .om-track { height: 4px; overflow: hidden; border-radius: 3px; background: #303541; }
 .om-track i { display: block; height: 100%; background: #00b979; }

@@ -1588,8 +1588,7 @@ def snowflake_ping():
 def dashboard():
     cache = _dashboard_cache_snapshot()
     active_users = _live_active_users()
-    monitor_payload = monitor_cache.get()
-    _reconcile_live_run_locks(monitor_payload)
+    monitor_payload = orchestration_cache.get()
     return jsonify({
         "ok": True,
         "source": "server-cache",
