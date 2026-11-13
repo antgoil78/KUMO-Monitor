@@ -359,6 +359,27 @@ schedulers suspended; enable individual schedules from the Monitor. A static hou
 requests, recovers interrupted runs, and removes leftover temporary tasks.
 TST retains its existing engine until the new engine has been tested and accepted. See the [parallel engine guide](snowflake/README.md#parallel-orchestration-engine).
 
+The Dashboard uses the same shared workflow/job snapshot as Workflow Monitor,
+including active submissions, job progress and enabled schedules. Last Run uses
+Stockholm calendar days: blue **Today**, yellow **Yesterday**, otherwise a date.
+
+Manual dbt job runs offer **Full refresh** for `build`, `run` and `seed`. It adds
+`--full-refresh` to the selected job's execution only; **Run from this job** keeps
+later jobs' saved commands. Job definitions and scheduled runs are unchanged.
+Before releasing this UI, run the targeted procedure migration in each intended
+environment (it inspects only unless `--apply` is supplied):
+
+```bash
+python backend/migrations/apply_manual_dbt_full_refresh.py --environment DEV
+python backend/migrations/apply_manual_dbt_full_refresh.py --environment DEV --apply
+```
+
+Use `--environment TST` for TST. Finish pending workflow runs first and use the
+procedure owner role. The migration updates only admission and command resolution,
+preserves usage grants and retains existing five-argument calls via an optional
+boolean. The signature change requires replacing the old overload, following
+[Snowflake's optional argument rules](https://docs.snowflake.com/en/sql-reference/sql/create-procedure).
+
 DEV now uses the new Workflow Monitor for manual workflow/job runs. The old
 execution tasks, procedures, queue and stream are suspended/archived with `X_`
 names; old history remains available. DEV's environment-specific retirement

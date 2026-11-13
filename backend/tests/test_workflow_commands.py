@@ -32,6 +32,28 @@ process.stdout.write(JSON.stringify({result: resolve(snowflake, input.definition
 
 
 class WorkflowCommandResolverTests(unittest.TestCase):
+    def test_full_refresh_is_per_execution_and_preserves_selection_vars_and_target(self):
+        import shlex
+        definition = dict(jobType='DBT', dbtCommand='dbt build --select tag:daily --vars \'{"keep":42}\'')
+        for environment in ('DEV', 'TST'):
+            for existing_flag in ('', ' --full-refresh', ' -f'):
+                result = self.resolve(dict(definition, dbtCommand=definition['dbtCommand'] + existing_flag, fullRefresh=True), environment)
+                self.assertTrue(result['ok'], result)
+                tokens = shlex.split(result['dbtCommand'])
+                self.assertEqual(sum(token in ('--full-refresh', '-f') for token in tokens), 1)
+                self.assertEqual(tokens[tokens.index('--select') + 1], 'tag:daily')
+                self.assertEqual(result['dbtVars'], dict(keep=42, runId=RUN_ID))
+                self.assertEqual(result['dbtTarget'], 'kumo_' + environment)
+        self.assertNotIn('--full-refresh', self.resolve(definition)['dbtCommand'])
+
+    def test_full_refresh_rejects_unsupported_dbt_commands(self):
+        for command in ('test', 'parse', 'compile', 'snapshot', 'run-operation anything'):
+            result = self.resolve(dict(jobType='DBT', dbtCommand=command, fullRefresh=True))
+            self.assertFalse(result['ok'], result)
+            self.assertIn('Full refresh', result['error'])
+        for command in ('run', 'seed'):
+            self.assertTrue(self.resolve(dict(jobType='DBT', dbtCommand=command, fullRefresh=True))['ok'])
+
     def resolve(self, definition, environment="DEV", changes=None, run_id=RUN_ID):
         values = {"DATABASE": "KUMO_" + environment, "MONITOR_APP_SCHEMA": "MONITOR_APP",
                   "META_SCHEMA": "MONITOR_META", "APP_SCHEMA": "META", "RAW_SCHEMA": "RAW_LIM", "DBT_SCHEMA": "DBT" if environment == "TST" else "DBT_APP",

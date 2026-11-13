@@ -68,6 +68,25 @@ class ParallelEngineTests(unittest.TestCase):
         self.assertTrue(same['reused']); submit.assert_called_once()
         self.assertEqual(conflict.status_code, 409)
 
+    def test_full_refresh_reaches_the_native_request_and_is_part_of_idempotency(self):
+        body = dict(self.payload, fullRefresh=True)
+        with patch.object(sf, 'submit_service_query', return_value='query') as submit, patch.object(engine.threading, 'Thread'):
+            response = self.client.post(f'/api/orchestration/workflows/{WORKFLOW}/runs', json=body)
+            conflict = self.client.post(f'/api/orchestration/workflows/{WORKFLOW}/runs', json=self.payload)
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(response.get_json()['fullRefresh'])
+        self.assertTrue(submit.call_args.args[1]['full_refresh'])
+        self.assertIn('%(full_refresh)s', submit.call_args.args[0])
+        self.assertEqual(conflict.status_code, 409)
+        submit.assert_called_once()
+
+    def test_invalid_full_refresh_options_never_submit(self):
+        for body in (dict(self.payload, fullRefresh='true'), dict(self.payload, fullRefresh=1),
+                     dict(self.payload, fullRefresh=None), dict(self.payload, mode='WORKFLOW', jobId=None, fullRefresh=True)):
+            with self.subTest(body=body), patch.object(sf, 'submit_service_query') as submit:
+                with self.assertRaises(ValueError): engine.request_run(WORKFLOW, body, 'TEST')
+                submit.assert_not_called()
+
     def test_background_completion_starts_only_the_containing_workflow_task(self):
         engine.orchestration_cache.reserve(WORKFLOW, self.payload, 'TEST')
         with patch.object(sf, 'service_query_result', return_value=self.query('request')), \

@@ -4,7 +4,7 @@ import { api } from '../api.js'
 import LoadingState from '../components/LoadingState.jsx'
 import PageHeader from '../components/PageHeader.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
-import { formatDateTime } from '../utils/time.js'
+import { formatDateTime, lastRunDay } from '../utils/time.js'
 import EditorDialog from '../components/EditorDialog.jsx'
 import HierarchyToggle from '../components/HierarchyToggle.jsx'
 import ActionIcon from '../components/ActionIcon.jsx'
@@ -21,7 +21,6 @@ const summaryStatuses = [
   ['SKIPPED', 'skipped', '↷', 'skipped'], ['CANCELLED', 'muted', '—', 'cancelled']
 ]
 const timeFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Stockholm', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-const dateFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Stockholm', day: '2-digit', month: 'short', year: 'numeric' })
 
 function asDate(value) {
   if (!value) return null
@@ -45,7 +44,8 @@ function matches(workflow, query) {
 function RunCells({ run, lastRun, now }) {
   const timing = lastRun || run
   const start = asDate(timing.start)
-  return <><td><span className="om-live-status">{['INITIATING', 'CLAIMED', 'QUEUED', 'RUNNING'].includes(run.status) && <span className="om-spinner" role="img" aria-label={run.status === 'RUNNING' ? 'Execution in progress' : 'Preparing execution'} />}<StatusBadge status={run.status === 'CLAIMED' ? 'INITIATING' : run.status} /></span></td><td className="om-time" title={timing.start || ''}>{start ? <>{timeFormatter.format(start)}<small>{dateFormatter.format(start)}</small></> : '—'}</td><td className="om-time">{durationLabel(timing, now)}</td></>
+  const day = lastRunDay(timing.start, now)
+  return <><td><span className="om-live-status">{['INITIATING', 'CLAIMED', 'QUEUED', 'RUNNING'].includes(run.status) && <span className="om-spinner" role="img" aria-label={run.status === 'RUNNING' ? 'Execution in progress' : 'Preparing execution'} />}<StatusBadge status={run.status === 'CLAIMED' ? 'INITIATING' : run.status} /></span></td><td className="om-time" title={timing.start || ''}>{start ? <>{timeFormatter.format(start)}<small className={day.tone ? `om-day-${day.tone}` : ''}>{day.label}</small></> : '—'}</td><td className="om-time">{durationLabel(timing, now)}</td></>
 }
 
 function RunActions({ name, displayName, disabled, reason, onRun, onHistory, onRunFrom, onDag, canDag, onLog, canLog, onState, enabled, busy, onSchedule, scheduleEnabled, onEditSchedule }) {

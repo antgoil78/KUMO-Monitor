@@ -114,6 +114,11 @@ try {
         if (!vars || typeof vars !== 'object' || Array.isArray(vars)) fail('Use a JSON object for dbt --vars');
       } else args.push(token);
     }
+    if (definition.fullRefresh === true) {
+      if (['build', 'run', 'seed'].indexOf(tokens[0]) < 0) fail('Full refresh is supported for dbt build, run and seed');
+      if (args.indexOf('--full-refresh') < 0 && args.indexOf('-f') < 0) args.push('--full-refresh');
+      result.fullRefresh = true;
+    }
     vars.runId = runId;
     result.dbtVars = vars;
     args.push('--vars', JSON.stringify(vars), '--target', result.dbtTarget);
