@@ -42,19 +42,21 @@ def normalize_dependencies(catalog):
             if workflow in workflows:
                 invalid.add(workflow)
             continue
-        key = (workflow, job)
+        key = (workflow, job, parent if job is None else None)
         if key in seen:
             warnings.append(f'DEPENDENCIES contains duplicate rows for {workflow} / {job or "(workflow)"}. Resolve these before editing this workflow.')
             invalid.add(workflow)
             continue
         seen.add(key)
         records.append(dict(
-            WORKFLOW_DEPENDENCY_ID=assignment_id(workflow, job), CHILD_WORKFLOW_ID=workflow,
+            WORKFLOW_DEPENDENCY_ID=(assignment_id(workflow, job) if job else
+                str(uuid.uuid5(uuid.NAMESPACE_URL, json.dumps([workflow, None, parent])))), CHILD_WORKFLOW_ID=workflow,
             JOB_ID=job, PARENT_WORKFLOW_ID=parent if not job or parent == workflow else None,
             PARENT_JOB_ID=parent if job and parent != workflow else None,
             JOB_SEQUENCE=None, TRIGGER_TYPE=source.get('TRIGGER_TYPE'),
             SUCCESS=source.get('SUCCESS'), WARNING=source.get('WARNING'), ERROR=source.get('ERROR'),
-            SQL_CONDITION=source.get('SQL'), ALLOW=source.get('ALLOW'), IS_ENABLED=True,
+            SQL_CONDITION=source.get('SQL'), ALLOW=source.get('ALLOW'),
+            PARENT_MUST_BE_NEWER=source.get('PARENT_MUST_BE_NEWER', False), IS_ENABLED=True,
             DEPENDENCY_TYPE='SEQUENCE' if job else 'TRIGGER', MIN_STATUS_LEVEL='SUCCESS', CONFIG_VERSION=1,
         ))
     # The table has no sequence column. Follow parents, never physical row order.
@@ -96,20 +98,11 @@ def configuration_rows(catalog):
                       for row in records if row.get('JOB_ID')}
     rows = []
     for workflow_id, workflow in workflows.items():
-        links = headers.get(workflow_id, [])
-        header = links[0] if len(links) == 1 else {}
-        issue = ''
-        if len(links) > 1:
-            parents = ', '.join(f"{workflows.get(link.get('PARENT_WORKFLOW_ID'), {}).get('WORKFLOW_NAME', 'No parent')} ({link.get('DEPENDENCY_TYPE')}, {link.get('MIN_STATUS_LEVEL')})" for link in links)
-            issue = f'Multiple workflow parents: {parents}. Select one parent, or explicitly choose No parent, to resolve.'
-        parent_id = header.get('PARENT_WORKFLOW_ID')
-        if header.get('DEPENDENCY_TYPE') == 'BLOCKER':
-            issue = 'This legacy blocker requires review. Select its parent explicitly and review the status rules.'
-        row = _row(workflow_id, workflow_id, workflow['WORKFLOW_NAME'], None, parent_id, header, issue)
-        if issue:
-            row['parentRules'] = {link.get('PARENT_WORKFLOW_ID'): dict(trigger=link.get('TRIGGER_TYPE'),
-                success=link.get('SUCCESS'), warning=link.get('WARNING'), error=link.get('ERROR')) for link in links}
-        rows.append(row)
+        links = sorted(headers.get(workflow_id, []), key=lambda link: link.get('PARENT_WORKFLOW_ID') or '')
+        for index, header in enumerate(links or [{}]):
+            row_id = header['WORKFLOW_DEPENDENCY_ID'] if index else workflow_id
+            rows.append(_row(row_id, workflow_id, workflow['WORKFLOW_NAME'], None,
+                             header.get('PARENT_WORKFLOW_ID'), header))
         for record in sorted(memberships.get(workflow_id, []), key=lambda item: (item.get('JOB_SEQUENCE') or 0, item['WORKFLOW_DEPENDENCY_ID'])):
             job_id = record['JOB_ID']
             if job_id not in jobs:
@@ -126,6 +119,7 @@ def _row(row_id, workflow_id, name, job_id, parent_id, record, issue=''):
     return dict(id=row_id, workflowId=workflow_id, name=name, jobId=job_id,
                 parentId=parent_id, trigger=record.get('TRIGGER_TYPE') if not job_id else 'DEP',
                 success=record.get('SUCCESS'), warning=record.get('WARNING'), error=record.get('ERROR'),
+                parentMustBeNewer=record.get('PARENT_MUST_BE_NEWER', False),
                 sql=record.get('SQL_CONDITION') or '', allow=True if record.get('ALLOW') is None else record['ALLOW'],
                 enabled=record.get('IS_ENABLED', True), issue=issue)
 
@@ -143,11 +137,12 @@ def validate_rows(rows, catalog):
         raise ValueError('rows must be a list of configuration objects')
     workflows = {row['WORKFLOW_ID']: row for row in catalog['workflows']}
     jobs = {row['JOB_ID']: row for row in catalog['jobs']}
-    by_id, headers, assignments = {}, set(), set()
+    by_id, headers, assignments, parent_rules = {}, set(), set(), set()
     normalized = []
     existing = {row['id']: row for row in configuration_rows(catalog)}
     for supplied in rows:
         row = {key: supplied.get(key) for key in ('id', 'workflowId', 'jobId', 'parentId', 'trigger', 'success', 'warning', 'error', 'sql', 'allow')}
+        row['parentMustBeNewer'] = supplied.get('parentMustBeNewer', existing.get(row['id'], {}).get('parentMustBeNewer', False))
         if any(value is not None and not isinstance(value, str) for key, value in row.items()
                if key in ('id', 'workflowId', 'jobId', 'parentId', 'trigger', 'sql')):
             raise ValueError('Object references and SQL must be strings')
@@ -168,9 +163,13 @@ def validate_rows(rows, catalog):
             if row['trigger'] not in ('DEP', None) or not row['parentId']:
                 raise ValueError('Jobs require a parent and must use DEP')
         else:
-            if row['id'] != row['workflowId'] or row['workflowId'] in headers:
-                raise ValueError('Each workflow requires exactly one configuration row')
+            if row['id'] != row['workflowId'] and existing.get(row['id'], {}).get('workflowId') != row['workflowId']:
+                raise ValueError('Workflow rule identity is inconsistent')
             headers.add(row['workflowId'])
+            key = (row['workflowId'], row['parentId'])
+            if key in parent_rules:
+                raise ValueError('Each workflow parent requires a unique dependency rule')
+            parent_rules.add(key)
             row['name'] = workflow['WORKFLOW_NAME']
         if row['trigger'] not in (None, 'RUNNER', 'DEP'):
             raise ValueError('Trigger must be RUNNER, DEP or null')
@@ -179,7 +178,11 @@ def validate_rows(rows, catalog):
                 raise ValueError('Status rules must be true, false or null')
         if type(row['allow']) is not bool:
             raise ValueError('ALLOW must be true or false')
-        if (row['trigger'] or any(row[field] is not None for field in ('success', 'warning', 'error'))) and not row['parentId']:
+        if type(row['parentMustBeNewer']) is not bool:
+            raise ValueError('Parent must be newer must be true or false')
+        if row['parentMustBeNewer'] and row['jobId']:
+            raise ValueError('Parent freshness applies only between workflows')
+        if (row['trigger'] or row['parentMustBeNewer'] or any(row[field] is not None for field in ('success', 'warning', 'error'))) and not row['parentId']:
             raise ValueError('This trigger or status rule requires a parent')
         if existing.get(row['id'], {}).get('issue') and supplied.get('resolvedConflict') is not True:
             raise ValueError('Resolve the multiple workflow parents explicitly before saving')
@@ -187,20 +190,39 @@ def validate_rows(rows, catalog):
         row['enabled'] = existing.get(row['id'], {}).get('enabled', True)
         by_id[row['id']] = row
         normalized.append(row)
-    if headers != set(workflows):
+    if headers != set(workflows) or any(workflow not in by_id or by_id[workflow]['jobId'] or by_id[workflow]['workflowId'] != workflow for workflow in headers):
         raise ValueError('Keep every workflow definition in the overview; manage definitions in the Workflow catalog')
     for row in normalized:
         parent = by_id.get(row['parentId'])
         if row['parentId'] and not parent:
             raise ValueError('A selected parent does not exist')
-        if parent and ((not row['jobId'] and parent['jobId']) or (row['jobId'] and parent['workflowId'] != row['workflowId'])):
+        if parent and ((not row['jobId'] and (parent['jobId'] or parent['id'] != parent['workflowId'])) or (row['jobId'] and parent['workflowId'] != row['workflowId'])):
             raise ValueError('Workflow parents must be workflows; job parents must belong to the same workflow')
-        seen = {row['id']}
-        while parent:
-            if parent['id'] in seen:
-                raise ValueError('Parent relationships cannot contain cycles')
-            seen.add(parent['id'])
-            parent = by_id.get(parent['parentId'])
+        if row['jobId']:
+            seen = {row['id']}
+            while parent and parent['jobId']:
+                if parent['id'] in seen:
+                    raise ValueError('Parent relationships cannot contain cycles')
+                seen.add(parent['id'])
+                parent = by_id.get(parent['parentId'])
+    graph = defaultdict(list)
+    for row in normalized:
+        if not row['jobId']:
+            graph[row['workflowId']].append(row['parentId'])
+    visited = set()
+    def visit(workflow, path):
+        if workflow in path:
+            raise ValueError('Parent relationships cannot contain cycles')
+        if not workflow or workflow in visited:
+            return
+        for parent in graph[workflow]:
+            visit(parent, path | {workflow})
+        visited.add(workflow)
+    for workflow_id in headers:
+        links = [row for row in normalized if not row['jobId'] and row['workflowId'] == workflow_id]
+        if len(links) > 1 and any(not row['parentId'] or row['trigger'] != 'DEP' for row in links):
+            raise ValueError('Multiple parent rules require DEP and a parent on every rule')
+        visit(workflow_id, set())
     for workflow_id in headers:
         members = [row for row in normalized if row['jobId'] and row['workflowId'] == workflow_id]
         if members and sum(row['parentId'] == workflow_id for row in members) != 1:
@@ -229,12 +251,12 @@ def save(rows, expected_revision):
         desired = {}
         for row in rows:
             parent = by_id.get(row['parentId'])
-            desired[assignment_id(row['workflowId'], row['jobId'])] = dict(
+            desired[native_identity(row['workflowId'], row['jobId'], row['parentId'])] = dict(
                 WORKFLOW_ID=row['workflowId'], JOB_ID=row['jobId'],
                 PARENT_ID=(parent['jobId'] or parent['workflowId']) if parent else None,
                 TRIGGER_TYPE=row['trigger'], SUCCESS=row['success'], WARNING=row['warning'],
-                ERROR=row['error'], SQL=row['sql'] or None, ALLOW=row['allow'])
-        original = {assignment_id(record['CHILD_WORKFLOW_ID'], record.get('JOB_ID')): native_record(record)
+                ERROR=row['error'], SQL=row['sql'] or None, ALLOW=row['allow'], PARENT_MUST_BE_NEWER=row['parentMustBeNewer'])
+        original = {native_identity(record['CHILD_WORKFLOW_ID'], record.get('JOB_ID'), record.get('PARENT_WORKFLOW_ID')): native_record(record)
                     for record in original.values()}
         persist_records(original, desired)
         result = payload()
@@ -254,7 +276,11 @@ def assignments(catalog):
             for record in sorted(catalog['records'], key=lambda row: (row['CHILD_WORKFLOW_ID'], row.get('JOB_SEQUENCE') or 0)) if record.get('JOB_ID')]
 
 
-NATIVE_FIELDS = ('WORKFLOW_ID', 'JOB_ID', 'PARENT_ID', 'TRIGGER_TYPE', 'SUCCESS', 'WARNING', 'ERROR', 'SQL', 'ALLOW')
+NATIVE_FIELDS = ('WORKFLOW_ID', 'JOB_ID', 'PARENT_ID', 'TRIGGER_TYPE', 'SUCCESS', 'WARNING', 'ERROR', 'SQL', 'ALLOW', 'PARENT_MUST_BE_NEWER')
+
+
+def native_identity(workflow, job, parent):
+    return (workflow, job, parent if job is None else None)
 
 
 def native_record(record):
@@ -262,7 +288,8 @@ def native_record(record):
                 PARENT_ID=record.get('PARENT_JOB_ID') or record.get('PARENT_WORKFLOW_ID'),
                 TRIGGER_TYPE=record.get('TRIGGER_TYPE'), SUCCESS=record.get('SUCCESS'),
                 WARNING=record.get('WARNING'), ERROR=record.get('ERROR'),
-                SQL=record.get('SQL_CONDITION'), ALLOW=record.get('ALLOW'))
+                SQL=record.get('SQL_CONDITION'), ALLOW=record.get('ALLOW'),
+                PARENT_MUST_BE_NEWER=record.get('PARENT_MUST_BE_NEWER', False))
 
 
 def persist_records(original, desired):
@@ -273,6 +300,8 @@ def persist_records(original, desired):
             continue
         values = after or before
         where = 'WORKFLOW_ID = %(WORKFLOW_ID)s AND ' + ('JOB_ID = %(JOB_ID)s' if values['JOB_ID'] is not None else 'JOB_ID IS NULL')
+        if values['JOB_ID'] is None:
+            where += ' AND ' + ('PARENT_ID = %(PARENT_ID)s' if values['PARENT_ID'] is not None else 'PARENT_ID IS NULL')
         if after is None:
             sf.execute_service(f'DELETE FROM {config.T_ORCHESTRATION_DEPENDENCY} WHERE {where}', values)
         elif before is not None:
@@ -286,7 +315,7 @@ def persist_records(original, desired):
 
 def add_workflow(workflow_id, entry_job_id=None):
     header = dict(WORKFLOW_ID=workflow_id, JOB_ID=None, PARENT_ID=None, TRIGGER_TYPE=None,
-                  SUCCESS=None, WARNING=None, ERROR=None, SQL=None, ALLOW=True)
+                  SUCCESS=None, WARNING=None, ERROR=None, SQL=None, ALLOW=True, PARENT_MUST_BE_NEWER=False)
     records = {assignment_id(workflow_id, None): header}
     if entry_job_id:
         records[assignment_id(workflow_id, entry_job_id)] = dict(header, JOB_ID=entry_job_id, PARENT_ID=workflow_id, TRIGGER_TYPE='DEP')
@@ -324,7 +353,7 @@ def apply_orders(catalog, orders):
         for job in job_ids:
             identity = assignment_id(workflow, job)
             values = original.get(identity, dict(WORKFLOW_ID=workflow, JOB_ID=job, TRIGGER_TYPE='DEP',
-                                                SUCCESS=None, WARNING=None, ERROR=None, SQL=None, ALLOW=True))
+                                                SUCCESS=None, WARNING=None, ERROR=None, SQL=None, ALLOW=True, PARENT_MUST_BE_NEWER=False))
             desired[identity] = dict(values, PARENT_ID=parent)
             parent = job
         changes.append((original, desired))

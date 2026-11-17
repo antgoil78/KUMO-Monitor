@@ -1,6 +1,8 @@
 """Read-only view of the parallel catalog and a coherent execution per workflow."""
 from collections import defaultdict
 from datetime import datetime, timezone
+import json
+import time
 
 import config
 import orchestration_configuration as catalog_store
@@ -30,6 +32,8 @@ def read_executions():
                l.JOB_POSITION, l.RUN_MODE, l.REQUEST_ID, l.REQUESTED_JOB_ID, l.STATUS,
                l.REQUESTED_BY, l.REQUESTED_AT, l.STARTED_AT, l.ENDED_AT,
                l.ERROR_MESSAGE, l.QUERY_ID, r.QUEUED_COUNT,
+               l.RESULT:startGate AS START_GATE,
+               l.CONFIG_SNAPSHOT:jobExecutionMode::VARCHAR AS RUN_JOB_EXECUTION_MODE,
                l.CONFIG_SNAPSHOT:selected::BOOLEAN AS RUN_SELECTED,
                l.CONFIG_SNAPSHOT:definition:JOB_NAME::VARCHAR AS RUN_JOB_NAME,
                l.CONFIG_SNAPSHOT:definition:JOB_TYPE::VARCHAR AS RUN_JOB_TYPE,
@@ -91,13 +95,20 @@ def read_dbt_progress(executions):
 
 def run_state(row=None, missing='NOT RUN'):
     row = row or {}
+    gate = row.get('START_GATE') or {}
+    if isinstance(gate, str):
+        gate = json.loads(gate)
+    waiting = gate.get('blockers', []) if row.get('STATUS') == 'QUEUED' and gate.get('state') == 'WAITING' else []
     return dict(executionId=row.get('EXECUTION_ID'), runId=row.get('WORKFLOW_RUN_ID'),
                 parentExecutionId=row.get('PARENT_EXECUTION_ID'), selected=row.get('RUN_SELECTED'),
                 status=row.get('STATUS', missing), mode=row.get('RUN_MODE'), requestId=row.get('REQUEST_ID'),
+                jobExecutionMode=row.get('RUN_JOB_EXECUTION_MODE') or 'SEQUENTIAL',
                 requestedJobId=row.get('REQUESTED_JOB_ID'), requestedBy=row.get('REQUESTED_BY'),
                 requestedAt=to_jsonable(row.get('REQUESTED_AT')),
                 start=to_jsonable(row.get('STARTED_AT')), end=to_jsonable(row.get('ENDED_AT')),
                 message=row.get('ERROR_MESSAGE'), queryId=row.get('QUERY_ID'),
+                waitingFor=[dict(workflowId=item.get('WORKFLOW_ID'), status=item.get('STATUS'),
+                                 direction=item.get('DIRECTION')) for item in waiting],
                 position=row.get('JOB_POSITION'))
 
 
@@ -144,7 +155,7 @@ def build_rows(catalog, executions, dbt_progress=None, schedules=None, last_runs
                                  JOB_SEQUENCE=row.get('JOB_POSITION'), runOnly=True, run=run_state(row),
                                  progress=dbt_progress.get(row['EXECUTION_ID']), lastRun=run_state(last_by_job.get((workflow_id,row['JOB_ID'])))))
         workflow = {key: definition.get(key) for key in (
-            'WORKFLOW_ID', 'WORKFLOW_NAME', 'WORKFLOW_GROUP', 'IS_ENABLED', 'ALLOW_MANUAL_TRIGGER',
+            'WORKFLOW_ID', 'WORKFLOW_NAME', 'WORKFLOW_GROUP', 'JOB_EXECUTION_MODE', 'IS_ENABLED', 'ALLOW_MANUAL_TRIGGER',
             'SCHEDULE', 'SCHEDULE_TIMEZONE', 'IS_SCHEDULE_ENABLED', 'ALLOW_EXTERNAL_TRIGGER')}
         header = headers.get(workflow_id, {})
         workflow['parentWorkflowName'] = (workflow_names.get(header['PARENT_WORKFLOW_ID'], 'Unknown workflow')
@@ -170,20 +181,38 @@ def build_rows(catalog, executions, dbt_progress=None, schedules=None, last_runs
                                       skipped=sum(row['STATUS'] == 'SKIPPED' for row in runs),
                                       cancelled=sum(row['STATUS'] == 'CANCELLED' for row in runs),
                                       completed=completed, percent=round((completed + partial) / len(runs) * 100) if runs else None))
+        blockers = []
+        for blocker in workflow['run']['waitingFor']:
+            related = roots.get(blocker['workflowId'], {})
+            active = ('RUNNING',) if blocker['direction'] == 'DOWNSTREAM' else ('PENDING', 'INITIATING', 'QUEUED', 'CLAIMED', 'RUNNING')
+            if related.get('STATUS') in active:
+                blockers.append(dict(blocker, name=workflow_names.get(blocker['workflowId'], blocker['workflowId']),
+                                     status=related['STATUS']))
+        workflow['run']['waitingFor'] = blockers
         result.append(workflow)
     return result
 
 
-def payload():
+def payload(metadata=None):
+    # Configuration and scheduler discovery change less often than executions.
+    # The shared reader owns this cache; writes/manual refresh clear it.
     with sf.connection_scope(force_service=True):
-        catalog = catalog_store.read_catalog()
+        if metadata is None or time.monotonic() >= metadata.get('expires', 0):
+            catalog = catalog_store.read_catalog()
+            from orchestration_schedules import read_schedules
+            schedules, schedule_warnings = read_schedules(catalog)
+            if metadata is not None:
+                metadata.update(catalog=catalog, schedules=schedules, warnings=schedule_warnings,
+                                expires=time.monotonic() + 30)
+        else:
+            catalog, schedules, schedule_warnings = metadata['catalog'], metadata['schedules'], metadata['warnings']
+        # Timestamp the status read, rather than the end of later enrichment.
+        generated_at = datetime.now(timezone.utc).isoformat()
         executions = read_executions()
         progress, warnings = read_dbt_progress(executions)
         last_runs = read_last_runs() if executions else []
-        from orchestration_schedules import read_schedules
-        schedules, schedule_warnings = read_schedules(catalog)
     return dict(ok=True, source=config.ORCHESTRATION_NAMESPACE,
                 executionSource=config.T_ORCHESTRATION_EXECUTION_LOG,
                 rows=build_rows(catalog, executions, progress, schedules, last_runs), warnings=catalog.get('warnings', []) + warnings + schedule_warnings,
                 runsEnabled=config.ORCHESTRATION_RUNS_ENABLED,
-                generatedAt=datetime.now(timezone.utc).isoformat(), refreshSeconds=max(5, config.REFRESH_SECONDS))
+                generatedAt=generated_at, refreshSeconds=max(5, config.REFRESH_SECONDS))

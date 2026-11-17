@@ -9,6 +9,7 @@
 .om-summary .system-counts { gap: 7px; }
 .om-page .om-summary :is(.summary-item, .summary-total) { min-height: 32px; padding: 0 11px; border-color: #2c2e33; border-radius: 3px; background: #20232d; color: #9a9ca5; }
 .om-summary .summary-updated { font-size: 11px; }
+.om-summary .om-status-delayed { color: var(--amber); }
 .om-summary .summary-item.warning .summary-icon { color: var(--amber); }
 .om-summary .summary-item.skipped .summary-icon, .om-summary .summary-item.muted .summary-icon { color: var(--muted2); }
 .om-summary-filtered { color: #9699a4; font-size: 11px; }

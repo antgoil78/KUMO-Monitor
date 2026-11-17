@@ -196,6 +196,19 @@ class OrchestrationServiceContextTests(unittest.TestCase):
         self.assertIsNone(inserts[0].args[1]['JOB_ID'])
         self.assertEqual(inserts[0].args[1]['WORKFLOW_ID'], response.get_json()['workflowId'])
 
+    def test_workflow_job_execution_setting_is_validated_and_saved(self):
+        for mode in ('SEQUENTIAL', 'PARALLEL'):
+            self.request('POST', '/api/orchestration/workflows', {'workflowName': 'Execution test', 'jobExecutionMode': mode})
+            insert = next(call for call in reversed(self.cursor.execute.call_args_list)
+                          if call.args[0].lstrip().startswith('INSERT INTO KUMO_DEV.MONITOR_META.WORKFLOW ('))
+            self.assertIn('JOB_EXECUTION_MODE', insert.args[0])
+            self.assertEqual(insert.args[1]['job_execution_mode'], mode)
+        with patch.object(application.sf, 'execute_service') as write:
+            for invalid in ('MIXED', '', None, False):
+                response = self.client.post('/api/orchestration/workflows', json={'workflowName': 'Bad mode', 'jobExecutionMode': invalid})
+                self.assertEqual(response.status_code, 400)
+        write.assert_not_called()
+
     def test_user_session_still_uses_caller_credentials(self):
         handle = sf.set_ingress_user_token("browser-token")
         try:

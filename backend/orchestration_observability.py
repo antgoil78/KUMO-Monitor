@@ -116,4 +116,4 @@ def dag_payload(workflow_id, run_id=None, job_id=None):
     nodes=[dict(id=workflow_id,label=workflow['WORKFLOW_NAME'],status='NOT RUN',type='WORKFLOW')]
     nodes += [dict(id=row['JOB_ID'],label=row['JOB_NAME'],status='NOT RUN' if row.get('JOB_IS_ENABLED') else 'DISABLED',type=row.get('JOB_TYPE')) for row in assignments]
     return dict(workflowId=workflow_id,kind='jobs',run=None,nodes=nodes,
-                edges=[dict(source=row.get('PARENT_JOB_ID') or workflow_id,target=row['JOB_ID']) for row in assignments],errors=[],tests=[])
+                edges=[dict(source=workflow_id if workflow.get('JOB_EXECUTION_MODE') == 'PARALLEL' else row.get('PARENT_JOB_ID') or workflow_id,target=row['JOB_ID']) for row in assignments],errors=[],tests=[])

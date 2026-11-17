@@ -5,16 +5,22 @@ export const activeWorkflowStatuses = new Set(['SUBMITTING', 'INITIATING', 'QUEU
 
 export function applySubmission(workflow, submissions = []) {
   const submission = submissions.find(row => row.workflowId === workflow.WORKFLOW_ID && activeWorkflowStatuses.has(row.status))
-  if (!submission || (submission.runId && workflow.run.runId === submission.runId)) return workflow
+  // A durable execution always wins, even before the asynchronous receipt has
+  // learned its run ID. A late receipt must never hide RUNNING or SUCCESS.
+  if (!submission || workflow.run.requestId === submission.requestId ||
+      (submission.runId && workflow.run.runId === submission.runId)) return workflow
   const jobIndex = workflow.jobs.findIndex(job => job.JOB_ID === submission.jobId)
   let first = true
   return { ...workflow, canRun: false, runUnavailable: 'Workflow is being prepared.',
-    run: { status: 'INITIATING', requestId: submission.requestId, mode: submission.mode, requestedBy: submission.requestedBy, queryId: submission.queryId },
+    run: { status: submission.status === 'QUEUED' ? 'QUEUED' : 'INITIATING',
+      jobExecutionMode: workflow.JOB_EXECUTION_MODE || 'SEQUENTIAL',
+      runId: submission.runId, requestedAt: submission.submittedAt,
+      requestId: submission.requestId, mode: submission.mode, requestedBy: submission.requestedBy, queryId: submission.queryId },
     progress: { total: workflow.jobs.length, succeeded: 0, failed: 0, skipped: 0, percent: 0 },
     jobs: workflow.jobs.map((job, index) => {
       const selected = !job.runOnly && job.JOB_IS_ENABLED !== false &&
         (submission.mode === 'WORKFLOW' || (submission.mode === 'JOB_ONLY' ? index === jobIndex : index >= jobIndex))
-      const status = selected ? first ? 'INITIATING' : 'PENDING' : 'SKIPPED'
+      const status = selected ? first || workflow.JOB_EXECUTION_MODE === 'PARALLEL' ? 'INITIATING' : 'PENDING' : 'SKIPPED'
       if (selected) first = false
       return { ...job, run: { status, message: selected ? '' : 'Not selected for this execution' }, progress: null }
     }) }
@@ -60,7 +66,8 @@ export default function useOrchestrationMonitor() {
   }, [reload])
   const acceptSubmission = useCallback(receipt => setData(previous => {
     if (!previous || previous.rows.some(row => row.WORKFLOW_ID === receipt.workflowId && row.run.requestId === receipt.requestId)) return previous
-    return { ...previous, submissions: [...(previous.submissions || []).filter(row => row.requestId !== receipt.requestId), receipt] }
+    const existing = previous.submissions?.find(row => row.requestId === receipt.requestId)
+    return { ...previous, submissions: [...(previous.submissions || []).filter(row => row.requestId !== receipt.requestId), { ...existing, ...receipt }] }
   }), [])
   return { data, error, loading: !error && (!data || data.warming), refreshing, refresh, acceptSubmission }
 }

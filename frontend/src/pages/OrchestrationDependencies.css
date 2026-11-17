@@ -14,7 +14,7 @@
 .od-actions .button, .od-bottom .button { padding: 7px 12px; font-size: 11px; }
 .od-table-wrap { max-width: 100%; overflow-x: auto; border: 1px solid #2c2e33; border-radius: 4px; background: #191c24; }
 .od-page table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
-.od-config-table { min-width: 1400px; table-layout: fixed; }
+.od-config-table { min-width: 1385px; table-layout: fixed; }
 .od-page table :is(th, td) { padding: 12px 10px; border-bottom: 1px solid #2c2e33; vertical-align: middle; }
 .od-page thead th { background: #20232d; color: #858a9b; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .035em; }
 .od-page tbody th { font-weight: 400; }
@@ -27,6 +27,7 @@
 .od-job-workflow { margin-left: 8px; padding-left: 16px; border-left: 1px solid #3b4657; color: #6c7991; font-size: 11px; }
 .od-page :is(select, input, textarea), .od-dialog :is(select, input, textarea) { min-width: 0; width: 100%; padding: 8px; border: 1px solid #363b48; border-radius: 4px; background: #13151c; color: #b7bac4; font: inherit; }
 .od-page select { font-size: 11px; }
+.od-config-table input[type="checkbox"] { width: 18px; height: 18px; padding: 0; accent-color: #0075ff; }
 .od-page .od-accept { color: #6acda2; }
 .od-page .od-reject { color: #ef8991; }
 .od-page .od-trigger { padding: 5px 8px; border: 1px solid #3b4657; border-radius: 3px; color: #8fc2ff; font-size: 10px; }
@@ -53,7 +54,7 @@
 .od-run-table strong { color: #e0e2e7; font-weight: 500; }
 .od-decision { display: inline-block; padding: 3px 7px; border: 1px solid #3b4657; border-radius: 3px; color: #a3b3c8; font-size: 10px; }
 .od-ready { border-color: #2b5d4a; color: #6acda2; }
-.od-blocked, .od-invalid { border-color: #6e3c45; color: #ef8991; }
+.od-blocked, .od-invalid, .od-stale-parent { border-color: #6e3c45; color: #ef8991; }
 .od-sql-check, .od-waiting { border-color: #615135; color: #dcbd80; }
 .od-running { color: #8fc2ff; }
 .od-backdrop { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(0,0,0,.75); }

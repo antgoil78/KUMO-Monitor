@@ -24,6 +24,28 @@ var filter = '(?::VARCHAR IS NULL OR WORKFLOW_ID = ?)';
 var active = rows('SELECT EXECUTION_ID, WORKFLOW_ID, STATUS, TASK_FQN, TASK_RUN_GROUP_ID FROM ' + log +
     " WHERE " + filter + " AND JOB_ID IS NULL AND STATUS IN ('CLAIMED','RUNNING')", [workflowId, workflowId]);
 var recovered = [], removed = [], errors = [];
+function evaluateRecoveredRun(runId) {
+    // Recovery writes the terminal workflow/job statuses before evaluating them.
+    var ended = rows('SELECT EXECUTION_ID FROM ' + log + ' WHERE WORKFLOW_RUN_ID = ? AND ENDED_AT IS NOT NULL ' +
+        'AND RESULT:dependencyEvaluation IS NULL ORDER BY JOB_POSITION NULLS LAST', [runId]);
+    ended.forEach(function(execution) {
+        var report;
+        try {
+            report = first(rows('CALL ' + app + '.SP_ORCH_DISPATCH_DEPENDENCIES(?)', [execution.EXECUTION_ID])[0]);
+            if (typeof report === 'string') report = JSON.parse(report);
+            if (!report || report.ok !== true) throw new Error(report && report.error || 'Invalid eligibility response');
+            (report.errors || []).forEach(function(error) { errors.push('Dependency dispatch: ' + JSON.stringify(error)); });
+        } catch (error) {
+            report = {ok: false, executionId: execution.EXECUTION_ID, error: String(error.message || error)};
+            errors.push('Dependency evaluation for ' + execution.EXECUTION_ID + ': ' + report.error);
+        }
+        report.checkedAt = new Date().toISOString();
+        try {
+            rows('UPDATE ' + log + " SET RESULT = OBJECT_INSERT(COALESCE(RESULT, OBJECT_CONSTRUCT()), 'dependencyEvaluation', PARSE_JSON(?), TRUE), UPDATED_AT = SYSDATE() " +
+                'WHERE EXECUTION_ID = ? AND WORKFLOW_RUN_ID = ? AND ENDED_AT IS NOT NULL', [JSON.stringify(report), execution.EXECUTION_ID, runId]);
+        } catch (error) { errors.push('Could not save dependency evaluation: ' + String(error.message || error)); }
+    });
+}
 active.forEach(function(run) {
     try {
         var prefix = app + '.TMP_ORCH_WF_' + run.WORKFLOW_ID.replace(/-/g, '_').toUpperCase() + '_' + run.EXECUTION_ID.replace(/-/g, '_').toUpperCase();
@@ -39,6 +61,7 @@ active.forEach(function(run) {
             rows('UPDATE ' + log + " SET STATUS = IFF(JOB_ID IS NOT NULL AND STATUS IN ('PENDING','INITIATING','QUEUED'), 'SKIPPED', ?), ENDED_AT = SYSDATE(), UPDATED_AT = SYSDATE(), ERROR_CODE = ?, ERROR_MESSAGE = ? " +
                 "WHERE WORKFLOW_RUN_ID = ? AND STATUS IN ('CLAIMED','RUNNING','PENDING','INITIATING','QUEUED')", [status, String(result.ERROR_CODE || ''), result.ERROR_MESSAGE || 'Workflow task did not complete', run.EXECUTION_ID]);
             recovered.push(run.EXECUTION_ID);
+            evaluateRecoveredRun(run.EXECUTION_ID);
         } else if (run.STATUS === 'CLAIMED' && (!history.length || history[0].STATE === 'SUCCEEDED')) {
             // Resume provisioning after a lost reply or interrupted launcher.
             // The runner claims the same immutable run; no workload is replayed.

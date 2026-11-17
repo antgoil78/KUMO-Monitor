@@ -16,7 +16,10 @@ sys.path.insert(0, str(ROOT / 'backend'))
 import config
 
 PROCEDURES = {
-    'SP_ORCH_REQUEST_RUN': '(VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,BOOLEAN)',
+    'SP_ORCH_EVALUATE_DEPENDENCIES': '(VARCHAR)',
+    'SP_ORCH_DISPATCH_DEPENDENCIES': '(VARCHAR)',
+    'SP_ORCH_REQUEST_RUN': '(VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,BOOLEAN,VARCHAR)',
+    'SP_ORCH_EXECUTE_JOB': '(VARCHAR,VARCHAR)',
     'SP_ORCH_EXECUTE_WORKFLOW': '(VARCHAR)',
     'SP_ORCH_RECONCILE': '(VARCHAR)',
     'SP_ORCH_START_RUN': '(VARCHAR)',
@@ -105,7 +108,9 @@ def run(apply=False, environment_table='KUMO_DEV.MONITOR_META.APPLICATION_PARAME
             if not str(row.get('COMMENT') or '').startswith('KUMO parallel orchestration v'):
                 raise ValueError('Unexpected existing procedure: ' + row['PROCEDURE_NAME'])
         if apply:
+            cursor.execute(f"ALTER TABLE {config.T_ORCHESTRATION_WORKFLOW} ADD COLUMN IF NOT EXISTS JOB_EXECUTION_MODE VARCHAR(20) NOT NULL DEFAULT 'SEQUENTIAL'")
             cursor.execute(render(DDL / 'MONITOR_META/tables/WORKFLOW_EXECUTION_LOG.sql'))
+            cursor.execute(render(DDL / 'MONITOR_APP/views/V_ORCH_WORKFLOW_RELATIONS.sql'))
             for procedure in PROCEDURES:
                 cursor.execute(render(DDL / ('MONITOR_APP/procedures/' + procedure + '.sql')))
             for address in old_tasks:

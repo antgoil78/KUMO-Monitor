@@ -233,10 +233,10 @@ Pull requests to `main` run these checks in `validate-pr.yml`.
 That workflow does not publish images or change a service; the existing image
 workflow continues to publish on merges to `main`.
 
-The new monitor and engine still have three known legacy parity gaps:
-automatic downstream workflow dispatch, completion notifications, and dbt
-warning/artifact classification. This change does not implement those engine
-features. Before promoting the new engine for workloads relying on them,
+The DEV engine now dispatches eligible downstream workflows after completion,
+including joins with multiple parents and duplicate-request protection. Two
+known legacy parity gaps remain: completion notifications and dbt warning/artifact
+classification. Before promoting the new engine for workloads relying on them,
 complete their integration and DEV validation. Fixture browser tests also do
 not replace live DEV checks for accepted run IDs, task permissions, workload
 execution, and schedule controls. See the
@@ -339,6 +339,20 @@ never own tasks. Workflow and Monitor pages both include Run controls.
 Job Run offers **Run only this job** and **Run from this job**. Definitions,
 conditions and commands are snapshotted when the request is accepted.
 
+Workflow Edit includes **Job execution**: **Sequential** (the default) or
+**Parallel** for the whole workflow. Parallel starts all selected jobs
+concurrently inside the same workflow task, without job-to-job result gating.
+Enabled/ALLOW flags and each job's SQL condition still apply. A failed or
+timed-out parallel job does not stop its siblings; the workflow waits for every
+selected job and fails if any failed. The mode is frozen with the run, and the
+parent/grandparent activity guard remains in force until the workflow finishes.
+Job order still defines the selection for **Run from this job**. Partial runs
+do not release downstream workflows. Install the DEV column/procedures with
+`python backend/migrations/apply_workflow_job_execution.py --apply`; without
+`--apply` the command is read-only. The opt-in
+`backend/tests/live_workflow_job_execution.py --run` uses and removes isolated
+DEV validation workflows.
+
 **Workflow → Monitor** reads the real `WORKFLOW`, `JOB`, `DEPENDENCIES`,
 and `WORKFLOW_EXECUTION_LOG` tables through a read-only endpoint. It refreshes
 automatically and keeps one execution's workflow/job statuses together: active
@@ -348,7 +362,8 @@ Each configured job receives a status. Disabled and out-of-scope jobs are
 `INITIATING`, `QUEUED` and `RUNNING`. Progress includes run-scoped dbt model/test
 counts. Older partial executions can still show `NOT SELECTED`. Workflows without execution records show
 `NOT RUN`. Click a workflow name for its execution history. Workflow Run executes
-all enabled jobs in order; a job Run offers only that job or from that job onward.
+all enabled jobs using the workflow's Sequential/Parallel setting; a job Run
+offers only that job or from that job onward.
 Disabled jobs are omitted from the execution preview and recorded as skipped.
 Right-aligned green play buttons and three-dot actions are in the Workflow / Job
 column. Live activity indicators identify the workflow and current job.

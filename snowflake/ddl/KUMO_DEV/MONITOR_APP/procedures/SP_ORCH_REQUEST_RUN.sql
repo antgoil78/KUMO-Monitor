@@ -1,7 +1,8 @@
--- Source: KUMO_DEV.MONITOR_APP.SP_ORCH_REQUEST_RUN(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, BOOLEAN)
+-- Source: KUMO_DEV.MONITOR_APP.SP_ORCH_REQUEST_RUN(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, BOOLEAN, VARCHAR)
 CREATE OR REPLACE PROCEDURE KUMO_DEV.MONITOR_APP.SP_ORCH_REQUEST_RUN(
     P_WORKFLOW_ID VARCHAR, P_RUN_MODE VARCHAR, P_JOB_ID VARCHAR,
-    P_REQUEST_ID VARCHAR, P_REQUESTED_BY VARCHAR, P_FULL_REFRESH BOOLEAN DEFAULT FALSE
+    P_REQUEST_ID VARCHAR, P_REQUESTED_BY VARCHAR, P_FULL_REFRESH BOOLEAN DEFAULT FALSE,
+    P_SOURCE_EXECUTION_ID VARCHAR DEFAULT NULL
 )
 RETURNS VARIANT
 LANGUAGE JAVASCRIPT
@@ -31,13 +32,17 @@ var app = environment.DATABASE + '.' + environment.MONITOR_APP_SCHEMA;
 var log = ns + '.WORKFLOW_EXECUTION_LOG';
 var requestedMode = String(P_RUN_MODE || 'WORKFLOW').toUpperCase();
 var scheduled = requestedMode === 'SCHEDULED';
-var mode = scheduled ? 'WORKFLOW' : requestedMode;
+var dependency = requestedMode === 'DEPENDENCY';
+var mode = scheduled || dependency ? 'WORKFLOW' : requestedMode;
 var fullRefresh = P_FULL_REFRESH === true;
 var requestId = String(P_REQUEST_ID || '').trim();
 if (['WORKFLOW', 'JOB_ONLY', 'FROM_JOB'].indexOf(mode) < 0) fail('Choose WORKFLOW, JOB_ONLY or FROM_JOB');
-if (!requestId || requestId.length > 128) fail('A request ID of at most 128 characters is required');
+if (!dependency && (!requestId || requestId.length > 128)) fail('A request ID of at most 128 characters is required');
 if ((mode === 'WORKFLOW' && P_JOB_ID) || (mode !== 'WORKFLOW' && !P_JOB_ID)) fail('Job selection does not match the run mode');
 if (fullRefresh && (scheduled || mode === 'WORKFLOW')) fail('Full refresh requires a selected dbt job');
+if (dependency !== (P_SOURCE_EXECUTION_ID != null)) fail('Dependency requests require a source execution; other requests must omit it');
+if (dependency && !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(String(P_SOURCE_EXECUTION_ID))) fail('Invalid dependency source execution ID');
+var dependencyParents = null, dependencyEligible = false;
 var started = false;
 try {
     execute('BEGIN'); started = true;
@@ -46,32 +51,70 @@ try {
     execute('UPDATE ' + ns + '.DEPENDENCIES SET ALLOW = ALLOW');
     var lock = execute('UPDATE ' + ns + '.WORKFLOW SET TASK_NAME = TASK_NAME WHERE WORKFLOW_ID = ?', [P_WORKFLOW_ID]);
     if (lock.getNumRowsAffected() !== 1) fail('Workflow not found or duplicate workflow ID');
-    var previous = rows('SELECT WORKFLOW_RUN_ID, RUN_MODE, REQUESTED_JOB_ID, STATUS, TASK_FQN, CONFIG_SNAPSHOT FROM ' + log +
+    if (dependency) {
+        // Recheck under the same admission/configuration locks as manual runs.
+        // The dispatcher holds no transaction while calling this procedure.
+        var evaluation = object(rows('CALL ' + app + '.SP_ORCH_EVALUATE_DEPENDENCIES(?)', [P_SOURCE_EXECUTION_ID])[0].SP_ORCH_EVALUATE_DEPENDENCIES);
+        var candidate = evaluation && evaluation.ok && evaluation.evaluated && evaluation.children.filter(function(child) { return child.workflowId === P_WORKFLOW_ID; })[0];
+        if (!candidate || !candidate.rules.length || candidate.rules.some(function(rule) { return !rule.parentExecutionId; })) {
+            execute('COMMIT'); started = false;
+            return {ok: true, eligible: false, workflowId: P_WORKFLOW_ID};
+        }
+        dependencyParents = candidate.rules.map(function(rule) { return [rule.parentWorkflowId, rule.parentExecutionId]; });
+        dependencyParents.sort(function(a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; });
+        requestId = 'DEP:' + rows('SELECT SHA2(?, 256) AS ID', [JSON.stringify(dependencyParents)])[0].ID;
+        dependencyEligible = candidate.eligible === true;
+    }
+    var previous = rows('SELECT WORKFLOW_RUN_ID, RUN_MODE, REQUESTED_JOB_ID, STATUS, TASK_FQN, CONFIG_SNAPSHOT, TRIGGER_SOURCE FROM ' + log +
         ' WHERE WORKFLOW_ID = ? AND JOB_ID IS NULL AND REQUEST_ID = ?', [P_WORKFLOW_ID, requestId]);
     if (previous.length) {
         if (previous.length !== 1 || previous[0].RUN_MODE !== mode || previous[0].REQUESTED_JOB_ID !== (P_JOB_ID || null) ||
-            !!object(previous[0].CONFIG_SNAPSHOT).fullRefresh !== fullRefresh)
+            !!object(previous[0].CONFIG_SNAPSHOT).fullRefresh !== fullRefresh || (dependency && previous[0].TRIGGER_SOURCE !== 'DEPENDENCY'))
             fail('Request ID already belongs to a different request');
         execute('COMMIT'); started = false;
         return {ok: true, runId: previous[0].WORKFLOW_RUN_ID, status: previous[0].STATUS,
                 taskFqn: previous[0].TASK_FQN, reused: true};
     }
+    if (dependency && !dependencyEligible) {
+        execute('COMMIT'); started = false;
+        return {ok: true, eligible: false, workflowId: P_WORKFLOW_ID};
+    }
     var workflow = rows('SELECT * FROM ' + ns + '.WORKFLOW WHERE WORKFLOW_ID = ?', [P_WORKFLOW_ID])[0];
     if (!workflow.IS_ENABLED) fail('Workflow is disabled');
+    var jobExecutionMode = workflow.JOB_EXECUTION_MODE || 'SEQUENTIAL';
+    if (['SEQUENTIAL', 'PARALLEL'].indexOf(jobExecutionMode) < 0) fail('Invalid workflow job execution mode');
     if (scheduled) {
         var scheduler = app + '.TASK_ORCH_WF_' + String(P_WORKFLOW_ID).replace(/-/g, '_').toUpperCase() + '_SCHEDULER';
         var nativeTask = rows("SELECT SYSTEM$TASK_RUNTIME_INFO('CURRENT_TASK_NAME') AS NAME")[0].NAME;
         if (String(nativeTask).replace(/"/g, '').toUpperCase() !== scheduler || !workflow.IS_SCHEDULE_ENABLED)
             fail('Scheduled requests must originate from the enabled workflow scheduler');
-    } else if (!workflow.ALLOW_MANUAL_TRIGGER) fail('Manual execution is disabled for this workflow');
+    } else if (!dependency && !workflow.ALLOW_MANUAL_TRIGGER) fail('Manual execution is disabled for this workflow');
+    if (dependency) {
+        var links = rows('SELECT WORKFLOW_ID, PARENT_ID FROM ' + ns + '.DEPENDENCIES WHERE JOB_ID IS NULL AND PARENT_ID IS NOT NULL');
+        var parents = Object.create(null), visiting = Object.create(null), visited = Object.create(null);
+        links.forEach(function(link) { (parents[link.WORKFLOW_ID] || (parents[link.WORKFLOW_ID] = [])).push(link.PARENT_ID); });
+        function visit(id) {
+            if (visiting[id]) fail('Workflow dependency cycle');
+            if (visited[id]) return;
+            visiting[id] = true;
+            (parents[id] || []).forEach(visit);
+            delete visiting[id]; visited[id] = true;
+        }
+        visit(P_WORKFLOW_ID);
+    }
     var warehouse = workflow.WAREHOUSE_NAME || rows('SELECT CURRENT_WAREHOUSE() AS NAME')[0].NAME;
     if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(warehouse)) fail('Configure a valid workflow warehouse');
     var records = rows('SELECT * FROM ' + ns + '.DEPENDENCIES WHERE WORKFLOW_ID = ?', [P_WORKFLOW_ID]);
     var members = records.filter(function(row) { return row.JOB_ID !== null; });
     if (!members.length) fail('Assign at least one job to this workflow');
     var headers = records.filter(function(row) { return row.JOB_ID === null; });
-    if (headers.length > 1) fail('Duplicate workflow dependency rows');
-    if (headers.length && headers[0].ALLOW === false) fail('Workflow ALLOW is false');
+    var workflowParents = Object.create(null);
+    headers.forEach(function(header) {
+        var key = header.PARENT_ID || '(root)';
+        if (workflowParents[key] || (headers.length > 1 && !header.PARENT_ID)) fail('Duplicate or ambiguous workflow dependency rows');
+        workflowParents[key] = true;
+        if (header.ALLOW === false) fail('Workflow ALLOW is false');
+    });
     var byParent = {}, seen = {}, ordered = [], parent = P_WORKFLOW_ID;
     members.forEach(function(row) {
         if (seen[row.JOB_ID] || !row.PARENT_ID || byParent[row.PARENT_ID]) fail('Job dependencies must form one unambiguous parent chain');
@@ -124,7 +167,7 @@ try {
         }
         if (!skipReason && definition.TIMEOUT_SECONDS !== null && (!Number.isInteger(Number(definition.TIMEOUT_SECONDS)) || Number(definition.TIMEOUT_SECONDS) < 1))
             fail('Invalid job timeout');
-        var initialStatus = skipReason ? 'SKIPPED' : firstRunnable ? 'INITIATING' : 'PENDING';
+        var initialStatus = skipReason ? 'SKIPPED' : (jobExecutionMode === 'PARALLEL' || firstRunnable) ? 'INITIATING' : 'PENDING';
         if (!skipReason) firstRunnable = false;
         executions.push({executionId: executionId, jobId: definition.JOB_ID, position: index + 1,
             definition: definition, dependency: dependency, resolved: resolution, sqlCondition: sqlCondition,
@@ -132,17 +175,19 @@ try {
     });
     if (!executions.some(function(job) { return job.selected; })) fail('No enabled jobs in the selected scope');
     var requestedBy = String(P_REQUESTED_BY || rows('SELECT CURRENT_USER() AS NAME')[0].NAME).slice(0, 256);
-    var snapshot = {workflow: workflow, workflowRule: headers[0] || null, runMode: mode,
+    var snapshot = {workflow: workflow, workflowRule: headers[0] || null, workflowRules: headers, runMode: mode, jobExecutionMode: jobExecutionMode,
         requestedJobId: P_JOB_ID || null, fullRefresh: fullRefresh, selectedJobIds: executions.filter(function(job) { return job.selected; }).map(function(job) { return job.jobId; }),
-        upstreamBypassed: mode !== 'WORKFLOW', downstreamWorkflows: false, taskWarehouse: String(warehouse).toUpperCase(), taskLifecycle: 'TEMPORARY'};
+        upstreamBypassed: mode !== 'WORKFLOW', downstreamWorkflows: mode === 'WORKFLOW',
+        dependency: dependency ? {sourceExecutionId: P_SOURCE_EXECUTION_ID, parents: dependencyParents} : null,
+        taskWarehouse: String(warehouse).toUpperCase(), taskLifecycle: 'TEMPORARY'};
     execute('INSERT INTO ' + log + ' (EXECUTION_ID, WORKFLOW_RUN_ID, WORKFLOW_ID, REQUEST_ID, RUN_MODE, REQUESTED_JOB_ID, TRIGGER_SOURCE, STATUS, REQUESTED_BY, TASK_FQN, CONFIG_SNAPSHOT)' +
         " SELECT ?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, PARSE_JSON(?)",
-        [runId, runId, P_WORKFLOW_ID, requestId, mode, P_JOB_ID || null, scheduled ? 'SCHEDULED' : 'MANUAL', requestedBy, expectedTask, JSON.stringify(snapshot)]);
+        [runId, runId, P_WORKFLOW_ID, requestId, mode, P_JOB_ID || null, scheduled ? 'SCHEDULED' : dependency ? 'DEPENDENCY' : 'MANUAL', requestedBy, expectedTask, JSON.stringify(snapshot)]);
     var parentExecution = runId;
     executions.forEach(function(job) {
         execute('INSERT INTO ' + log + ' (EXECUTION_ID, WORKFLOW_RUN_ID, WORKFLOW_ID, JOB_ID, PARENT_EXECUTION_ID, REQUEST_ID, RUN_MODE, REQUESTED_JOB_ID, TRIGGER_SOURCE, STATUS, JOB_POSITION, REQUESTED_BY, TASK_FQN, CONFIG_SNAPSHOT, ERROR_MESSAGE, ENDED_AT)' +
             " SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, PARSE_JSON(?), ?, IFF(? = 'SKIPPED', SYSDATE(), NULL)",
-            [job.executionId, runId, P_WORKFLOW_ID, job.jobId, job.selected ? parentExecution : runId, requestId, mode, P_JOB_ID || null, scheduled ? 'SCHEDULED' : 'MANUAL',
+            [job.executionId, runId, P_WORKFLOW_ID, job.jobId, jobExecutionMode === 'PARALLEL' ? runId : job.selected ? parentExecution : runId, requestId, mode, P_JOB_ID || null, scheduled ? 'SCHEDULED' : dependency ? 'DEPENDENCY' : 'MANUAL',
              job.initialStatus, job.position, requestedBy, expectedTask, JSON.stringify(job), job.skipReason, job.initialStatus]);
         if (job.selected) parentExecution = job.executionId;
     });
