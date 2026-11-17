@@ -122,7 +122,7 @@ function buildGraph(payload) {
           parentId: workflowId,
           extent: 'parent',
           position: { x: 24, y: 88 + index * (JOB_HEIGHT + JOB_GAP) },
-          data: { label: job.JOB_NAME, command: job.COMMAND_LINE, detail: parent ? `After ${parent.JOB_NAME}` : 'Root job' },
+          data: { label: job.JOB_NAME, command: job.COMMAND_LINE, detail: workflow.JOB_EXECUTION_MODE === 'PARALLEL' ? 'Parallel job' : parent ? `After ${parent.JOB_NAME}` : 'Root job' },
           draggable: false
         })
       })
@@ -130,7 +130,8 @@ function buildGraph(payload) {
     })
   })
 
-  const jobEdges = definitions.filter(row => row.PARENT_JOB_ID).map(row => ({
+  const parallelIds = new Set(workflows.filter(row => row.JOB_EXECUTION_MODE === 'PARALLEL').map(row => String(row.WORKFLOW_ID)))
+  const jobEdges = definitions.filter(row => row.PARENT_JOB_ID && !parallelIds.has(String(row.WORKFLOW_ID))).map(row => ({
     id: `job-${row.WORKFLOW_ID}-${row.PARENT_JOB_ID}-${row.JOB_ID}`,
     source: `${row.WORKFLOW_ID}::${row.PARENT_JOB_ID}`,
     target: `${row.WORKFLOW_ID}::${row.JOB_ID}`,

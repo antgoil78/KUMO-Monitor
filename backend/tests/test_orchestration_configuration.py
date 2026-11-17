@@ -55,22 +55,45 @@ class ConfigurationTests(unittest.TestCase):
         rows[-1].update(success=True, warning=None, error=False, allow=False)
         validated = model.validate_rows(rows, self.catalog)
         self.assertIs(validated[-1]['error'], False)
-        for field in ('success', 'warning', 'error', 'allow'):
+        for field in ('success', 'warning', 'error', 'allow', 'parentMustBeNewer'):
             bad = copy.deepcopy(rows)
             bad[-1][field] = 'false'
             with self.assertRaises(ValueError):
                 model.validate_rows(bad, self.catalog)
 
-    def test_conflicting_legacy_parents_remain_visible_and_require_explicit_resolution(self):
-        self.catalog['records'].append(record('extra', 'w2', parent_workflow='w2'))
+    def test_multiple_parent_rules_keep_independent_freshness_and_targeted_writes(self):
+        self.catalog['workflows'].append(dict(WORKFLOW_ID='w3', WORKFLOW_NAME='WF3'))
+        self.catalog['records'].extend([record('h3', 'w3'), record('extra', 'w2', parent_workflow='w3')])
         rows = model.configuration_rows(self.catalog)
-        header = next(row for row in rows if row['id'] == 'w2')
-        self.assertIn('Multiple workflow parents', header['issue'])
-        self.assertIn('w1', header['parentRules'])
-        with self.assertRaisesRegex(ValueError, 'explicitly'):
-            model.validate_rows(rows, self.catalog)
-        header.update(parentId='w1', trigger='DEP', resolvedConflict=True)
+        links = [row for row in rows if row['workflowId'] == 'w2' and not row['jobId']]
+        self.assertEqual([row['parentId'] for row in links], ['w1', 'w3'])
+        links[1]['parentMustBeNewer'] = True
         model.validate_rows(rows, self.catalog)
+        with patch.object(model, 'read_catalog', return_value=self.catalog), patch.object(model.sf, 'execute_service') as execute:
+            model.save(rows, model.revision(self.catalog))
+        writes = [call for call in execute.call_args_list if call.args[0].startswith('UPDATE') and 'SET "PARENT_ID"' in call.args[0]]
+        self.assertEqual(len(writes), 1)
+        self.assertIn('AND PARENT_ID = %(PARENT_ID)s', writes[0].args[0])
+        self.assertEqual(writes[0].args[1]['PARENT_ID'], 'w3')
+        self.assertTrue(writes[0].args[1]['PARENT_MUST_BE_NEWER'])
+        links[1]['parentId'] = 'w1'
+        with self.assertRaisesRegex(ValueError, 'unique dependency'):
+            model.validate_rows(rows, self.catalog)
+        links[1]['parentId'] = 'w3'
+        next(row for row in rows if row['id'] == 'w3').update(parentId='w2', trigger='DEP')
+        with self.assertRaisesRegex(ValueError, 'cycles'):
+            model.validate_rows(rows, self.catalog)
+
+    def test_native_multiple_parents_are_valid_but_duplicate_edges_are_not(self):
+        source = dict(workflows=self.catalog['workflows'], jobs=self.catalog['jobs'], raw_records=[
+            dict(WORKFLOW_ID='w2', JOB_ID=None, PARENT_ID='w1', PARENT_MUST_BE_NEWER=True),
+            dict(WORKFLOW_ID='w2', JOB_ID=None, PARENT_ID='w2', PARENT_MUST_BE_NEWER=False)])
+        normalized = model.normalize_dependencies(source)
+        self.assertEqual(normalized['invalidWorkflows'], [])
+        self.assertEqual(len(normalized['records']), 2)
+        self.assertTrue(normalized['records'][0]['PARENT_MUST_BE_NEWER'])
+        source['raw_records'].append(source['raw_records'][0])
+        self.assertEqual(model.normalize_dependencies(source)['invalidWorkflows'], ['w2'])
 
     def test_definition_names_cannot_be_overwritten_through_the_grid(self):
         self.rows[0]['name'] = 'Spoofed'

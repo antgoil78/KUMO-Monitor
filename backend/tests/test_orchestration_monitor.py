@@ -28,6 +28,19 @@ def execution(workflow, run, job=None, status='SUCCESS', **fields):
 
 
 class MonitorRowsTests(unittest.TestCase):
+    def test_queued_workflow_explains_actual_start_gate_blockers(self):
+        import json
+        gate = dict(state='WAITING', blockers=[dict(WORKFLOW_ID='one', STATUS='RUNNING', DIRECTION='UPSTREAM')])
+        for encoded in (gate, json.dumps(gate)):
+            row = monitor.build_rows(catalog(), [execution('one', 'parent', status='RUNNING'),
+                execution('two', 'queued', status='QUEUED', START_GATE=encoded)])[1]
+            self.assertEqual(row['run']['waitingFor'], [dict(workflowId='one', name='one', status='RUNNING', direction='UPSTREAM')])
+        running = monitor.run_state(execution('two', 'running', status='RUNNING', START_GATE=gate))
+        self.assertEqual(running['waitingFor'], [])
+        finished = monitor.build_rows(catalog(), [execution('one', 'parent', status='SUCCESS'),
+            execution('two', 'queued', status='QUEUED', START_GATE=gate)])[1]
+        self.assertEqual(finished['run']['waitingFor'], [])
+
     def test_never_run_workflows_keep_real_assignments_without_invented_results(self):
         rows = monitor.build_rows(catalog(), [])
         self.assertEqual([len(row['jobs']) for row in rows], [2, 1])
@@ -159,6 +172,25 @@ class MonitorApiTests(unittest.TestCase):
         for patcher in patches:
             patcher.start(); self.addCleanup(patcher.stop)
         self.client = application.app.test_client()
+
+    def test_metadata_cache_never_caches_execution_status_and_expires(self):
+        metadata = {}
+        empty_catalog = dict(workflows=[], jobs=[], records=[], warnings=[])
+        with patch.object(sf, 'connection_scope'), \
+             patch.object(catalog_store, 'read_catalog', return_value=empty_catalog) as read_catalog, \
+             patch('orchestration_schedules.read_schedules', return_value=({}, [])) as schedules, \
+             patch.object(monitor, 'read_executions', return_value=[]) as executions, \
+             patch.object(monitor.time, 'monotonic', return_value=0) as clock:
+            monitor.payload(metadata)
+            clock.return_value = 29
+            monitor.payload(metadata)
+            self.assertEqual(read_catalog.call_count, 1)
+            self.assertEqual(schedules.call_count, 1)
+            self.assertEqual(executions.call_count, 2)
+            clock.return_value = 31
+            monitor.payload(metadata)
+            self.assertEqual(read_catalog.call_count, 2)
+            self.assertEqual(executions.call_count, 3)
 
     def test_monitor_reads_only_the_four_parallel_tables_in_the_selected_environment(self):
         tables = {'T_ORCHESTRATION_WORKFLOW': 'WORKFLOW', 'T_ORCHESTRATION_JOB': 'JOB',

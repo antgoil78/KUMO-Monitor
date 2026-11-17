@@ -72,3 +72,34 @@ test('old parent runs cannot release this execution; finished objects do not red
   runs.wf2.status = 'SUCCESS'
   assert.equal(evaluateDependency(rows[2], rows, runs).state, 'FINISHED')
 })
+
+test('freshness compares parent completion strictly against child last start and allows a first run', () => {
+  const rows = fresh(), runs = createRunPreview(rows, 'fresh'), target = rows[2]
+  target.parentMustBeNewer = true
+  runs.wf1.status = 'SUCCESS'
+  runs.wf1.endedAt = '2026-11-17T09:00:00'
+  assert.equal(evaluateDependency(target, rows, runs).state, 'READY')
+  runs.wf2.lastStartedAt = '2026-11-17T09:00:00'
+  assert.equal(evaluateDependency(target, rows, runs).state, 'STALE PARENT')
+  runs.wf1.endedAt = '2026-11-17T09:00:01'
+  assert.equal(evaluateDependency(target, rows, runs).state, 'READY')
+  runs.wf1.endedAt = '2026-11-17T08:59:59'
+  target.parentMustBeNewer = false
+  assert.equal(evaluateDependency(target, rows, runs).state, 'READY')
+})
+
+test('every parent rule passes independently and secondary edges participate in cycle checks', () => {
+  const rows = fresh()
+  rows.push({ ...rows[2], id: 'wf2-other-rule', parentId: 'wf3', parentMustBeNewer: true })
+  assert.deepEqual(validateConfiguration(rows), [])
+  const runs = createRunPreview(rows, 'fresh')
+  runs.wf1.status = 'SUCCESS'
+  assert.equal(evaluateDependency(rows[2], rows, runs).state, 'WAITING')
+  runs.wf3.status = 'SUCCESS'
+  assert.equal(evaluateDependency(rows[2], rows, runs).state, 'READY')
+  runs.wf2.lastStartedAt = '2026-11-17T09:00:00'
+  runs.wf3.endedAt = '2026-11-17T08:00:00'
+  assert.equal(evaluateDependency(rows[2], rows, runs).state, 'STALE PARENT')
+  rows[5].parentId = 'wf2'
+  assert.ok(validateConfiguration(rows).some(error => error.message.includes('cycle')))
+})

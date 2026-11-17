@@ -78,13 +78,214 @@ the destination is configured and ready.
 
 The current orchestration administration uses `WORKFLOW`, `JOB` and
 `DEPENDENCIES`. `DEPENDENCIES` stores `WORKFLOW_ID`, nullable `JOB_ID`,
-`PARENT_ID`, `TRIGGER_TYPE`, `SUCCESS`, `WARNING`, `ERROR`, `SQL` and `ALLOW`.
+`PARENT_ID`, `TRIGGER_TYPE`, `SUCCESS`, `WARNING`, `ERROR`, `SQL`, `ALLOW`,
+and `PARENT_MUST_BE_NEWER` (Boolean, default FALSE).
 Workflow rows have no job ID. Assignment rows identify a job within a workflow;
 their parent IDs form the job order, starting with the containing workflow.
 The Workflow page saves order changes in one transaction and rejects stale
 revisions. Reordering preserves existing rules. Unmatched sample references
 are reported and preserved. The page itself does not import older configuration.
 The old `WORKFLOWS` / `WORKFLOW_TASKS` definitions remain available for historical reads. DEV retirement is described below; TST retains its existing engine.
+
+## Workflow dependency dispatch after execution
+
+[`SP_ORCH_EVALUATE_DEPENDENCIES.sql`](ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_EVALUATE_DEPENDENCIES.sql)
+defines `MONITOR_APP.SP_ORCH_EVALUATE_DEPENDENCIES(P_EXECUTION_ID VARCHAR)`.
+The executor calls `SP_ORCH_DISPATCH_DEPENDENCIES` after saving each completed
+job, then again after saving the final workflow status. The dispatcher uses the
+read-only evaluator, admits eligible children, and wakes their native tasks. Native task failure/cancellation recovery evaluates
+the recovered terminal records too. The report is saved under
+`WORKFLOW_EXECUTION_LOG.RESULT.dependencyEvaluation`, preserving command results,
+workflow counters, and execution status. Evaluator failures are recorded as
+`ok: false` reports and warnings; they do not turn successful workloads into
+failures. Skipped/out-of-scope jobs that never enter the executor do not need
+separate checks; the workflow receives its final check.
+
+Eligible children now start automatically. The dispatcher admits all ready
+siblings before waking any of their tasks, so a fast sibling cannot release a
+join using another sibling's old successful run. Admission rechecks eligibility
+under the existing configuration/workflow locks and derives a `DEP:` request ID
+from the sorted complete parent workflow/execution set. Repeated completion
+checks reuse that request, including after it finishes. Accepted work is logged
+as `TRIGGER_SOURCE='DEPENDENCY'`, with every parent execution frozen in
+`CONFIG_SNAPSHOT.dependency.parents`. Failed task wakeups leave durable requests
+for native reconciliation.
+
+Install the four changed DEV procedures with the targeted migration (read-only
+by default):
+
+```bash
+python backend/migrations/apply_dependency_dispatch.py
+python backend/migrations/apply_dependency_dispatch.py --apply
+```
+
+The migration checks DEV routing, idle executions, procedure ownership and
+source drift, and preserves existing execution/recovery grants. It changes only
+`SP_ORCH_REQUEST_RUN`, `SP_ORCH_DISPATCH_DEPENDENCIES`,
+`SP_ORCH_EXECUTE_WORKFLOW`, and `SP_ORCH_RECONCILE`;
+no tasks, schedules, execution records, services, or TST objects are changed by
+deployment. The standard engine installer includes both the evaluator and
+dispatcher. The admission upgrade preserves five/six-argument manual/scheduled
+calls; the optional seventh argument is the source execution for internal
+`DEPENDENCY` requests. Native workload execution remains in the child's own
+task, outside the admission transaction.
+
+The input identifies a completed job or workflow execution in
+`WORKFLOW_EXECUTION_LOG`. Its workflow identifies candidate children through
+`DEPENDENCIES` rows with `JOB_ID IS NULL`, that workflow as `PARENT_ID`, and
+`TRIGGER_TYPE = 'DEP'`. For each candidate, **every workflow dependency row must
+pass**. Several distinct parent workflows are supported. Job assignment rows
+and other children's external/runner triggers are excluded.
+
+Rules use the latest requested run of each parent, with execution ID breaking
+timestamp ties. Ranking includes unfinished and failed runs; an older success
+cannot substitute for the latest run. Missing or unfinished parents wait.
+`SUCCESS`, `WARNING`, and `FAILED`/`ERROR` select the corresponding status flag:
+TRUE accepts, FALSE rejects, NULL imposes no restriction. Skipped/cancelled
+parents cannot release a child. Partial manual executions (`JOB_ONLY` and
+`FROM_JOB`) retain their existing behavior of not releasing downstream workflows.
+
+Each workflow parent rule can require a fresh completion with
+`PARENT_MUST_BE_NEWER=TRUE`. The latest parent must have `ENDED_AT` strictly
+after the child's most recent `STARTED_AT` across workflow execution records.
+Equality or an older completion reports `STALE_PARENT` and prevents dispatch.
+A child that has never started has no freshness cutoff. Queued/cancelled
+requests without a start timestamp do not erase the previous cutoff. Each
+parent rule is checked independently before SQL conditions, including when
+admission rechecks eligibility under its locks.
+
+The dependency editor displays one row per workflow parent rule, preserving
+multiple parents and allowing independent freshness/status/SQL settings.
+Install the column and updated evaluator in DEV (read-only by default):
+
+```bash
+python backend/migrations/apply_dependency_freshness.py
+python backend/migrations/apply_dependency_freshness.py --apply
+```
+
+On first installation this enables freshness for existing workflow DEP rules.
+It leaves job assignments unchanged. Reapplying preserves explicit settings.
+The migration checks DEV routing, idle runs, ownership and evaluator drift;
+it replaces only the evaluator with COPY GRANTS and adds one column. Saved
+DDL includes this column for new environments.
+
+Workflow dependency admission also waits for active **parents and grandparents**.
+This check is always applied and stops at those two levels. It checks all
+workflow-root executions in `PENDING`, `INITIATING`, `QUEUED`, `CLAIMED` or
+`RUNNING`, including an older active run hidden by a newer completion. Job
+execution rows do not participate. Status/freshness/SQL conditions continue to
+apply to the latest direct parent run; grandparent status is checked only for
+activity. Decisions report `PARENT_BUSY` or `GRANDPARENT_BUSY`, with `parentBusy`
+and `busyGrandparentCount` on each rule. SQL conditions wait for these checks.
+
+Completion events re-evaluate direct children and grandchildren. The evaluator
+orders affected parents before their children so the existing enqueue-before-
+wakeup dispatcher and locked admission recheck see newly queued parent runs.
+Partial source runs retain their existing no-downstream-release behavior.
+Install only the updated DEV evaluator (read-only by default):
+
+```bash
+python backend/migrations/apply_dependency_activity.py
+python backend/migrations/apply_dependency_activity.py --apply
+```
+
+The migration checks DEV routing, idle runs, evaluator ownership and source
+drift, and replaces only that procedure with COPY GRANTS. No configuration
+rows, execution records, tasks or services are changed by deployment.
+
+The executor is now the single owner of the start decision for **all triggers
+and run modes**, including manual, scheduled, dependency, partial and recovery
+runs. `SP_ORCH_START_RUN` only prepares/wakes the task and never reserves or
+claims an execution. The normal path is `QUEUED -> RUNNING -> terminal`;
+`CLAIMED` is accepted only for compatibility with older records.
+
+The executor opens a short transaction, acquires the same `DEPENDENCIES`
+UPDATE lock as admission/configuration writers, then the workflow lock. It
+checks FIFO/same-workflow activity, checks related runs, writes RUNNING and
+commits. Workload SQL/dbt executes after the commit. Retried task invocations
+must pass the same gate and cannot execute the same run twice. Eligibility and
+the start gate share `MONITOR_APP.V_ORCH_WORKFLOW_RELATIONS`, which contains only
+workflow parents/grandparents and excludes job sequencing.
+
+A child waits for any active parent/grandparent, including queued upstream
+work. In the reverse direction, a parent/grandparent waits for RUNNING
+protected descendants; queued descendants yield priority to upstream work.
+This avoids a queue deadlock when both sides are waiting to start. Checks stop
+at two levels in either direction; siblings and unrelated workflows can run
+in parallel. The lock is held only through the RUNNING transition, not for the
+workload duration. A blocked root stays QUEUED with its reason and blocking
+execution IDs under `RESULT.startGate`. Existing maintenance retries queued
+work; admission still handles latest-parent status/freshness/SQL rules.
+
+Install the shared relation view and three updated DEV procedures (read-only
+by default):
+
+```bash
+python backend/migrations/apply_atomic_workflow_start.py
+python backend/migrations/apply_atomic_workflow_start.py --apply
+```
+
+The migration checks DEV routing, idle runs, ownership and known source hashes.
+It grants view SELECT to existing procedure usage roles and preserves procedure
+grants with COPY GRANTS. It changes only the shared view, evaluator, launcher
+and executor. Standard environment installers use the same view/procedures.
+No schema-wide DDL export, app image publication or service update is needed.
+
+Offline gate tests execute the saved SQL/view and procedure bodies:
+`python3 -m unittest discover -s backend/tests -p 'test_atomic_workflow_start.py'`.
+The opt-in live check is `python backend/tests/live_atomic_workflow_start.py --run`.
+It uses isolated temporary fixture definitions and real native tasks to verify
+both grandparent/child directions, queued priority, waiting diagnostics and
+completed-run replay. Successful test fixtures/logs/tasks are removed; active
+failed-test runs are retained for diagnosis. WF1-WF10 are not modified.
+
+The DEV test graph can be extended to ten workflows with observable delays:
+
+```bash
+python backend/migrations/seed_dependency_test_workflows.py
+python backend/migrations/seed_dependency_test_workflows.py --apply
+```
+
+The graph is `WF1 -> (WF2, WF3) -> WF4 -> (WF5, WF6) -> WF7 -> (WF8, WF9) -> WF10`.
+Each join requires both parents. WF1/WF4/WF7/WF10 wait 20 seconds; WF2/WF5/WF8
+wait 30 seconds; WF3/WF6/WF9 wait 60 seconds, using `SYSTEM$WAIT` in harmless SQL
+jobs with 180-second statement timeouts. Native task and hook overhead adds to
+the total elapsed time. Setup preserves existing rule settings, rejects name,
+identity and graph conflicts, and changes only fixture configuration while
+those workflows are idle. It starts no executions or schedules. Fixture
+definitions share the `DEPENDENCY TEST` group; start WF1 manually to observe
+the full chain.
+
+Disabled children, ALLOW=false, active child requests, unknown references,
+self-dependencies, duplicate parent rules, and mixed trigger configurations
+prevent eligibility. After every parent/status rule passes, each configured
+SQL condition is resolved through the environment command resolver and executed
+as a SELECT subquery. It must return exactly one non-NULL Boolean cell; FALSE
+skips and errors prevent eligibility. In these conditions, `[run_id]` identifies
+that rule's parent workflow execution; no child execution exists yet.
+
+The returned variant contains `evaluated`, `children[].eligible`, and a decision
+per rule with its selected parent execution ID. It is an observation, not a
+reservation: direct evaluator calls may report the same child READY. The
+dispatcher returns `dispatches` and per-child errors alongside that report.
+Workflow dependencies wait for workflow completion: job reports can say WAITING
+while the final workflow report says READY. Admission supports multiple distinct
+parent rows and rejects duplicate parents or ancestor cycles. The editor retains
+WF4's two rules and saves changes to each parent independently.
+
+Offline checks execute the actual relational SQL against fixtures and the
+procedure body through the Snowflake JavaScript API test harness:
+
+```bash
+python3 -m unittest discover -s backend/tests -p 'test_workflow_dependency_eligibility.py'
+python3 -m unittest discover -s backend/tests -p 'test_post_execution_dependencies.py'
+python3 -m unittest discover -s backend/tests -p 'test_dependency_dispatch.py'
+python3 -m unittest discover -s backend/tests -p 'test_dependency_evaluation_migration.py'
+```
+
+The evaluator was checked in Snowflake with read-only CTE fixtures and against
+WF1's real completed workflow/job executions. Integration checks cover normal
+completion, skipped/failed jobs, evaluator failures, and native task recovery.
 
 ## Parallel orchestration engine
 
@@ -107,6 +308,8 @@ Credentials and table contents are not saved with the definitions.
 | Object | Responsibility |
 | --- | --- |
 | `MONITOR_META.WORKFLOW_EXECUTION_LOG` | Durable requests and workflow/job results |
+| `MONITOR_APP.SP_ORCH_EVALUATE_DEPENDENCIES` | Report child workflow eligibility after terminal execution updates |
+| `MONITOR_APP.SP_ORCH_DISPATCH_DEPENDENCIES` | Admit and start eligible children once per parent execution set |
 | `MONITOR_APP.SP_ORCH_REQUEST_RUN` | Validate scope and atomically snapshot enabled jobs and resolved commands |
 | `MONITOR_APP.SP_ORCH_START_RUN` | Serialize workflow requests and create/start a task for one recorded run |
 | `MONITOR_APP.SP_ORCH_EXECUTE_WORKFLOW` | Execute only that run's selected jobs in order |
@@ -185,8 +388,9 @@ keyed by the job execution ID passed to dbt as `runId`. Missing telemetry is sho
 as waiting for progress. Monitoring GET does not
 start tasks or reconcile state; explicit Run and Refresh status actions use POST.
 
-The new engine does not automatically dispatch downstream workflows or
-write existing workflow history/queues, or reuse the old dispatcher,
+The new engine automatically dispatches eligible downstream workflows through
+its own admission and task lifecycle. It does not write existing workflow
+history/queues or reuse the old dispatcher,
 completion procedures, or locks. Known legacy engine/cleanup references in selected
 commands are rejected. The retired cleanup call was removed from the migrated maintenance job. Business
 workload tables, loaders, and dbt targets remain shared resources.
@@ -553,9 +757,9 @@ Workflow; the legacy navigation group has been removed.
 The old temporary-task cleanup invocation is removed from the new maintenance
 job; new temporary tasks are already handled by `TASK_ORCH_MAINTENANCE`.
 
-No business workloads or new schedules are activated by retirement. Automatic
-downstream workflow dispatch and notification parity still need integration
-and testing in the new engine. Schedule controls are now available in the Monitor. Source changes reach
+No business workloads or new schedules are activated by retirement. Downstream
+workflow dispatch is now supported in DEV; notification parity still needs
+integration and testing in the new engine. Schedule controls are now available in the Monitor. Source changes reach
 SPCS through the normal Git/image release process; this migration does not deploy
 an image or change a service.
 

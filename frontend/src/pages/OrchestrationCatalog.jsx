@@ -83,6 +83,7 @@ export function WorkflowEditor({ workflow, groups, jobs, assignments, saving, er
   const [form, setForm] = useState({
     workflowName: workflow?.WORKFLOW_NAME || '',
     workflowGroup: initialGroup,
+    jobExecutionMode: workflow?.JOB_EXECUTION_MODE || 'SEQUENTIAL',
     description: workflow?.DESCRIPTION || '',
     schedule: workflow?.SCHEDULE || '',
     scheduleTimezone: workflow?.SCHEDULE_TIMEZONE || 'UTC',
@@ -130,6 +131,7 @@ export function WorkflowEditor({ workflow, groups, jobs, assignments, saving, er
       </div>
       {groupSelection === '__new_group__' && <div className="form-field orchestration-new-group"><label htmlFor="new-workflow-group">New workflow group</label><input id="new-workflow-group" required autoFocus value={form.workflowGroup} onChange={event => update('workflowGroup', event.target.value)} placeholder="Enter a new group name" /></div>}
       <div className="form-field"><label>Description</label><textarea rows="2" value={form.description} onChange={event => update('description', event.target.value)} /></div>
+      <div className="form-field"><label htmlFor="workflow-job-execution">Job execution</label><select id="workflow-job-execution" value={form.jobExecutionMode} onChange={event => update('jobExecutionMode', event.target.value)}><option value="SEQUENTIAL">Sequential — one job at a time</option><option value="PARALLEL">Parallel — all jobs at once</option></select><small className="form-help">Applies to the whole workflow. Parallel jobs run independently; the workflow waits for all selected jobs to finish.</small></div>
       <div className="form-grid two">
         <div className="form-field"><label>Schedule cron</label><input placeholder="0 6 * * 1-5" value={form.schedule} onChange={event => update('schedule', event.target.value)} /></div>
         <div className="form-field"><label>Schedule timezone</label><input value={form.scheduleTimezone} onChange={event => update('scheduleTimezone', event.target.value)} /></div>

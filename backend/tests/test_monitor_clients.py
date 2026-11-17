@@ -103,7 +103,7 @@ class ReaderDemandTests(unittest.TestCase):
         broker = RealtimeEventBroker(); cache = cache_module.OrchestrationCache()
         entered = threading.Event(); release = threading.Event(); refreshed = threading.Event()
         payload = dict(ok=True,rows=[],warnings=[],generatedAt='2026-11-10T12:00:00Z')
-        def load():
+        def load(**kwargs):
             entered.set(); release.wait(2); refreshed.set()
             return payload
         def demand(count):
@@ -111,6 +111,7 @@ class ReaderDemandTests(unittest.TestCase):
             else: cache.stop()
         broker.set_client_count_callback(demand)
         with patch.object(config,'USE_MOCK',False),patch.object(cache_module.sf,'is_configured',return_value=True), \
+             patch.object(cache_module.sf,'connection_scope'), \
              patch.object(cache_module,'realtime_broker',broker),patch.object(monitor,'payload',side_effect=load) as read:
             clients = [broker.subscribe() for _ in range(50)]
             self.assertTrue(entered.wait(1)); worker = cache._thread

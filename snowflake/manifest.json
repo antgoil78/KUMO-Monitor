@@ -1,5 +1,5 @@
 {
-  "exported_at": "2026-11-10T13:27:37+01:00",
+  "exported_at": "2026-11-12T11:15:25+01:00",
   "source": {
     "ACCOUNT_NAME": "OV24823",
     "ROLE_NAME": "KUMO_ADMIN"
@@ -9,10 +9,11 @@
     "KUMO_DEV.MONITOR_META"
   ],
   "counts": {
-    "PROCEDURE": 23,
+    "PROCEDURE": 26,
     "STREAM": 1,
-    "TABLE": 23,
-    "TASK": 2
+    "TABLE": 24,
+    "TASK": 2,
+    "VIEW": 1
   },
   "objects": [
     {
@@ -20,6 +21,24 @@
       "name": "KUMO_DEV.MONITOR_APP.SP_LOAD_RAW_LIM_INCREMENTAL_PERSIST",
       "file": "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_LOAD_RAW_LIM_INCREMENTAL_PERSIST__a0a986b618dc.sql",
       "signature": "(VARCHAR)"
+    },
+    {
+      "type": "PROCEDURE",
+      "name": "KUMO_DEV.MONITOR_APP.SP_ORCH_DISPATCH_DEPENDENCIES",
+      "file": "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_DISPATCH_DEPENDENCIES.sql",
+      "signature": "(VARCHAR)"
+    },
+    {
+      "type": "PROCEDURE",
+      "name": "KUMO_DEV.MONITOR_APP.SP_ORCH_EVALUATE_DEPENDENCIES",
+      "file": "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_EVALUATE_DEPENDENCIES.sql",
+      "signature": "(VARCHAR)"
+    },
+    {
+      "type": "PROCEDURE",
+      "name": "KUMO_DEV.MONITOR_APP.SP_ORCH_EXECUTE_JOB",
+      "file": "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_EXECUTE_JOB.sql",
+      "signature": "(VARCHAR, VARCHAR)"
     },
     {
       "type": "PROCEDURE",
@@ -37,7 +56,7 @@
       "type": "PROCEDURE",
       "name": "KUMO_DEV.MONITOR_APP.SP_ORCH_REQUEST_RUN",
       "file": "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_REQUEST_RUN.sql",
-      "signature": "(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, BOOLEAN)"
+      "signature": "(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, BOOLEAN, VARCHAR)"
     },
     {
       "type": "PROCEDURE",
@@ -108,8 +127,8 @@
     {
       "type": "PROCEDURE",
       "name": "KUMO_DEV.MONITOR_APP.X_SP_RUN_WORKFLOW",
-      "file": "ddl/KUMO_DEV/MONITOR_APP/procedures/X_SP_RUN_WORKFLOW__a0a986b618dc.sql",
-      "signature": "(VARCHAR)"
+      "file": "ddl/KUMO_DEV/MONITOR_APP/procedures/X_SP_RUN_WORKFLOW__c203e74ecf77.sql",
+      "signature": "(VARCHAR, VARCHAR)"
     },
     {
       "type": "PROCEDURE",
@@ -126,8 +145,8 @@
     {
       "type": "PROCEDURE",
       "name": "KUMO_DEV.MONITOR_APP.X_SP_WORKFLOW_DISPATCH",
-      "file": "ddl/KUMO_DEV/MONITOR_APP/procedures/X_SP_WORKFLOW_DISPATCH__a0a986b618dc.sql",
-      "signature": "(VARCHAR)"
+      "file": "ddl/KUMO_DEV/MONITOR_APP/procedures/X_SP_WORKFLOW_DISPATCH__c203e74ecf77.sql",
+      "signature": "(VARCHAR, VARCHAR)"
     },
     {
       "type": "PROCEDURE",
@@ -172,6 +191,11 @@
       "type": "TABLE",
       "name": "KUMO_DEV.MONITOR_META.APP_WORKFLOW_RUN_LOCKS",
       "file": "ddl/KUMO_DEV/MONITOR_META/tables/APP_WORKFLOW_RUN_LOCKS.sql"
+    },
+    {
+      "type": "TABLE",
+      "name": "KUMO_DEV.MONITOR_META.DEPENDENCIES",
+      "file": "ddl/KUMO_DEV/MONITOR_META/tables/DEPENDENCIES.sql"
     },
     {
       "type": "TABLE",
@@ -284,6 +308,11 @@
       "name": "KUMO_DEV.MONITOR_META.SP_GET_ENVIRONMENT",
       "file": "ddl/KUMO_DEV/MONITOR_META/procedures/SP_GET_ENVIRONMENT__2e38e77b22c3.sql",
       "signature": "()"
+    },
+    {
+      "type": "VIEW",
+      "name": "KUMO_DEV.MONITOR_APP.V_ORCH_WORKFLOW_RELATIONS",
+      "file": "ddl/KUMO_DEV/MONITOR_APP/views/V_ORCH_WORKFLOW_RELATIONS.sql"
     }
   ],
   "restore_order": [
@@ -292,6 +321,7 @@
     "ddl/KUMO_DEV/MONITOR_META/tables/APP_USER_INTERACTIONS.sql",
     "ddl/KUMO_DEV/MONITOR_META/tables/APP_USER_SESSIONS.sql",
     "ddl/KUMO_DEV/MONITOR_META/tables/APP_WORKFLOW_RUN_LOCKS.sql",
+    "ddl/KUMO_DEV/MONITOR_META/tables/DEPENDENCIES.sql",
     "ddl/KUMO_DEV/MONITOR_META/tables/EMAIL_GROUPS.sql",
     "ddl/KUMO_DEV/MONITOR_META/tables/JOB.sql",
     "ddl/KUMO_DEV/MONITOR_META/tables/RAW_LIM_CONTROL_ARCHIVE.sql",
@@ -312,7 +342,11 @@
     "ddl/KUMO_DEV/MONITOR_META/tables/WORKFLOW_JOB.sql",
     "ddl/KUMO_DEV/MONITOR_META/tables/WORKFLOW_TASKS.sql",
     "ddl/KUMO_DEV/MONITOR_META/streams/X_WORKFLOW_EXECUTION_QUEUE_STREAM.sql",
+    "ddl/KUMO_DEV/MONITOR_APP/views/V_ORCH_WORKFLOW_RELATIONS.sql",
     "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_LOAD_RAW_LIM_INCREMENTAL_PERSIST__a0a986b618dc.sql",
+    "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_DISPATCH_DEPENDENCIES.sql",
+    "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_EVALUATE_DEPENDENCIES.sql",
+    "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_EXECUTE_JOB.sql",
     "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_EXECUTE_WORKFLOW.sql",
     "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_RECONCILE.sql",
     "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_REQUEST_RUN.sql",

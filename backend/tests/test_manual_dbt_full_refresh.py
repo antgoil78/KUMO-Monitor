@@ -13,25 +13,26 @@ import apply_manual_dbt_full_refresh as migration
 
 NODE = r"""
 const input = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-const workflow = {WORKFLOW_ID:'wf', IS_ENABLED:true, ALLOW_MANUAL_TRIGGER:true, WAREHOUSE_NAME:'WH'};
+const workflow = {WORKFLOW_ID:'wf', IS_ENABLED:true, ALLOW_MANUAL_TRIGGER:true, WAREHOUSE_NAME:'WH', JOB_EXECUTION_MODE:input.jobExecutionMode};
 const definitions = [
   {JOB_ID:'first', JOB_NAME:'First', JOB_TYPE:input.jobType || 'DBT', DBT_COMMAND:'dbt build --select first', IS_ENABLED:true,TIMEOUT_SECONDS:null},
   {JOB_ID:'later', JOB_NAME:'Later', JOB_TYPE:'DBT', DBT_COMMAND:'dbt run --select later', IS_ENABLED:true,TIMEOUT_SECONDS:null}
 ];
 const dependencies = [{JOB_ID:null,ALLOW:true}, {JOB_ID:'first',PARENT_ID:'wf',ALLOW:true}, {JOB_ID:'later',PARENT_ID:'first',ALLOW:true}];
-const resolved = [], snapshots = [];
+const resolved = [], snapshots = [], jobParents = [];
+let nextId = 0;
 function query(sql, binds) {
   if (sql.includes('SP_GET_ENVIRONMENT')) return [{SP_GET_ENVIRONMENT:{DATABASE:'KUMO_DEV',META_SCHEMA:'MONITOR_META',MONITOR_APP_SCHEMA:'MONITOR_APP'}}];
   if (sql.startsWith('SELECT WORKFLOW_RUN_ID')) return input.previous ? [input.previous] : [];
   if (sql.startsWith('SELECT * FROM') && sql.includes('.WORKFLOW WHERE')) return [workflow];
   if (sql.startsWith('SELECT * FROM') && sql.includes('.DEPENDENCIES')) return dependencies;
   if (sql.startsWith('SELECT * FROM') && sql.includes('.JOB WHERE')) return definitions.filter(job=>job.JOB_ID===binds[0]);
-  if (sql.includes('UUID_STRING')) return [{ID:'id-'+snapshots.length}];
+  if (sql.includes('UUID_STRING')) return [{ID:'id-'+nextId++}];
   if (sql.includes('SP_RESOLVE_WORKFLOW_COMMAND')) {
     const definition=JSON.parse(binds[0]); resolved.push(definition);
     return [{SP_RESOLVE_WORKFLOW_COMMAND:{ok:true,execSql:'SELECT 1',fullRefresh:definition.fullRefresh}}];
   }
-  if (sql.startsWith('INSERT INTO')) {snapshots.push(JSON.parse(binds[binds.length===10 ? 9 : 13])); return [];}
+  if (sql.startsWith('INSERT INTO')) {snapshots.push(JSON.parse(binds[binds.length===10 ? 9 : 13])); if(binds.length!==10)jobParents.push(binds[4]); return [];}
   if (['BEGIN','COMMIT','ROLLBACK'].includes(sql) || sql.startsWith('UPDATE')) return [];
   throw Error('Unexpected query: '+sql);
 }
@@ -41,9 +42,9 @@ const snowflake = {createStatement({sqlText,binds=[]}) {
     return {next(){return ++index<values.length},getColumnValue(n){return values[index][keys[n-1]]}}},
     getColumnCount(){return keys.length},getColumnName(n){return keys[n-1]},getNumRowsAffected(){return 1}};
 }};
-const run = new Function('snowflake','P_WORKFLOW_ID','P_RUN_MODE','P_JOB_ID','P_REQUEST_ID','P_REQUESTED_BY','P_FULL_REFRESH',input.source);
+const run = new Function('snowflake','P_WORKFLOW_ID','P_RUN_MODE','P_JOB_ID','P_REQUEST_ID','P_REQUESTED_BY','P_FULL_REFRESH','P_SOURCE_EXECUTION_ID',input.source);
 const result=run(snowflake,'wf',input.mode||'FROM_JOB',input.mode==='WORKFLOW'?null:'first','request','actor',input.fullRefresh??true);
-process.stdout.write(JSON.stringify({result,resolved,snapshots,definitions}));
+process.stdout.write(JSON.stringify({result,resolved,snapshots,definitions,jobParents}));
 """
 
 
@@ -60,6 +61,24 @@ class AdmissionTests(unittest.TestCase):
         self.assertTrue(result['snapshots'][0]['fullRefresh'])
         self.assertEqual(result['definitions'][0]['DBT_COMMAND'], 'dbt build --select first')
         self.assertNotIn('fullRefresh', result['definitions'][0])
+
+    def test_parallel_mode_is_frozen_and_all_selected_jobs_share_workflow_parent(self):
+        for mode in ('WORKFLOW', 'FROM_JOB', 'JOB_ONLY'):
+            result = self.admission(mode=mode, fullRefresh=False, jobExecutionMode='PARALLEL')
+            self.assertTrue(result['result']['ok'], result)
+            root, *jobs = result['snapshots']
+            self.assertEqual(root['jobExecutionMode'], 'PARALLEL')
+            self.assertTrue(all(parent == result['result']['runId'] for parent in result['jobParents']))
+            self.assertTrue(all(job['initialStatus'] == 'INITIATING' for job in jobs if job['selected']))
+        default = self.admission(mode='WORKFLOW', fullRefresh=False)
+        self.assertEqual(default['snapshots'][0]['jobExecutionMode'], 'SEQUENTIAL')
+        self.assertNotEqual(default['jobParents'][0], default['jobParents'][1])
+
+    def test_unknown_job_execution_modes_are_rejected_before_creating_a_run(self):
+        result = self.admission(jobExecutionMode='MIXED')
+        self.assertFalse(result['result']['ok'])
+        self.assertIn('execution mode', result['result']['error'])
+        self.assertEqual(result['snapshots'], [])
 
     def test_job_only_excludes_later_jobs_and_default_workflow_runs_stay_incremental(self):
         only = self.admission(mode='JOB_ONLY')

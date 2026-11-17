@@ -23,7 +23,7 @@ class SharedMonitorTests(unittest.TestCase):
              patch.object(cache_module.realtime_broker, 'publish') as publish:
             self.cache.refresh()
             for _ in range(5): self.cache.get()
-        read.assert_called_once()
+        read.assert_called_once_with(metadata=self.cache._metadata)
         self.assertEqual(publish.call_args.args[0], 'orchestration_update')
         self.assertEqual(publish.call_args.args[1]['rows'][0]['jobs'][0]['progress']['models']['completed'], 2)
         self.assertEqual(self.cache.get()['revision'], 1)
@@ -33,6 +33,19 @@ class SharedMonitorTests(unittest.TestCase):
             self.cache.refresh(); result = self.cache.refresh()
         self.assertEqual(result['rows'], self.payload['rows'])
         self.assertIn('unavailable', result['error'])
+
+    def test_active_execution_and_submission_poll_faster_then_return_to_idle_rate(self):
+        self.cache.set_refresh_seconds(10)
+        with patch.object(monitor, 'payload', return_value=self.payload): self.cache.refresh()
+        self.assertEqual(self.cache.get()['refreshSeconds'], 10)
+        self.payload['rows'][0]['run']['status'] = 'RUNNING'
+        self.assertEqual(self.cache.get()['refreshSeconds'], 2)
+        self.payload['rows'][0]['run']['status'] = 'SUCCESS'
+        self.assertEqual(self.cache.get()['refreshSeconds'], 10)
+        self.cache.reserve('wf', dict(requestId='request', mode='WORKFLOW'), 'ACTOR')
+        self.assertEqual(self.cache.get()['refreshSeconds'], 2)
+        self.cache.update_submission('wf', 'request', status='FAILED')
+        self.assertEqual(self.cache.get()['refreshSeconds'], 10)
 
     def test_submission_disables_run_until_its_durable_log_snapshot_is_visible(self):
         request = dict(requestId='request', mode='WORKFLOW', jobId=None)
@@ -53,6 +66,48 @@ class SharedMonitorTests(unittest.TestCase):
         self.cache.update_submission('wf','request',queryId='native-query',status='INITIATING')
         for body, actor in [(dict(request,mode='JOB_ONLY',jobId='job'),'ACTOR'),(request,'SPOOFED')]:
             with self.assertRaises(cache_module.SubmissionConflict): self.cache.reserve('wf',body,actor)
+
+    def test_manual_refresh_invalidates_metadata_but_submission_updates_keep_it(self):
+        self.cache._metadata.update(catalog='cached')
+        with patch.object(monitor, 'payload', return_value=self.payload):
+            self.cache.refresh_async(metadata=False)
+            self.cache.refresh()
+            self.assertEqual(self.cache._metadata, dict(catalog='cached'))
+            self.cache.refresh_async()
+            self.cache.refresh()
+            self.assertEqual(self.cache._metadata, {})
+
+    def test_worker_reuses_one_connection_and_closes_it_when_stopped(self):
+        self.cache._enabled = True
+        waits = []
+        def wait(seconds):
+            waits.append(seconds)
+            if len(waits) == 3:
+                self.cache.stop()
+        with patch.object(sf, 'connection_scope') as scope, \
+             patch.object(monitor, 'payload', return_value=self.payload) as read, \
+             patch.object(self.cache._wake, 'wait', side_effect=wait):
+            self.cache._loop()
+        self.assertEqual(read.call_count, 3)
+        scope.assert_called_once_with(force_service=True)
+        scope.return_value.__exit__.assert_called_once()
+        self.assertFalse(self.cache.diagnostics()['enabled'])
+
+    def test_failed_poll_preserves_rows_then_reconnects_and_recovers(self):
+        self.cache._enabled = True
+        waits = []
+        def wait(seconds):
+            waits.append(seconds)
+            if len(waits) == 3:
+                self.cache.stop()
+        with patch.object(sf, 'connection_scope') as scope, \
+             patch.object(monitor, 'payload', side_effect=[self.payload, RuntimeError('connection lost'), self.payload]), \
+             patch.object(self.cache._wake, 'wait', side_effect=wait):
+            self.cache._loop()
+        self.assertEqual(scope.call_count, 2)
+        self.assertEqual(scope.return_value.__exit__.call_count, 2)
+        self.assertIsNone(self.cache.get()['error'])
+        self.assertEqual(self.cache.get()['rows'], self.payload['rows'])
 
 
 class AsyncServiceQueryTests(unittest.TestCase):

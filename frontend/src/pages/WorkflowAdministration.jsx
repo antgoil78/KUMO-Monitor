@@ -49,7 +49,8 @@ export default function WorkflowAdministration({ onNavigate, workflowId = '', wo
   const [dropTarget, setDropTarget] = useState(null)
   const [engine, setEngine] = useState(null)
   const selectedLiveWorkflow = dialog?.kind === 'run' ? live?.rows?.find(row => row.WORKFLOW_ID === dialog.workflow.WORKFLOW_ID) : null
-  const runWorkflow = selectedLiveWorkflow ? applySubmission(selectedLiveWorkflow, live?.submissions) : dialog?.workflow
+  const runWorkflow = selectedLiveWorkflow ? { ...applySubmission(selectedLiveWorkflow, live?.submissions),
+    JOB_EXECUTION_MODE: dialog.workflow.JOB_EXECUTION_MODE } : dialog?.workflow
   const dirty = Object.keys(drafts).length > 0
   const busy = loading || saving
   const workflows = catalog?.workflows || []
@@ -182,12 +183,12 @@ export default function WorkflowAdministration({ onNavigate, workflowId = '', wo
                 if (!job) return null
                 const savedAssignment = assignments.find(row => row.WORKFLOW_ID === id && row.JOB_ID === jobId)
                 const isEntry = drafts[id] ? position === 0 : savedAssignment?.PARENT_WORKFLOW_ID === id
-                const parentName = drafts[id]
+                const parentName = workflow.JOB_EXECUTION_MODE === 'PARALLEL' ? workflow.WORKFLOW_NAME : drafts[id]
                   ? (position === 0 ? workflow.WORKFLOW_NAME : jobById.get(ids[position - 1])?.JOB_NAME)
                   : (isEntry ? workflow.WORKFLOW_NAME : jobById.get(savedAssignment?.PARENT_JOB_ID)?.JOB_NAME || 'Unknown parent')
                 return <tr key={jobId} className={dropTarget === `${id}:${jobId}` ? 'wa-drop-target' : ''} onDragOver={event => { if (!locked && dragging?.workflowId === id) { event.preventDefault(); setDropTarget(`${id}:${jobId}`) } }} onDrop={event => drop(event, id, position)}>
                   <th scope="row"><div className="om-job-name"><button className="wa-drag" type="button" draggable={!locked} disabled={locked} aria-label={`Drag ${job.JOB_NAME} to reorder`} title="Drag to reorder, or use the move buttons" onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', jobId); setDragging({ workflowId: id, jobId }) }} onDragEnd={() => { setDragging(null); setDropTarget(null) }}>⠿</button><span className="om-sequence">{String(position + 1).padStart(2, '0')}</span><div><strong>{job.JOB_NAME}</strong>{job.DESCRIPTION && <small>{job.DESCRIPTION}</small>}</div></div></th>
-                  <td><span className="om-kind">{job.JOB_TYPE}</span><small>{job.JOB_LAYER || 'GENERAL'}</small></td><td><State enabled={job.IS_ENABLED} /></td><td><span className="wa-command" title={job.SQL_COMMAND || job.DBT_COMMAND || job.COMMAND_LINE || ''}>{job.SQL_COMMAND || job.DBT_COMMAND || job.COMMAND_LINE || '—'}</span></td><td><span className="om-dependency">{parentName}</span><small>{isEntry ? 'Workflow · First job' : 'Job parent'}</small></td>
+                  <td><span className="om-kind">{job.JOB_TYPE}</span><small>{job.JOB_LAYER || 'GENERAL'}</small></td><td><State enabled={job.IS_ENABLED} /></td><td><span className="wa-command" title={job.SQL_COMMAND || job.DBT_COMMAND || job.COMMAND_LINE || ''}>{job.SQL_COMMAND || job.DBT_COMMAND || job.COMMAND_LINE || '—'}</span></td><td><span className="om-dependency">{parentName}</span><small>{workflow.JOB_EXECUTION_MODE === 'PARALLEL' ? 'Workflow · Parallel job' : isEntry ? 'Workflow · First job' : 'Job parent'}</small></td>
                   <td><div className="wa-order"><button className="button" type="button" disabled={locked || position === 0} aria-label={`Move ${job.JOB_NAME} up in ${workflow.WORKFLOW_NAME}`} onClick={() => move(id, jobId, position - 1)}>↑</button><button className="button" type="button" disabled={locked || position === ids.length - 1} aria-label={`Move ${job.JOB_NAME} down in ${workflow.WORKFLOW_NAME}`} onClick={() => move(id, jobId, position + 1)}>↓</button></div></td>
                   <td><div className="wa-actions">{job.JOB_TYPE === 'DBT' && <button className="button" type="button" disabled={busy || dirty} aria-label={`DAG Preview for ${job.JOB_NAME}`} onClick={() => open({ kind: 'preview', record: job })}>DAG Preview</button>}<button className="button" type="button" disabled={busy || dirty} aria-label={`Edit job ${job.JOB_NAME}`} onClick={() => open({ kind: 'job', record: job })}>Edit</button><button className="button" type="button" disabled={busy || dirty || locked || !!runUnavailable || !workflow.IS_ENABLED || !job.IS_ENABLED} title={runUnavailable} aria-label={`Run ${job.JOB_NAME} in ${workflow.WORKFLOW_NAME}`} onClick={() => open({ kind: 'run', workflow, jobId })}>Run…</button><button className="button wa-remove" type="button" disabled={locked} aria-label={`Remove ${job.JOB_NAME} from ${workflow.WORKFLOW_NAME}`} title="Remove assignment; keep the reusable job" onClick={() => changeOrder(id, ids.filter(value => value !== jobId))}>×</button></div></td>
                 </tr>

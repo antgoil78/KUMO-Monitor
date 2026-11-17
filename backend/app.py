@@ -1363,7 +1363,7 @@ def bind_request_context():
 def log_response(response):
     if (request.path.startswith('/api/orchestration/') and request.method in ('POST', 'PUT', 'PATCH', 'DELETE')
             and response.status_code < 400 and not request.path.endswith('/dag-preview')):
-        orchestration_cache.refresh_async()
+        orchestration_cache.refresh_async(metadata=not request.path.endswith('/runs'))
     if request.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store"
     elif response.mimetype == "text/html":
@@ -1730,6 +1730,9 @@ def _orchestration_workflow_values(payload):
     schedule_enabled = bool(payload.get("scheduleEnabled", False))
     if schedule_enabled and not schedule:
         raise ValueError("An enabled schedule requires a cron expression")
+    job_execution_mode = payload.get('jobExecutionMode', 'SEQUENTIAL')
+    if job_execution_mode not in ('SEQUENTIAL', 'PARALLEL'):
+        raise ValueError('Job execution must be SEQUENTIAL or PARALLEL')
     return {
         "name": name,
         "group": str(payload.get("workflowGroup") or "").strip() or None,
@@ -1740,6 +1743,7 @@ def _orchestration_workflow_values(payload):
         "manual": bool(payload.get("allowManualTrigger", True)),
         "external": bool(payload.get("allowExternalTrigger", False)),
         "enabled": bool(payload.get("enabled", True)),
+        "job_execution_mode": job_execution_mode,
     }
 
 
@@ -1810,7 +1814,7 @@ def create_orchestration_workflow():
                         WORKFLOW_ID, WORKFLOW_NAME, WORKFLOW_GROUP, DESCRIPTION,
                         SCHEDULE, SCHEDULE_TIMEZONE, IS_SCHEDULE_ENABLED,
                         ALLOW_MANUAL_TRIGGER, ALLOW_EXTERNAL_TRIGGER, IS_ENABLED,
-                        EXTERNAL_TRIGGERS, WAREHOUSE_NAME
+                        EXTERNAL_TRIGGERS, WAREHOUSE_NAME, JOB_EXECUTION_MODE
                     ) SELECT
                         %(workflow_id)s, %(name)s, %(group)s, %(description)s,
                         %(schedule)s, %(timezone)s, %(schedule_enabled)s,
@@ -1818,7 +1822,7 @@ def create_orchestration_workflow():
                         ARRAY_CONSTRUCT_COMPACT(
                             IFF(%(schedule_enabled)s, 'SCHEDULE', NULL),
                             IFF(%(external)s, 'EXTERNAL', NULL)
-                        ), %(task_warehouse)s
+                        ), %(task_warehouse)s, %(job_execution_mode)s
 
                 """, {**values, "workflow_id": workflow_id, "task_warehouse": config.DEFAULT_TASK_WAREHOUSE})
                 orchestration.add_workflow(workflow_id, entry_job_id)
@@ -1854,6 +1858,7 @@ def update_orchestration_workflow(workflow_id):
                     UPDATE {config.T_ORCHESTRATION_WORKFLOW} SET
                         WORKFLOW_NAME = %(name)s,
                         WORKFLOW_GROUP = %(group)s,
+                        JOB_EXECUTION_MODE = %(job_execution_mode)s,
                         DESCRIPTION = %(description)s,
                         SCHEDULE = %(schedule)s,
                         SCHEDULE_TIMEZONE = %(timezone)s,

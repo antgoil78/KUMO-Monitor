@@ -146,7 +146,7 @@ def complete_submission(workflow_id, request_id, query_id):
         except Exception as exc:
             # Keep the committed request visible; native maintenance retries it.
             logging.getLogger(__name__).warning('Workflow task start deferred to maintenance: %s', exc)
-    orchestration_cache.refresh_async()
+    orchestration_cache.refresh_async(metadata=False)
 
 
 @orchestration_engine_bp.route('/api/orchestration/engine')
