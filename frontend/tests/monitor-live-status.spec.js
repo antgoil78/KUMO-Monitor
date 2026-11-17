@@ -1,5 +1,16 @@
 import { test, expect } from './timeline.fixture.js'
 
+test('monitor renders scheduled next-run dates for workflows and their jobs', async ({ page, timeline }) => {
+  timeline.monitor.rows[0].scheduler = { state: 'STARTED', nextRun: '2026-11-12T06:00:00Z' }
+  await page.goto('/?page=orchestrationMonitor')
+  const workflowNextRun = page.locator('.om-parent tr > td').last()
+  await expect(workflowNextRun).toContainText('07:00:00')
+  await expect(workflowNextRun).toContainText('12 Nov 2026')
+  await page.getByRole('button', { name: 'Expand all', exact: true }).click()
+  await expect(page.locator('.om-children tr > td').last()).toContainText('07:00:00')
+  await expect(page.locator('.om-children tr > td').last()).toContainText('12 Nov 2026 · With workflow')
+})
+
 test('monitor shows queue blockers, snapshot age and live status changes', async ({ page, timeline }) => {
   const { monitor } = timeline
   await page.clock.pauseAt(new Date('2026-11-11T12:00:02Z'))
