@@ -88,6 +88,7 @@ test('failed refresh keeps loaded history, retries it, and a new range clears it
 
 test('dependency drafts require confirmation before sidebar navigation and guard reloads', async ({ page, timeline }) => {
   await page.goto('/?page=orchestrationDependencies')
+  await page.getByRole('button', { name: 'Show parents for PYMT LOAD', exact: true }).click()
   const allow = page.getByLabel('PYMT LOAD allow', { exact: true })
   await allow.selectOption('false')
   await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible()

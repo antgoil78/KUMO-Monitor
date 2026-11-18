@@ -17,6 +17,26 @@ export function parentOptions(row, rows) {
     : !parent.jobId && parent.workflowId !== row.workflowId))
 }
 
+export function addWorkflowParent(rows, workflowId, values) {
+  const header = rows.find(row => row.id === workflowId && !row.jobId)
+  const hasParent = rows.some(row => !row.jobId && row.workflowId === workflowId && row.parentId)
+  const added = { ...header, ...values, id: hasParent ? globalThis.crypto.randomUUID() : workflowId,
+    workflowId, jobId: null, name: header.name, issue: '' }
+  if (!hasParent) return rows.map(row => row.id === workflowId ? added : row)
+  return [...rows.map(row => !row.jobId && row.workflowId === workflowId ? { ...row, trigger: 'DEP' } : row),
+    { ...added, trigger: 'DEP' }]
+}
+
+export function removeWorkflowParent(rows, id) {
+  const removed = rows.find(row => row.id === id && !row.jobId)
+  const remaining = rows.filter(row => !row.jobId && row.workflowId === removed.workflowId && row.id !== id)
+  if (!remaining.length) return rows.map(row => row.id === id ? { ...row, parentId: null, trigger: null,
+    success: null, warning: null, error: null, parentMustBeNewer: false, sql: '', allow: true, issue: '' } : row)
+  // Job assignments and other workflows always refer to the primary workflow ID.
+  const promote = id === removed.workflowId ? remaining[0].id : null
+  return rows.filter(row => row.id !== id).map(row => row.id === promote ? { ...row, id: removed.workflowId } : row)
+}
+
 export function validateConfiguration(rows) {
   const errors = []
   const ids = new Set()
