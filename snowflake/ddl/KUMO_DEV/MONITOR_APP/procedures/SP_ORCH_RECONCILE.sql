@@ -17,7 +17,8 @@ if (typeof environment === 'string') environment = JSON.parse(environment);
     if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(environment[key])) throw new Error('Invalid environment identifier');
 });
 var app = environment.DATABASE + '.' + environment.MONITOR_APP_SCHEMA;
-var log = environment.DATABASE + '.' + environment.META_SCHEMA + '.WORKFLOW_EXECUTION_LOG';
+var ns = environment.DATABASE + '.' + environment.META_SCHEMA;
+var log = ns + '.WORKFLOW_EXECUTION_LOG';
 // Snowflake passes a SQL NULL procedure argument as JavaScript undefined.
 var workflowId = P_WORKFLOW_ID == null ? null : String(P_WORKFLOW_ID);
 var filter = '(?::VARCHAR IS NULL OR WORKFLOW_ID = ?)';
@@ -69,6 +70,23 @@ active.forEach(function(run) {
         }
     } catch (error) { errors.push(String(error.message || error)); }
 });
+// Also catch interruptions after final status was written but before the email
+// hook ran. The activation marker excludes old runs; the notifier claims once.
+try {
+    if (!/^[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*){2}$/.test(environment._parameterTable || '')) throw new Error('Invalid parameter table address');
+    var notifications = rows('SELECT e.EXECUTION_ID FROM ' + log + ' e JOIN ' + environment._parameterTable + ' p ON ' +
+        "p.INSTANCE_NAME = 'DEFAULT' AND p.PARAMETER_GROUP = 'ORCHESTRATION' AND p.PARAMETER_KEY = 'NOTIFICATIONS_START_AT' " +
+        'AND p.ACTIVE_FL AND NOT p.IS_SECRET WHERE (?::VARCHAR IS NULL OR e.WORKFLOW_ID = ?) AND e.JOB_ID IS NULL ' +
+        "AND e.STATUS IN ('SUCCESS','WARNING','FAILED','CANCELLED') AND e.RESULT:notification IS NULL " +
+        'AND e.ENDED_AT >= TRY_TO_TIMESTAMP_NTZ(p.PARAMETER_VALUE) ORDER BY e.ENDED_AT LIMIT 100', [workflowId, workflowId]);
+    notifications.forEach(function(run) {
+        try {
+            var report = first(rows('CALL ' + app + '.SP_ORCH_NOTIFY(?)', [run.EXECUTION_ID])[0]);
+            if (typeof report === 'string') report = JSON.parse(report);
+            if (report.ok === false) errors.push('Notification: ' + report.reason);
+        } catch (error) { errors.push('Notification: ' + String(error.message || error)); }
+    });
+} catch (error) { errors.push('Notification recovery: ' + String(error.message || error)); }
 // List only this engine's temporary tasks, rather than scanning old log rows
 // and issuing DROP repeatedly for every historical execution.
 var tasks = rows("SHOW TASKS LIKE 'TMP_ORCH_WF_%' IN SCHEMA " + app);

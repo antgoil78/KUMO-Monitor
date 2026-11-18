@@ -233,12 +233,15 @@ Pull requests to `main` run these checks in `validate-pr.yml`.
 That workflow does not publish images or change a service; the existing image
 workflow continues to publish on merges to `main`.
 
-The DEV engine now dispatches eligible downstream workflows after completion,
-including joins with multiple parents and duplicate-request protection. Two
-known legacy parity gaps remain: completion notifications and dbt warning/artifact
-classification. Before promoting the new engine for workloads relying on them,
-complete their integration and DEV validation. Fixture browser tests also do
-not replace live DEV checks for accepted run IDs, task permissions, workload
+The DEV engine dispatches eligible downstream workflows after completion,
+including joins with multiple parents and duplicate-request protection. DEV
+completion emails are restored through the current workflow catalog; see the
+[notification migration guide](snowflake/README.md#dev-workflow-notifications).
+dbt warning/artifact classification remains a legacy parity gap. Before promoting
+the engine for workloads relying on it, complete its integration and DEV validation.
+Notification rollout to ACC is pending and must enable failure emails for every
+workflow, as requested; DEV restores existing notification rules only. Fixture
+browser tests also do not replace live DEV checks for accepted run IDs, task permissions, workload
 execution, and schedule controls. See the
 [engine validation instructions](snowflake/README.md).
 
@@ -400,7 +403,8 @@ execution tasks, procedures, queue and stream are suspended/archived with `X_`
 names; old history remains available. DEV's environment-specific retirement
 parameter blocks the old controls and recovery worker. TST is unchanged.
 See [DEV retirement](snowflake/README.md#dev-retirement-of-the-old-execution-engine)
-for the targeted migration and remaining dispatch/notification integration.
+for the targeted migration. DEV supports downstream dispatch and
+[workflow completion emails](snowflake/README.md#dev-workflow-notifications).
 
 The new Monitor includes Log shortcuts on workflow/job rows and Latest DAG Run
 for DBT jobs, quick enable/disable controls, and a schedule editor. Latest DAG Run

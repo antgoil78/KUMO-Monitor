@@ -730,8 +730,9 @@ only the schedules approved for TST after execution validation. Exclude these
 generated tasks from saved DDL.
 
 The reconciliation review records outstanding prerequisites: CARD's dbt files
-are missing from DEV, automatic downstream workflow dispatch is absent, and
-completion notification parity still needs integration/testing. Resolve these
+are missing from DEV. Completion emails are restored in DEV using the targeted
+notification migration below; their rollout to ACC remains separate. The DEV
+dependency dispatcher supports downstream execution. Resolve outstanding prerequisites
 before treating the new engine as a replacement for TST's scheduled pipeline.
 The current DEV reconciliation and release do not change TST objects.
 
@@ -758,8 +759,7 @@ The old temporary-task cleanup invocation is removed from the new maintenance
 job; new temporary tasks are already handled by `TASK_ORCH_MAINTENANCE`.
 
 No business workloads or new schedules are activated by retirement. Downstream
-workflow dispatch is now supported in DEV; notification parity still needs
-integration and testing in the new engine. Schedule controls are now available in the Monitor. Source changes reach
+workflow dispatch and completion notifications are supported in DEV. Schedule controls are now available in the Monitor. Source changes reach
 SPCS through the normal Git/image release process; this migration does not deploy
 an image or change a service.
 
@@ -813,3 +813,61 @@ GET   /api/orchestration/workflows/<workflow_id>/log?runId=...&jobId=...
 `backend/tests/live_monitor_controls.py` creates one disposable future-scheduled
 SELECT job/workflow, checks the native scheduler lifecycle and Next Run through
 the API, and removes its rows and scheduler. It never executes the job.
+
+## DEV workflow notifications
+
+Preview, then apply the DEV-only migration:
+
+```bash
+python backend/migrations/apply_workflow_notifications.py
+python backend/migrations/apply_workflow_notifications.py --apply
+python backend/tests/live_workflow_notifications.py --run
+```
+
+It maps `WORKFLOW_NOTIFICATIONS` through both workflow and job migration
+identities, preserving the original rows and any settings already saved for
+new workflow IDs. Matching recipient groups across readiness/SDL/EDV steps
+become one workflow rule; conflicting groups or integrations stop the migration.
+An old enabled flag with no recipient group remains effectively disabled.
+DEV restores existing rules only. Do not enable previously unconfigured DEV
+workflows. For the later ACC rollout, enable failure emails for **every workflow**
+as requested; do not apply DEV's restore-only coverage there. This migration
+deliberately has no ACC/TST apply option.
+
+The migration checks idle DEV executions, routing, ownership and known procedure
+bodies. It changes only `SP_GET_ENVIRONMENT`, `SP_ORCH_NOTIFY`,
+`SP_ORCH_EXECUTE_WORKFLOW`, and `SP_ORCH_RECONCILE`, preserving grants. The
+environment helper exposes its bootstrap parameter-table address so activation
+uses that same configuration store. The initial activation timestamp is saved
+as `ORCHESTRATION / NOTIFICATIONS_START_AT`; reruns preserve it. Completions
+before that timestamp never generate catch-up mail. No schedules, business
+workloads, services or notification integrations are changed by the migration.
+
+Failures and cancellations use the failure rule; success and warning outcomes
+use the optional success rule. A workflow run generates one email with its
+frozen workflow name, run ID and failed job errors/query IDs, including partial
+manual runs. The existing `SP_SEND_WORKFLOW_EMAIL` formats and sends it through
+the configured Snowflake integration. Normal completion and engine failures
+invoke the notifier; housekeeping also catches missing notification attempts
+after interrupted completion or native task failure.
+
+Each run stores its notification outcome in
+`WORKFLOW_EXECUTION_LOG.RESULT.notification`. An atomic durable claim prevents
+concurrent completion/recovery calls from sending duplicate emails. Mail failures
+record `ERROR` without changing workflow/job status or blocking downstream
+dispatch. `SENDING` or `ERROR` needs operator review: Snowflake may have accepted
+an email before its reply or the final result write was lost, so recovery never
+automatically resends an attempted email. `SENT` means Snowflake accepted the
+send; mailbox delivery is not established by that status.
+
+The opt-in live check uses a private transient execution table and disposable
+procedure copies with an isolated sender. It validates Snowflake SQL, the
+failure payload, duplicate suppression, and historical/disabled skip paths
+without emailing anyone. It also runs one disposable division-by-zero job
+through the real engine to verify its completion hook. That workflow has no
+email rule and cannot send mail. All validation fixtures are removed afterwards.
+
+Notifications → Workflow Config reads the current catalog when the old engine
+is retired, and supports editing success/failure groups and the integration.
+The app source changes follow the normal Git/image release process; applying
+this database migration does not deploy the updated configuration screen.
