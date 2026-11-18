@@ -14,17 +14,21 @@
 .od-actions .button, .od-bottom .button { padding: 7px 12px; font-size: 11px; }
 .od-table-wrap { max-width: 100%; overflow-x: auto; border: 1px solid #2c2e33; border-radius: 4px; background: #191c24; }
 .od-page table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
-.od-config-table { min-width: 1385px; table-layout: fixed; }
+.od-config-table { min-width: 1295px; table-layout: fixed; }
 .od-page table :is(th, td) { padding: 12px 10px; border-bottom: 1px solid #2c2e33; vertical-align: middle; }
 .od-page thead th { background: #20232d; color: #858a9b; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .035em; }
 .od-page tbody th { font-weight: 400; }
 .od-workflow { background: #20232d; }
-.od-config-table tbody + tbody { border-top: 2px solid #3c4251; }
-.od-workflow-toggle { display: flex; align-items: center; gap: 12px; padding: 0; border: 0; background: transparent; color: #fff; font: inherit; font-weight: 600; }
-.od-workflow-toggle span { color: #8fc2ff; font-size: 22px; }
-.od-workflow-toggle { max-width: 100%; text-align: left; overflow-wrap: anywhere; }
-.od-config-table td > strong { display: block; overflow-wrap: anywhere; }
-.od-job-workflow { margin-left: 8px; padding-left: 16px; border-left: 1px solid #3b4657; color: #6c7991; font-size: 11px; }
+.od-workflow-header { background: #1d2029; }
+.od-parent-rules + .od-workflow-header { border-top: 2px solid #393d48; }
+.od-workflow-header small { display: block; margin-top: 3px; color: #7f8494; font-size: 10px; font-weight: 400; }
+.od-workflow-header .od-add-parent { margin-left: auto; padding: 7px 12px; font-size: 11px; }
+.od-parent-name { margin-left: 25px; padding-left: 12px; border-left: 1px solid #3b4657; }
+.od-parent-rules { background: #191c24; }
+.od-parent-rules[hidden] { display: none; }
+.od-rule-control { min-width: 0; margin: 0; padding: 0; border: 0; }
+.od-list-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin: 14px 0; font-size: 12px; }
+.od-list-heading > span { color: #9699a4; }
 .od-page :is(select, input, textarea), .od-dialog :is(select, input, textarea) { min-width: 0; width: 100%; padding: 8px; border: 1px solid #363b48; border-radius: 4px; background: #13151c; color: #b7bac4; font: inherit; }
 .od-page select { font-size: 11px; }
 .od-config-table input[type="checkbox"] { width: 18px; height: 18px; padding: 0; accent-color: #0075ff; }
@@ -33,8 +37,9 @@
 .od-page .od-trigger { padding: 5px 8px; border: 1px solid #3b4657; border-radius: 3px; color: #8fc2ff; font-size: 10px; }
 .od-sql-button { display: block; width: 100%; padding: 8px; overflow: hidden; border: 1px dashed #3c4251; border-radius: 4px; background: transparent; color: #78869c; font-size: 11px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .od-sql-button.has-sql { border-style: solid; background: #151b25; color: #8fc2ff; font-family: ui-monospace, monospace; }
-.od-remove { width: 26px; height: 28px; border: 1px solid #3c4251; border-radius: 4px; background: transparent; color: #ef8991; font-size: 18px; }
-.od-remove:disabled { opacity: .2; }
+.od-remove { padding: 7px 9px; border: 1px solid #57333b; border-radius: 4px; background: transparent; color: #ef8991; font-size: 11px; cursor: pointer; }
+.od-remove:hover { background: #33232b; border-color: #93515f; }
+.od-page select:disabled { opacity: .5; }
 .od-dim, .od-help { color: #858a9b; font-size: 11px; line-height: 1.7; }
 .od-bottom { align-items: flex-start; }
 .od-bottom .od-help { flex: 1; max-width: 820px; min-width: 240px; margin: 0; }
@@ -63,6 +68,9 @@
 .od-dialog-heading h2 { margin: 0; color: #fff; font-size: 18px; font-weight: 500; }
 .od-dialog-heading .button { padding: 2px 9px; font-size: 22px; }
 .od-dialog label { display: grid; gap: 7px; margin-top: 15px; color: #a9aebc; font-size: 12px; }
+.od-rule-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.od-dialog .od-check { display: flex; align-items: center; gap: 9px; }
+.od-dialog .od-check input { flex-shrink: 0; width: 18px; height: 18px; accent-color: #0075ff; }
 .od-dialog textarea { resize: vertical; font: 12px/1.7 ui-monospace, monospace; }
 .od-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 .od-form-error { color: #ef8991; }

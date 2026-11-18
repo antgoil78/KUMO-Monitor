@@ -163,8 +163,18 @@ def validate_rows(rows, catalog):
             if row['trigger'] not in ('DEP', None) or not row['parentId']:
                 raise ValueError('Jobs require a parent and must use DEP')
         else:
-            if row['id'] != row['workflowId'] and existing.get(row['id'], {}).get('workflowId') != row['workflowId']:
-                raise ValueError('Workflow rule identity is inconsistent')
+            if row['id'] != row['workflowId']:
+                previous = existing.get(row['id'])
+                if previous:
+                    if previous['workflowId'] != row['workflowId'] or previous['jobId']:
+                        raise ValueError('Workflow rule identity is inconsistent')
+                else:
+                    # Additional parents are new rules, identified by a client UUID.
+                    # The workflow's primary row must still be retained below.
+                    try:
+                        uuid.UUID(row['id'])
+                    except ValueError:
+                        raise ValueError('New workflow rules require a UUID identity') from None
             headers.add(row['workflowId'])
             key = (row['workflowId'], row['parentId'])
             if key in parent_rules:
