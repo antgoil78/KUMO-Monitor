@@ -38,5 +38,6 @@ if (environment.DATABASE !== String(context.getColumnValue(1)).toUpperCase() ||
     environment.META_SCHEMA !== String(context.getColumnValue(2)).toUpperCase())
   throw new Error(''Environment parameters do not match the deployed engine; redeploy after moving its database or metadata schema'');
 environment._parameters = parameters;
+environment._parameterTable = parameterTable;
 return environment;
 ';

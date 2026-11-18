@@ -141,6 +141,46 @@ function GroupEditor({ editor, saving, onChange, onSave, onClose }) {
 }
 
 
+function WorkflowNotificationEditor({ editor, groups, saving, onChange, onSave, onClose }) {
+  if (!editor) return null
+  return (
+    <div className="modal-backdrop">
+      <div className="vision-modal notification-group-modal" role="dialog" aria-modal="true" aria-label={`Notifications: ${editor.workflowName}`}>
+        <div className="modal-header">
+          <div><h2>{editor.workflowName}</h2><p>Send one email when a workflow run finishes. Failure emails include failed job details.</p></div>
+          <button type="button" className="modal-close" disabled={saving} onClick={onClose} aria-label="Close">×</button>
+        </div>
+        <form className="notification-editor-form" onSubmit={onSave}>
+          {['fail', 'success'].map(channel => {
+            const label = channel === 'fail' ? 'Failure' : 'Success'
+            const enabledKey = channel === 'fail' ? 'onFailEmail' : 'onSuccessEmail'
+            const groupKey = `${channel}Group`
+            return <div className="form-field" key={channel}>
+              <label><input type="checkbox" checked={editor[enabledKey]} disabled={saving} onChange={event => onChange(enabledKey, event.target.checked)} /> {label} emails</label>
+              <label htmlFor={`notification-${channel}-group`}>{label} recipient group</label>
+              <select id={`notification-${channel}-group`} value={editor[groupKey]} disabled={saving} required={editor[enabledKey]} onChange={event => onChange(groupKey, event.target.value)}>
+                <option value="">Choose a group</option>
+                {editor[groupKey] && !groups.some(group => group.GROUP_NAME === editor[groupKey]) && <option value={editor[groupKey]}>{editor[groupKey]} (missing)</option>}
+                {groups.map(group => <option key={group.GROUP_NAME} value={group.GROUP_NAME}>{group.GROUP_NAME}</option>)}
+              </select>
+            </div>
+          })}
+          <div className="form-field">
+            <label htmlFor="notification-integration">Email integration</label>
+            <input id="notification-integration" required value={editor.emailIntegration} disabled={saving} onChange={event => onChange('emailIntegration', event.target.value)} />
+          </div>
+          {editor.error && <div className="alert error" role="alert">{editor.error}</div>}
+          <div className="notification-modal-actions">
+            <button type="submit" className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save notifications'}</button>
+            <button type="button" className="button muted" disabled={saving} onClick={onClose}>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+
 export default function Notifications() {
   const [activeTab, setActiveTab] = useState('groups')
   const [groups, setGroups] = useState([])
@@ -150,6 +190,7 @@ export default function Notifications() {
   const [error, setError] = useState(null)
   const [message, setMessage] = useState(null)
   const [editor, setEditor] = useState(null)
+  const [workflowEditor, setWorkflowEditor] = useState(null)
   const [groupSearch, setGroupSearch] = useState('')
   const [workflowSearch, setWorkflowSearch] = useState('')
 
@@ -203,6 +244,26 @@ export default function Notifications() {
   function showMessage(text) {
     setMessage(text)
     window.setTimeout(() => setMessage(null), 4500)
+  }
+
+  function editWorkflow(row) {
+    setWorkflowEditor({ workflowId: row.WORKFLOW_ID, workflowName: row.WORKFLOW_NAME,
+      onFailEmail: Boolean(asBoolean(row.ON_FAIL_EMAIL)), onSuccessEmail: Boolean(asBoolean(row.ON_SUCCESS_EMAIL)),
+      failGroup: row.FAIL_GROUP || '', successGroup: row.SUCCESS_GROUP || '', emailIntegration: row.EMAIL_INTEGRATION || 'MY_EMAIL_INT' })
+  }
+
+  async function saveWorkflow(event) {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      const { workflowId, workflowName, error, ...payload } = workflowEditor
+      await api.updateWorkflowNotifications(workflowId, payload)
+      setWorkflowEditor(null)
+      showMessage(`Notifications saved for ${workflowName}.`)
+      await load()
+    } catch (err) {
+      setWorkflowEditor(current => ({ ...current, error: err.message }))
+    } finally { setSaving(false) }
   }
 
   function openCreate() {
@@ -429,7 +490,7 @@ export default function Notifications() {
           <div className="notification-panel-head">
             <div>
               <h2>Workflow Config</h2>
-              <p>Email notification settings per workflow. Configuration remains edited from the workflow editor.</p>
+              <p>Email notification settings for the current workflows. Edit a workflow to choose its recipient groups.</p>
             </div>
 
             <div className="notification-panel-actions">
@@ -461,6 +522,7 @@ export default function Notifications() {
                     <th>Success Group</th>
                     <th>Integration</th>
                     <th>Env</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -478,6 +540,7 @@ export default function Notifications() {
                       <td>{row.SUCCESS_GROUP || '—'}</td>
                       <td className="notification-muted">{row.EMAIL_INTEGRATION || '—'}</td>
                       <td className="notification-muted">{row.ENVIRONMENT || '—'}</td>
+                      <td><button type="button" className="small-button notification-edit-button" aria-label={`Edit notifications for ${row.WORKFLOW_NAME}`} onClick={() => editWorkflow(row)}>Edit</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -487,6 +550,9 @@ export default function Notifications() {
         </div>
       )}
 
+      <WorkflowNotificationEditor editor={workflowEditor} groups={groups} saving={saving}
+        onChange={(key, value) => setWorkflowEditor(current => ({ ...current, [key]: value, error: '' }))}
+        onSave={saveWorkflow} onClose={() => !saving && setWorkflowEditor(null)} />
       <GroupEditor
         editor={editor}
         saving={saving}

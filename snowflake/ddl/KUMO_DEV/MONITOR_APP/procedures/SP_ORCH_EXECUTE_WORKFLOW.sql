@@ -37,6 +37,12 @@ var originalTimeout = rows("SHOW PARAMETERS LIKE 'STATEMENT_TIMEOUT_IN_SECONDS' 
 var timeoutValue = originalTimeout && (originalTimeout.value || originalTimeout.VALUE) || '0';
 var inTransaction = false, ownsRun = false, dependencyWarnings = [];
 function evaluateDependencies(executionId) {
+    if (executionId === runId) {
+        try {
+            var notification = object(first(rows('CALL ' + app + '.SP_ORCH_NOTIFY(?)', [executionId])[0]));
+            if (notification.ok === false) dependencyWarnings.push('Notification: ' + notification.reason);
+        } catch (error) { dependencyWarnings.push('Notification: ' + String(error.message || error)); }
+    }
     var report;
     try {
         report = object(first(rows('CALL ' + app + '.SP_ORCH_DISPATCH_DEPENDENCIES(?)', [executionId])[0]));
