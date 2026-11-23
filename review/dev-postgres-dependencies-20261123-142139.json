@@ -1,0 +1,93 @@
+{
+  "ok": true,
+  "environment": "DEV",
+  "graphId": "d2f9fe33-ae3b-4d0e-83b8-edffccab2955",
+  "graphRevision": 1,
+  "cascadeId": "c7b86cfc-828d-4cb0-aed4-e92348531ff8",
+  "source": {
+    "jobs": {
+      "WF1": [
+        "550123ca-1550-55c4-99e2-86f60b2ca44d"
+      ],
+      "WF2": [
+        "fbc88b96-a564-5644-8451-1c1dc58e51f0"
+      ],
+      "WF3": [
+        "3eddc720-4414-573b-9898-d61c84123b77"
+      ],
+      "WF4": [
+        "b07b0ac6-e92c-558e-b775-1d0b39ad60a0"
+      ]
+    },
+    "scope": "WF1\u2013WF4 only; existing catalog, schedules and WF5\u2013WF10 untouched",
+    "namespace": "KUMO_DEV.MONITOR_META",
+    "workflows": {
+      "WF1": "354133d9-b454-5cd5-9f96-32095ed0a268",
+      "WF2": "58283873-4021-558c-bedb-6f40f57de5a4",
+      "WF3": "1f9d1be4-1702-5133-9bc3-05dc3ee691c9",
+      "WF4": "a2a20202-2b8d-5560-8c20-f08b37312e78"
+    },
+    "capturedAt": "2026-11-23T13:17:16.585851+00:00"
+  },
+  "nodes": {
+    "WF1": {
+      "runId": "80076351-4fd3-46af-9ab9-ad38df17f11d",
+      "state": "SUCCESS",
+      "parentRuns": {},
+      "queryId": "01c89a9d-010c-055a-0004-a4f20894e67a",
+      "nativeStart": "2026-11-23T05:17:24.396000-08:00",
+      "nativeEnd": "2026-11-23T05:17:45.501000-08:00",
+      "nativeSubmissions": 1
+    },
+    "WF2": {
+      "runId": "6b9880bb-7763-4439-8aaa-7a71dfd13813",
+      "state": "SUCCESS",
+      "parentRuns": {
+        "WF1": "80076351-4fd3-46af-9ab9-ad38df17f11d"
+      },
+      "queryId": "01c89a9e-010c-050b-0004-a4f20894d8ba",
+      "nativeStart": "2026-11-23T05:18:02.269000-08:00",
+      "nativeEnd": "2026-11-23T05:18:33.206000-08:00",
+      "nativeSubmissions": 1
+    },
+    "WF3": {
+      "runId": "8dfa55bc-6631-4e8e-9841-3a7ebc9a6d03",
+      "state": "SUCCESS",
+      "parentRuns": {
+        "WF1": "80076351-4fd3-46af-9ab9-ad38df17f11d"
+      },
+      "queryId": "01c89a9e-010c-055a-0004-a4f20894e7da",
+      "nativeStart": "2026-11-23T05:18:07.533000-08:00",
+      "nativeEnd": "2026-11-23T05:19:08.155000-08:00",
+      "nativeSubmissions": 1
+    },
+    "WF4": {
+      "runId": "440ffd91-af91-442b-9dd3-7618c7ede02c",
+      "state": "SUCCESS",
+      "parentRuns": {
+        "WF2": "6b9880bb-7763-4439-8aaa-7a71dfd13813",
+        "WF3": "8dfa55bc-6631-4e8e-9841-3a7ebc9a6d03"
+      },
+      "queryId": "01c89a9f-010c-050b-0004-a4f20894d972",
+      "nativeStart": "2026-11-23T05:19:26.249000-08:00",
+      "nativeEnd": "2026-11-23T05:19:46.998000-08:00",
+      "nativeSubmissions": 1
+    }
+  },
+  "assertions": {
+    "durableParentCompletionEvent": true,
+    "workerReplacedBeforeChildAdmission": true,
+    "siblingsAdmittedBeforeNativeSubmission": true,
+    "nativeSiblingOverlap": true,
+    "joinWaitsForBothParents": true,
+    "repeatedDispatchCreatesNoNewRuns": true,
+    "temporaryTasksAbsent": true
+  },
+  "idle": {
+    "start": "2026-11-23T13:20:04.866652+00:00",
+    "end": "2026-11-23T13:21:34.964892+00:00",
+    "combinedWorkerChecks": 84,
+    "snowflakeAdapterCalls": 0,
+    "taggedSnowflakeQueries": 0
+  }
+}

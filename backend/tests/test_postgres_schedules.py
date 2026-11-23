@@ -68,7 +68,7 @@ class PostgresScheduleTests(unittest.TestCase):
             assert conn.execute('SELECT current_database() AS name').fetchone()['name'].endswith('_test')
         self.store.initialize()
         with self.store.connect() as conn:
-            conn.execute('TRUNCATE kumo_task_engine.schedules,kumo_task_engine.scheduler_workers,kumo_task_engine.events,kumo_task_engine.attempts,kumo_task_engine.runs RESTART IDENTITY CASCADE')
+            conn.execute('TRUNCATE kumo_task_engine.dependency_graphs,kumo_task_engine.dependency_workers,kumo_task_engine.schedules,kumo_task_engine.scheduler_workers,kumo_task_engine.events,kumo_task_engine.attempts,kumo_task_engine.runs RESTART IDENTITY CASCADE')
         self.schedules=Schedules(self.store);self.worker=Scheduler(self.store)
 
     def create(self,**values):
@@ -240,7 +240,7 @@ class PostgresScheduleTests(unittest.TestCase):
         self.store.initialize();self.store.initialize()
         self.assertEqual(self.store.read(run)['run']['request_id'],'v1-history')
         with self.store.connect() as conn:
-            self.assertEqual([r['version'] for r in conn.execute('SELECT version FROM kumo_task_engine.schema_version ORDER BY version').fetchall()],[1,2])
+            self.assertEqual([r['version'] for r in conn.execute('SELECT version FROM kumo_task_engine.schema_version ORDER BY version').fetchall()],[1,2,3])
 
 
 if __name__=='__main__':unittest.main()

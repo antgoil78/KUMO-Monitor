@@ -1,0 +1,44 @@
+{
+  "ok": true,
+  "date": "2026-11-23",
+  "branch": "feat/postgres-task-engine",
+  "rollback": {
+    "queueTag": "rollback/stream-queue-20261123",
+    "queueCommit": "aacf516",
+    "beforeDependenciesCommit": "9b63fc3"
+  },
+  "validation": {
+    "backendTests": 400,
+    "browserTests": 12,
+    "frontendBuild": "passed",
+    "nativeReport": "dev-postgres-dependencies-20261123-142139.json",
+    "localUiReport": "dev-postgres-wf1-local-ui.json",
+    "dispatcherHealth": "HEALTHY",
+    "enabledSchedules": 0,
+    "completedValidationCascade": "c7b86cfc-828d-4cb0-aed4-e92348531ff8",
+    "validationOutcomes": "all four SUCCESS",
+    "validationCleanup": "all DONE",
+    "additionalUiTrialsObserved": [
+      {
+        "id": "0b1638d0-a4b4-4d40-b4c2-7b58828cfae5",
+        "state": "RUNNING"
+      }
+    ]
+  },
+  "scope": {
+    "importedWorkflows": [
+      "WF1",
+      "WF2",
+      "WF3",
+      "WF4"
+    ],
+    "source": "KUMO_DEV.MONITOR_META",
+    "sourceCatalogWrites": false,
+    "sourceScheduleChanges": false,
+    "wf5Through10Included": false,
+    "spcsDeployment": false,
+    "tstChanges": false,
+    "pushed": false,
+    "executionPolicy": "Frozen full graph; one outstanding execution group per graph; SQL SELECT expressions only"
+  }
+}

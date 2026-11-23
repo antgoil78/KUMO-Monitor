@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../api.js'
 import StatusBadge from './StatusBadge.jsx'
 import TaskEngineSchedules from './TaskEngineSchedules.jsx'
+import TaskEngineDependencies from './TaskEngineDependencies.jsx'
 import './TaskEngineTrial.css'
 
 const examples = {
@@ -94,6 +95,7 @@ export default function TaskEngineTrial() {
       {current.state === 'UNKNOWN' && <p role="status">Execution needs review. The worker has stopped automatic recovery and will not resubmit it.</p>}
     </>}
     <small>Status reads use PostgreSQL. Automatic refresh stops once runs and cleanup finish.</small>
+    <TaskEngineDependencies onSelectRun={id => { setSelected(id); setRevision(value => value + 1) }} />
     <TaskEngineSchedules examples={examples} onSelectRun={id => { setSelected(id); setRevision(value => value + 1) }} />
   </details>
 }

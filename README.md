@@ -20,8 +20,9 @@ this experiment, is preserved at commit `aacf516`, branch
 The trial is developed on `feat/postgres-task-engine`. These references are
 local; they have not been pushed. Existing workflows continue to use their
 current stream engine. The trial supports disposable SQL jobs and PostgreSQL
-cron schedules for those examples. Catalog migration, dbt jobs and production
-schedule migration are later work.
+cron schedules for those examples, plus an isolated WF1–WF4 dependency snapshot.
+Full business catalog migration, dbt jobs and production schedule migration are
+later work.
 
 The existing Flask app accepts trial runs into PostgreSQL. A separate worker
 from that same app creates one unscheduled Snowflake task per job attempt,
@@ -113,6 +114,67 @@ saving transition are skipped; repeated local times run at their first
 occurrence only. This policy is tested explicitly and is not an automatic
 promise of identical behavior to every existing native Snowflake schedule.
 
+### WF1 workflow dependency trial
+
+The **Workflow dependency trial** section of the same local Monitor tests
+`WF1 → (WF2, WF3) → WF4` in PostgreSQL. Use its **Run WF1** button; the existing
+workflow controls farther down the page still use their current Snowflake
+engine. WF5–WF10 are outside this snapshot and are not released by it.
+
+The imported SQL is preserved: WF1 waits 20 seconds, WF2 30, WF3 60 and WF4 20.
+Both children are admitted in one PostgreSQL transaction before either native
+task can start. WF4 waits for both parent executions. The UI shows the actual
+workflow outcomes, waiting/blocking reasons, the pinned parent run IDs and links
+to each workflow's job details. Source workflow/job IDs and per-parent result,
+ALLOW and freshness rules are retained. WF4's current WF2 freshness flag is true;
+its WF3 flag is false. Native query start and completion times are used for
+freshness, so delayed observation does not make an old parent appear recent.
+
+Import is explicit and read-only against Snowflake. From `backend/`:
+
+```bash
+python -m flask --env-file ../.env.postgres.local --app app task-engine init
+# Preview: exactly the four named workflows, their rules and assigned jobs.
+python -m flask --env-file ../.env.postgres.local --app app task-engine import-wf1
+# Save that validated snapshot into PostgreSQL; no Snowflake catalog writes.
+python -m flask --env-file ../.env.postgres.local --app app task-engine import-wf1 --apply
+```
+
+A changed snapshot requires `--expected-revision N`. It affects later trial
+executions; already accepted executions retain their complete graph and job
+snapshot. The importer validates the four-workflow diamond and accepts only
+enabled SQL jobs that pass the existing SELECT-expression restrictions. It
+rejects unsupported job gates, SQL conditions, dbt jobs, mixed trigger policies
+or external parents instead of silently omitting them. Only configuration for
+these four workflows is read; no live account inventory or DDL export is used.
+
+Each trial creates a frozen execution group with one run per workflow. Parents
+must belong to that group; an earlier trial's success cannot satisfy a new
+trial. This first stage allows one outstanding group per graph, including any
+unknown outcome. Together with reserved workflow keys and parent completion
+gates, this prevents a newer parent/ancestor from overlapping a child from an
+older trial. It is a deliberately narrower policy than a general engine with
+overlapping generations. There is no partial-run endpoint or recurring
+dependency-trial schedule in this stage.
+
+The existing `task-engine work` process handles the PostgreSQL dependency outbox
+and native task worker; no additional daemon is required. Parent outcomes and
+their pending dependency work commit together. Dependency processing cannot
+change a parent's successful result. Evaluation/admission failures roll back
+the entire child frontier, retry at most six times, then expose a dispatch
+error. **Retry dependency dispatch** only retries admission decisions; existing
+native attempts are never reset or resubmitted. Duplicate notifications and
+worker replacements reuse the same per-group, per-workflow request identity.
+Unknown outcomes remain blocked for review. Cancelling a group stops pending
+admissions and requests cancellation of active native work, waiting for native
+confirmation before reporting completion.
+
+Dependency evaluation, waiting states, dispatcher health and idle checks use
+PostgreSQL only. SQL/data-readiness predicates still need their own bounded
+evaluation and wake-up design; they are not polled by this trial. Native SQL
+tasks currently produce success, failure or cancellation, not custom warning
+outcomes, although warning rule flags are retained for later migration.
+
 The worker CLI also provides `task-engine status` and `task-engine submit
 PLAN.json`. Plans contain a stable `requestId`, optional `workflowKey`,
 `SEQUENTIAL` or `PARALLEL` mode, and jobs with `key`, `sql`, optional `timeoutSeconds` (1–300)
@@ -138,10 +200,17 @@ scheduler identity after admission, then checks 90 seconds with an enabled
 future schedule and no Snowflake calls. Stop other trial workers while it
 drives its own worker. It pauses its own fixture schedules on exit.
 
+The opt-in `backend/tests/live_postgres_dependencies.py --run` executes the
+imported WF1 diamond through real native tasks, checks actual sibling overlap
+and the two-parent join, replaces its dependency worker after parent completion,
+replays dependency delivery without new native submissions, and proves 90
+seconds of idle operation without Snowflake calls. Stop other trial execution
+workers while it drives its own worker. It never starts the old WF1 engine.
+
 To return to the saved queue code, pause all trial schedules, stop the scheduler,
 stop admitting trial runs, let the execution worker
 finish and confirm that there are no active, `UNKNOWN`, or pending/error
-cleanup attempts. Stop the local worker/API, commit or stash trial changes,
+cleanup attempts or outstanding dependency groups/dispatch errors. Stop the local worker/API, commit or stash trial changes,
 then `git switch checkpoint/stream-queue-20261123` and restart the existing app
 without the trial environment file. The tag remains available even if the
 checkpoint branch moves. Git switching does not cancel native executions or
@@ -173,6 +242,18 @@ The [localhost UI report](review/dev-postgres-schedules-local-ui.json) covers
 creation, enablement, real cron admission, pausing future work and successful
 completion/cleanup of two dependent jobs. All test fixture schedules were left
 paused. The local scheduler and execution worker remain available for testing.
+
+The WF1 dependency extension passed 400 backend tests, 12 browser tests and the
+frontend build. The [native WF1 report](review/dev-postgres-dependencies-20261123-142139.json)
+records four successful native SQL runs, real WF2/WF3 overlap, WF4 starting only
+after both parents finished, replacement of the dependency worker before child
+admission, and replay without another native submission. All four temporary
+tasks were absent after cleanup. The following 90-second idle window made 84
+combined dependency/execution-worker checks with zero Snowflake calls and zero
+prototype-tagged queries. The [localhost view check](review/dev-postgres-wf1-local-ui.json)
+verified the four outcomes, mixed WF4 freshness flags and job-detail navigation
+against PostgreSQL without creating another execution. The WF1 snapshot is
+installed for manual testing; it has no recurring schedule.
 
 ## DEV/TST configuration and migration
 

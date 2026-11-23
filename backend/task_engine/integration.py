@@ -76,6 +76,35 @@ def update_schedule(schedule_id):
     return jsonify(encode(Schedules(store()).update(schedule_id,request.get_json(silent=True),actor.get('userName') or 'LOCAL_DEV')))
 
 
+@blueprint.route(PREFIX+'/graphs')
+def graphs():
+    from .dependencies import Graphs
+    return jsonify(encode(Graphs(store()).status()))
+
+
+@blueprint.route(PREFIX+'/graphs/<graph_id>/runs',methods=['POST'])
+def start_graph(graph_id):
+    from .dependencies import Graphs
+    if os.getenv('KUMO_ORCHESTRATION_RUNS_ENABLED','').lower()!='true':raise PermissionError('Execution controls are disabled')
+    actor=current_app.extensions['task_prototype_actor_context']()
+    return jsonify(encode(Graphs(store()).start(graph_id,request.get_json(silent=True),actor.get('userName') or 'LOCAL_DEV'))),202
+
+
+@blueprint.route(PREFIX+'/cascades/<cascade_id>')
+def cascade(cascade_id):
+    from .dependencies import Graphs
+    return jsonify(encode(Graphs(store()).read(cascade_id)))
+
+
+@blueprint.route(PREFIX+'/cascades/<cascade_id>/<action>',methods=['POST'])
+def cascade_action(cascade_id,action):
+    from .dependencies import Graphs
+    if action not in ('cancel','retry-dispatch'):raise LookupError('Unknown dependency trial action')
+    if os.getenv('KUMO_ORCHESTRATION_RUNS_ENABLED','').lower()!='true':raise PermissionError('Execution controls are disabled')
+    service=Graphs(store())
+    return jsonify(encode(service.cancel(cascade_id) if action=='cancel' else service.retry_dispatch(cascade_id)))
+
+
 def register(app,actor_context):
     app.register_blueprint(blueprint)
     app.extensions['task_prototype_actor_context']=actor_context
@@ -98,6 +127,16 @@ def register(app,actor_context):
         with open(plan) as stream:body=json.load(stream)
         click.echo(json.dumps(store().submit(body,'LOCAL_DEV_CLI'),indent=2))
 
+    @commands.command('import-wf1')
+    @click.option('--apply',is_flag=True,help='Save the validated snapshot in PostgreSQL; Snowflake remains read-only')
+    @click.option('--expected-revision',type=int,help='Required when replacing a changed graph snapshot')
+    def import_wf1(apply,expected_revision):
+        from .dependencies import Graphs
+        from .wf1 import read_source,snapshot
+        db=store();body,source=snapshot(read_source())
+        if apply:click.echo(json.dumps(encode(Graphs(db).install(body,'LOCAL_DEV_CLI',source,expected_revision)),indent=2))
+        else:click.echo(json.dumps(dict(ok=True,applied=False,graph=body,source=source),indent=2))
+
     @commands.command('schedule')
     @click.option('--once',is_flag=True,help='Evaluate at most one due schedule')
     def schedule(once):
@@ -118,13 +157,15 @@ def register(app,actor_context):
     @commands.command('work')
     @click.option('--once',is_flag=True,help='Perform at most one durable step')
     def work(once):
+        from .dependencies import DependencyWorker
         from .snowflake_tasks import SnowflakeTasks
         from .worker import Worker
-        db=store();worker=Worker(db,SnowflakeTasks(db.settings))
+        db=store();worker=Worker(db,SnowflakeTasks(db.settings));dependencies=DependencyWorker(db)
         click.echo('DEV prototype worker started; only recorded disposable attempts are eligible')
         while True:
             try:
-                processed=worker.step()
+                dispatched=dependencies.step(execution_enabled=os.getenv('KUMO_ORCHESTRATION_RUNS_ENABLED','').lower()=='true')
+                processed=worker.step() or dispatched
             except Exception as exc:
                 if once:raise click.ClickException('Worker paused: '+type(exc).__name__) from None
                 click.echo('Worker paused; PostgreSQL recovery will retry: '+type(exc).__name__,err=True)

@@ -82,6 +82,8 @@ class Worker:
             return
         raw=report['state']
         identifiers=dict(native_group_id=str(report['graph_run_group_id']),native_attempt=report['attempt_number'],query_id=report['query_id'],observed_at=now())
+        if report.get('query_start_time'):
+            identifiers['native_started_at']=report['query_start_time']
         if raw in ('SUCCEEDED','FAILED','CANCELLED','FAILED_AND_AUTO_SUSPENDED','SKIPPED'):
             state={'SUCCEEDED':'SUCCESS','FAILED_AND_AUTO_SUSPENDED':'FAILED'}.get(raw,raw)
             self.store.update(job,self.owner,**identifiers,state=state,error=report.get('error_message'),recovery_checks=0,

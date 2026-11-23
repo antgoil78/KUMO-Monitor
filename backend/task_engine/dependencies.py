@@ -1,0 +1,264 @@
+"""Frozen workflow dependency trials. All admission and event work is PostgreSQL-only."""
+from datetime import timedelta
+import hashlib
+import json
+import re
+import uuid
+
+from .store import Conflict, TERMINAL, WorkflowBusy, normalize
+
+NODE_DONE = TERMINAL | {'BLOCKED'}
+
+
+def digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
+def graph_definition(body):
+    if not isinstance(body, dict) or set(body)-{'key','name','enabled','nodes'}:
+        raise ValueError('Use key, name, enabled and nodes for a dependency trial')
+    key, name, enabled, nodes = body.get('key'), body.get('name'), body.get('enabled', True), body.get('nodes')
+    if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', key):
+        raise ValueError('Graph key must be a simple identifier of at most 64 characters')
+    if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100 or not isinstance(enabled, bool):
+        raise ValueError('Supply a graph name and a boolean enabled flag')
+    if not isinstance(nodes, list) or not 1 <= len(nodes) <= 16:
+        raise ValueError('Use 1–16 SQL-only workflow nodes')
+    definitions = {}
+    for node in nodes:
+        if not isinstance(node, dict) or set(node)-{'key','name','enabled','allow','plan','parents'}:
+            raise ValueError('Nodes accept key, name, enabled, allow, plan and parents')
+        node_key, node_name = node.get('key'), node.get('name', node.get('key'))
+        if not isinstance(node_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,24}', node_key) or node_key in definitions:
+            raise ValueError('Node keys must be unique simple identifiers of at most 24 characters')
+        if not isinstance(node_name, str) or not 1 <= len(node_name) <= 100:
+            raise ValueError('Invalid workflow node name')
+        if not isinstance(node.get('enabled', True), bool) or not isinstance(node.get('allow', True), bool):
+            raise ValueError('Workflow enabled/allow flags must be boolean')
+        plan = node.get('plan')
+        if not isinstance(plan, dict) or set(plan)-{'jobs','mode'}:
+            raise ValueError('Node plans contain jobs and optional mode; business commands and conditions are excluded')
+        _, frozen = normalize(dict(plan, requestId='dependency-validation'))
+        parents = node.get('parents', [])
+        if not isinstance(parents, list):
+            raise ValueError('parents must be a list of workflow rules')
+        rules = []; seen = set()
+        for rule in parents:
+            if not isinstance(rule, dict) or set(rule)-{'key','success','warning','error','allow','parentMustBeNewer'}:
+                raise ValueError('Parent rules accept key, success, warning, error, allow and parentMustBeNewer')
+            parent = rule.get('key')
+            if not isinstance(parent, str) or parent == node_key or parent in seen:
+                raise ValueError('Parent references must be distinct and cannot refer to themselves')
+            value = dict(key=parent, success=rule.get('success', True), warning=rule.get('warning', False), error=rule.get('error', False),
+                         allow=rule.get('allow', True), parentMustBeNewer=rule.get('parentMustBeNewer', False))
+            if any(v is not None and not isinstance(v, bool) for k,v in value.items() if k in ('success','warning','error')):
+                raise ValueError('Outcome rule flags must be true, false or null')
+            if not isinstance(value['allow'], bool) or not isinstance(value['parentMustBeNewer'], bool):
+                raise ValueError('Rule allow/freshness flags must be boolean')
+            seen.add(parent); rules.append(value)
+        definitions[node_key] = dict(key=node_key, name=node_name, enabled=node.get('enabled', True), allow=node.get('allow', True), plan=frozen, parents=sorted(rules, key=lambda r:r['key']))
+    ordered = []; visiting = set(); visited = set()
+    def visit(node_key):
+        if node_key not in definitions:
+            raise ValueError('Dependency references a workflow outside this trial graph')
+        if node_key in visiting:
+            raise ValueError('Workflow dependencies contain a cycle')
+        if node_key in visited:
+            return
+        visiting.add(node_key)
+        for rule in definitions[node_key]['parents']:
+            visit(rule['key'])
+        visiting.remove(node_key); visited.add(node_key); ordered.append(definitions[node_key])
+    for node_key in sorted(definitions):
+        visit(node_key)
+    return dict(key=key, name=name.strip(), enabled=enabled, nodes=ordered, version=1)
+
+
+def accepts(state, rule):
+    flag = {'SUCCESS':'success', 'WARNING':'warning', 'FAILED':'error'}.get(state)
+    return bool(rule['allow'] and flag and rule[flag] is not False)
+
+
+def enqueue(conn, cascade_id):
+    conn.execute('''INSERT INTO kumo_task_engine.dependency_work(cascade_id) VALUES(%s)
+        ON CONFLICT(cascade_id) DO UPDATE SET state='PENDING',next_check_at=clock_timestamp(),attempts=0,error=NULL''', (cascade_id,))
+
+
+class Graphs:
+    def __init__(self, store):
+        self.store = store
+
+    def install(self, body, actor, source=None, expected_revision=None):
+        from psycopg.types.json import Jsonb
+        definition = graph_definition(body); fingerprint = digest(definition)
+        with self.store.transaction() as conn:
+            previous = conn.execute('SELECT * FROM kumo_task_engine.dependency_graphs WHERE key=%s', (definition['key'],)).fetchone()
+            if previous:
+                if previous['definition_hash'] == fingerprint:
+                    return dict(ok=True, graph=previous, reused=True)
+                if previous['revision'] != expected_revision:
+                    raise Conflict('Graph changed; supply its current expected revision before importing a new snapshot')
+                row = conn.execute('''UPDATE kumo_task_engine.dependency_graphs SET name=%s,enabled=%s,definition=%s,
+                    definition_hash=%s,source=%s,revision=revision+1,updated_by=%s,updated_at=clock_timestamp() WHERE id=%s RETURNING *''',
+                    (definition['name'], definition['enabled'], Jsonb(definition), fingerprint, Jsonb(source or previous['source']), str(actor)[:256], previous['id'])).fetchone()
+            else:
+                row = conn.execute('''INSERT INTO kumo_task_engine.dependency_graphs(id,key,name,enabled,definition,definition_hash,source,created_by,updated_by)
+                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *''',
+                    (uuid.uuid4(), definition['key'], definition['name'], definition['enabled'], Jsonb(definition), fingerprint, Jsonb(source or {}), str(actor)[:256], str(actor)[:256])).fetchone()
+        return dict(ok=True, graph=row, reused=False)
+
+    def start(self, graph_id, body, actor):
+        from psycopg.types.json import Jsonb
+        graph_id = uuid.UUID(str(graph_id))
+        if not isinstance(body, dict) or set(body)-{'requestId'} or not isinstance(body.get('requestId'), str) or not 1 <= len(body['requestId'].strip()) <= 128:
+            raise ValueError('Start a full dependency trial using a stable requestId')
+        request_id = body['requestId'].strip()
+        with self.store.transaction() as conn:
+            previous = conn.execute('SELECT * FROM kumo_task_engine.cascades WHERE request_id=%s', (request_id,)).fetchone()
+            if previous:
+                if previous['graph_id'] != graph_id:
+                    raise Conflict('requestId belongs to another graph')
+                return dict(ok=True, cascadeId=str(previous['id']), reused=True)
+            graph = conn.execute('SELECT * FROM kumo_task_engine.dependency_graphs WHERE id=%s', (graph_id,)).fetchone()
+            if not graph:
+                raise LookupError('Dependency trial graph not found')
+            if not graph['enabled']:
+                raise Conflict('Dependency trial graph is disabled')
+            if conn.execute("SELECT id FROM kumo_task_engine.cascades WHERE graph_id=%s AND state IN ('QUEUED','RUNNING','UNKNOWN')", (graph_id,)).fetchone():
+                raise WorkflowBusy('This graph already has an outstanding trial; finish or review it first')
+            cascade_id = uuid.uuid4()
+            conn.execute('''INSERT INTO kumo_task_engine.cascades(id,graph_id,request_id,graph_revision,snapshot,requested_by,state)
+                VALUES(%s,%s,%s,%s,%s,%s,'QUEUED')''', (cascade_id, graph_id, request_id, graph['revision'], Jsonb(graph['definition']), str(actor)[:256]))
+            for node in graph['definition']['nodes']:
+                conn.execute("INSERT INTO kumo_task_engine.cascade_nodes(cascade_id,node_key,workflow_key,state) VALUES(%s,%s,%s,'WAITING')",
+                             (cascade_id, node['key'], 'dep-'+graph_id.hex+'-'+node['key']))
+            enqueue(conn, cascade_id)
+        return dict(ok=True, cascadeId=str(cascade_id), reused=False)
+
+    def read(self, cascade_id):
+        cascade_id = uuid.UUID(str(cascade_id))
+        with self.store.connect() as conn:
+            cascade = conn.execute('SELECT * FROM kumo_task_engine.cascades WHERE id=%s', (cascade_id,)).fetchone()
+            if not cascade:
+                raise LookupError('Dependency trial execution not found')
+            nodes = conn.execute('''SELECT n.*,r.state AS run_state,r.started_at,r.ended_at,
+                (SELECT count(*) FROM kumo_task_engine.attempts a WHERE a.run_id=n.run_id AND a.cleanup_state='PENDING') AS cleanup_pending
+                FROM kumo_task_engine.cascade_nodes n LEFT JOIN kumo_task_engine.runs r ON r.id=n.run_id WHERE n.cascade_id=%s ORDER BY n.node_key''', (cascade_id,)).fetchall()
+            work = conn.execute('SELECT state,attempts,error FROM kumo_task_engine.dependency_work WHERE cascade_id=%s', (cascade_id,)).fetchone()
+        return dict(ok=True, cascade=cascade, nodes=nodes, dispatch=work)
+
+    def status(self):
+        with self.store.connect() as conn:
+            graphs = conn.execute('''SELECT g.*,(SELECT jsonb_build_object('id',c.id,'state',c.state) FROM kumo_task_engine.cascades c
+                WHERE c.graph_id=g.id AND c.state IN ('QUEUED','RUNNING','UNKNOWN') LIMIT 1) AS active_cascade
+                FROM kumo_task_engine.dependency_graphs g ORDER BY g.name''').fetchall()
+            cascades = conn.execute('SELECT id,graph_id,graph_revision,request_id,state,created_at,ended_at FROM kumo_task_engine.cascades ORDER BY created_at DESC LIMIT 30').fetchall()
+            workers = conn.execute('SELECT *,EXTRACT(EPOCH FROM clock_timestamp()-last_seen) AS age FROM kumo_task_engine.dependency_workers ORDER BY last_seen DESC').fetchall()
+        live = [w for w in workers if w['age'] <= 10 and w['execution_enabled']]
+        health = 'HEALTHY' if live else 'EXECUTION_DISABLED' if any(w['age']<=10 for w in workers) else 'DELAYED' if workers and workers[0]['age']<=30 else 'UNAVAILABLE' if workers else 'NOT_STARTED'
+        return dict(ok=True, graphs=graphs, cascades=cascades, dispatcher=dict(state=health, liveWorkers=len(live), lastSeen=workers[0]['last_seen'] if workers else None))
+
+    def cancel(self, cascade_id):
+        cascade_id = uuid.UUID(str(cascade_id))
+        with self.store.transaction() as conn:
+            row = conn.execute('SELECT * FROM kumo_task_engine.cascades WHERE id=%s', (cascade_id,)).fetchone()
+            if not row:
+                raise LookupError('Dependency trial execution not found')
+            if row['state'] in TERMINAL:
+                return dict(ok=True, cascadeId=str(cascade_id))
+            conn.execute('UPDATE kumo_task_engine.cascades SET cancel_requested=true WHERE id=%s', (cascade_id,))
+            for run in conn.execute('''SELECT n.run_id FROM kumo_task_engine.cascade_nodes n JOIN kumo_task_engine.runs r ON r.id=n.run_id
+                WHERE n.cascade_id=%s AND r.state IN ('QUEUED','RUNNING','UNKNOWN')''', (cascade_id,)).fetchall():
+                self.store.cancel_in_transaction(conn, run['run_id'])
+            enqueue(conn, cascade_id)
+        return dict(ok=True, cascadeId=str(cascade_id))
+
+    def retry_dispatch(self, cascade_id):
+        cascade_id = uuid.UUID(str(cascade_id))
+        with self.store.transaction() as conn:
+            if not conn.execute('SELECT id FROM kumo_task_engine.cascades WHERE id=%s', (cascade_id,)).fetchone():
+                raise LookupError('Dependency trial execution not found')
+            enqueue(conn, cascade_id)
+        return dict(ok=True, cascadeId=str(cascade_id))
+
+
+class DependencyWorker:
+    def __init__(self, store, owner=None):
+        self.store = store
+        self.owner = owner or uuid.uuid4()
+
+    def step(self, execution_enabled=True):
+        cascade_id = None
+        try:
+            with self.store.transaction() as conn:
+                conn.execute('''INSERT INTO kumo_task_engine.dependency_workers(id,execution_enabled) VALUES(%s,%s)
+                    ON CONFLICT(id) DO UPDATE SET execution_enabled=excluded.execution_enabled,last_seen=clock_timestamp()''', (self.owner, execution_enabled))
+                if not execution_enabled:
+                    return False
+                work = conn.execute("SELECT * FROM kumo_task_engine.dependency_work WHERE state='PENDING' AND next_check_at<=clock_timestamp() ORDER BY next_check_at LIMIT 1 FOR UPDATE SKIP LOCKED").fetchone()
+                if not work:
+                    return False
+                cascade_id = work['cascade_id']
+                self.evaluate(conn, cascade_id)
+                conn.execute("UPDATE kumo_task_engine.dependency_work SET state='DONE',next_check_at=NULL,error=NULL,attempts=0 WHERE cascade_id=%s", (cascade_id,))
+            return True
+        except Exception as exc:
+            if cascade_id is None:
+                raise
+            # Outcome persistence has already committed independently. Rollback
+            # leaves this event pending, and this separate transaction bounds retry.
+            with self.store.transaction() as conn:
+                row = conn.execute('SELECT attempts FROM kumo_task_engine.dependency_work WHERE cascade_id=%s', (cascade_id,)).fetchone()
+                count = row['attempts']+1
+                conn.execute("UPDATE kumo_task_engine.dependency_work SET state=%s,attempts=%s,error=%s,next_check_at=CASE WHEN %s THEN NULL ELSE clock_timestamp()+(%s*interval '1 second') END WHERE cascade_id=%s",
+                             ('ERROR' if count>=6 else 'PENDING', count, 'Dependency evaluation unavailable: '+type(exc).__name__, count>=6, min(60,2**count), cascade_id))
+            return True
+
+    def evaluate(self, conn, cascade_id):
+        from psycopg.types.json import Jsonb
+        cascade = conn.execute('SELECT * FROM kumo_task_engine.cascades WHERE id=%s', (cascade_id,)).fetchone()
+        rows = conn.execute('''SELECT n.*,r.state AS actual_state,r.started_at,r.ended_at FROM kumo_task_engine.cascade_nodes n
+            LEFT JOIN kumo_task_engine.runs r ON r.id=n.run_id WHERE n.cascade_id=%s''', (cascade_id,)).fetchall()
+        nodes = {row['node_key']:row for row in rows}
+        for row in rows:
+            if row['run_id']:
+                row['state'] = row['actual_state'] if row['actual_state'] in TERMINAL|{'UNKNOWN'} else 'ADMITTED'
+                conn.execute('UPDATE kumo_task_engine.cascade_nodes SET state=%s WHERE cascade_id=%s AND node_key=%s', (row['state'], cascade_id, row['node_key']))
+        for definition in cascade['snapshot']['nodes']:
+            node = nodes[definition['key']]
+            if node['state'] != 'WAITING':
+                continue
+            state, blockers, parents = 'WAITING', [], {}
+            if cascade['cancel_requested']:
+                state='CANCELLED';blockers=[dict(reason='Trial cancelled before admission')]
+            elif not definition['enabled'] or not definition['allow']:
+                state='SKIPPED';blockers=[dict(reason='Workflow is disabled or disallowed in this snapshot')]
+            else:
+                cutoff = conn.execute('SELECT MAX(started_at) AS cutoff FROM kumo_task_engine.runs WHERE workflow_key=%s', (node['workflow_key'],)).fetchone()['cutoff']
+                for rule in definition['parents']:
+                    parent = nodes[rule['key']]
+                    if parent['run_id']:
+                        parents[rule['key']]=str(parent['run_id'])
+                    actual = parent['actual_state'] or parent['state']
+                    if parent['state'] in ('WAITING','ADMITTED','UNKNOWN'):
+                        blockers.append(dict(parent=rule['key'],state=actual,reason='Parent outcome needs review' if parent['state']=='UNKNOWN' else 'Waiting for parent completion'))
+                    elif not accepts(parent['state'],rule):
+                        state='BLOCKED';blockers.append(dict(parent=rule['key'],state=actual,reason='Parent outcome or ALLOW rule does not permit execution'))
+                    elif rule['parentMustBeNewer'] and cutoff and (parent['ended_at'] is None or parent['ended_at']<=cutoff):
+                        state='BLOCKED';blockers.append(dict(parent=rule['key'],state='STALE_PARENT',reason='Parent completed before the child last started'))
+                if not blockers:
+                    plan = {k:v for k,v in definition['plan'].items() if k!='version'}
+                    run = self.store.submit_in_transaction(conn, dict(plan,workflowKey=node['workflow_key'],requestId='dep:'+str(cascade_id)+':'+definition['key']),
+                                                           cascade['requested_by'], dependency_admission=True)
+                    node['run_id']=uuid.UUID(run['runId']);state='ADMITTED'
+                    self.store.event(conn,node['run_id'],'DEPENDENCY_ADMITTED',cascadeId=str(cascade_id),node=definition['key'],parentRuns=parents,graphRevision=cascade['graph_revision'])
+            node['state']=state
+            conn.execute('UPDATE kumo_task_engine.cascade_nodes SET state=%s,run_id=%s,blockers=%s,parent_runs=%s WHERE cascade_id=%s AND node_key=%s',
+                         (state,node['run_id'],Jsonb(blockers),Jsonb(parents),cascade_id,definition['key']))
+        states = [n['state'] for n in nodes.values()]
+        complete = all(s in NODE_DONE for s in states)
+        if complete:
+            state='FAILED' if any(s in ('FAILED','BLOCKED') for s in states) else 'CANCELLED' if cascade['cancel_requested'] or 'CANCELLED' in states else 'SKIPPED' if all(s=='SKIPPED' for s in states) else 'SUCCESS'
+        else:
+            state='UNKNOWN' if 'UNKNOWN' in states else 'RUNNING'
+        conn.execute('UPDATE kumo_task_engine.cascades SET state=%s,ended_at=CASE WHEN %s THEN COALESCE(ended_at,clock_timestamp()) ELSE NULL END WHERE id=%s', (state,complete,cascade_id))

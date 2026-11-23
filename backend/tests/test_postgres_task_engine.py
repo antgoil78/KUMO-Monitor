@@ -82,7 +82,7 @@ class PostgresWorkerTests(unittest.TestCase):
         with self.store.connect() as conn:
             assert conn.execute('SELECT current_database() AS name').fetchone()['name'].endswith('_test'),'Never truncate a non-test database'
         self.store.initialize()
-        with self.store.connect() as conn:conn.execute('TRUNCATE kumo_task_engine.schedules,kumo_task_engine.scheduler_workers,kumo_task_engine.events,kumo_task_engine.attempts,kumo_task_engine.runs RESTART IDENTITY CASCADE')
+        with self.store.connect() as conn:conn.execute('TRUNCATE kumo_task_engine.dependency_graphs,kumo_task_engine.dependency_workers,kumo_task_engine.schedules,kumo_task_engine.scheduler_workers,kumo_task_engine.events,kumo_task_engine.attempts,kumo_task_engine.runs RESTART IDENTITY CASCADE')
         self.tasks=FakeTasks(self.store);self.worker=Worker(self.store,self.tasks)
 
     def submit(self,body=None):
@@ -171,6 +171,18 @@ class PostgresWorkerTests(unittest.TestCase):
         job=self.store.read(run)['jobs'][0]
         self.assertEqual(job['state'],'SCHEDULED');self.assertIsNone(job['query_id'])
         self.assertIsNotNone(job['next_check_at'])
+
+    def test_native_execution_timestamps_are_preserved_instead_of_poll_times(self):
+        from datetime import timedelta
+        run=self.submit();self.tick();self.tasks.native[self.tasks.executions[0]]['state']='SCHEDULED';self.tick()
+        self.assertIsNone(self.store.read(run)['run']['started_at'])
+        started=datetime.now(timezone.utc)-timedelta(seconds=60)
+        ended=started+timedelta(seconds=5)
+        group=self.tasks.native[self.tasks.executions[0]]['group']
+        report=dict(state='SUCCEEDED',graph_run_group_id=group,attempt_number=1,query_id='native-query',query_start_time=started,completed_time=ended)
+        with patch.object(self.tasks,'history',return_value=report):self.tick()
+        result=self.store.read(run)['run']
+        self.assertEqual(result['started_at'],started);self.assertEqual(result['ended_at'],ended)
 
     def test_waiting_dependencies_do_not_generate_status_requests(self):
         run=self.submit(plan(jobs=[dict(key='a',sql='SELECT 1'),dict(key='b',sql='SELECT 2')]))
@@ -353,6 +365,23 @@ class ApiTests(unittest.TestCase):
         with patch('task_engine.schedules.Schedules') as service,patch.dict(os.environ,KUMO_ORCHESTRATION_RUNS_ENABLED='false'):
             for method,path in [('post','/schedules'),('patch','/schedules/id')]:
                 self.assertEqual(getattr(self.client,method)(self.integration.PREFIX+path,json={}).status_code,503)
+            service.assert_not_called()
+
+    def test_dependency_routes_use_trusted_actor_and_never_bootstrap_snowflake(self):
+        with patch('task_engine.dependencies.Graphs') as service,patch.dict(self.application.app.extensions,task_prototype_actor_context=lambda:dict(userName='TRUSTED')):
+            for name in ['status','start','read','cancel','retry_dispatch']:
+                getattr(service.return_value,name).return_value=dict(ok=True)
+            self.assertEqual(self.client.get(self.integration.PREFIX+'/graphs').status_code,200)
+            self.assertEqual(self.client.post(self.integration.PREFIX+'/graphs/id/runs',json={'requestId':'one'}).status_code,202)
+            service.return_value.start.assert_called_once_with('id',{'requestId':'one'},'TRUSTED')
+            self.assertEqual(self.client.get(self.integration.PREFIX+'/cascades/id').status_code,200)
+            self.assertEqual(self.client.post(self.integration.PREFIX+'/cascades/id/cancel').status_code,200)
+            self.assertEqual(self.client.post(self.integration.PREFIX+'/cascades/id/retry-dispatch').status_code,200)
+
+    def test_disabled_execution_controls_block_dependency_mutations(self):
+        with patch('task_engine.dependencies.Graphs') as service,patch.dict(os.environ,KUMO_ORCHESTRATION_RUNS_ENABLED='false'):
+            for path in ['/graphs/id/runs','/cascades/id/cancel','/cascades/id/retry-dispatch']:
+                self.assertEqual(self.client.post(self.integration.PREFIX+path,json={}).status_code,503)
             service.assert_not_called()
 
 

@@ -94,7 +94,7 @@ class Store:
         with self.transaction() as conn:
             return self.submit_in_transaction(conn,body,actor)
 
-    def submit_in_transaction(self,conn,body,actor):
+    def submit_in_transaction(self,conn,body,actor,*,dependency_admission=False):
         """Caller holds the admission transaction; schedules advance atomically."""
         from psycopg.types.json import Jsonb
         request_id,definition=normalize(body)
@@ -104,6 +104,8 @@ class Store:
             if previous['definition_hash']!=digest:raise Conflict('requestId already belongs to a different frozen plan')
             return dict(ok=True,runId=str(previous['id']),status=previous['state'],reused=True)
         workflow_key=definition.get('workflowKey')
+        if workflow_key and workflow_key.startswith('dep-') and not dependency_admission:
+            raise ValueError('Dependency workflow keys must be admitted through their graph')
         if workflow_key and conn.execute("SELECT id FROM kumo_task_engine.runs WHERE workflow_key=%s AND state IN ('QUEUED','RUNNING','UNKNOWN') LIMIT 1",(workflow_key,)).fetchone():
             raise WorkflowBusy('A run is already outstanding for this trial workflow')
         run_id=uuid.uuid4()
@@ -136,26 +138,42 @@ class Store:
     def cancel(self,run_id):
         run_id=uuid.UUID(str(run_id))
         with self.transaction() as conn:
-            if not conn.execute('SELECT id FROM kumo_task_engine.runs WHERE id=%s',(run_id,)).fetchone():raise LookupError('Prototype run not found')
-            conn.execute('UPDATE kumo_task_engine.runs SET cancel_requested=true WHERE id=%s',(run_id,))
-            conn.execute("UPDATE kumo_task_engine.attempts SET state='CANCELLED',ended_at=clock_timestamp(),next_check_at=NULL WHERE run_id=%s AND state='QUEUED'",(run_id,))
-            conn.execute("UPDATE kumo_task_engine.attempts SET next_check_at=clock_timestamp() WHERE run_id=%s AND state IN ('SUBMITTING','SUBMITTED','SCHEDULED','RUNNING')",(run_id,))
-            self.event(conn,run_id,'CANCEL_REQUESTED')
-            self.refresh(conn,run_id)
+            self.cancel_in_transaction(conn,run_id)
         return self.read(run_id)
+
+    def cancel_in_transaction(self,conn,run_id):
+        if not conn.execute('SELECT id FROM kumo_task_engine.runs WHERE id=%s',(run_id,)).fetchone():raise LookupError('Prototype run not found')
+        conn.execute('UPDATE kumo_task_engine.runs SET cancel_requested=true WHERE id=%s',(run_id,))
+        conn.execute("UPDATE kumo_task_engine.attempts SET state='CANCELLED',ended_at=clock_timestamp(),next_check_at=NULL WHERE run_id=%s AND state='QUEUED'",(run_id,))
+        conn.execute("UPDATE kumo_task_engine.attempts SET next_check_at=clock_timestamp() WHERE run_id=%s AND state IN ('SUBMITTING','SUBMITTED','SCHEDULED','RUNNING')",(run_id,))
+        self.event(conn,run_id,'CANCEL_REQUESTED')
+        self.refresh(conn,run_id)
 
     def refresh(self,conn,run_id):
         run=conn.execute('SELECT * FROM kumo_task_engine.runs WHERE id=%s',(run_id,)).fetchone()
         states=[r['state'] for r in conn.execute('SELECT state FROM kumo_task_engine.attempts WHERE run_id=%s',(run_id,)).fetchall()]
+        conn.execute('''UPDATE kumo_task_engine.runs SET started_at=COALESCE(started_at,
+            (SELECT MIN(native_started_at) FROM kumo_task_engine.attempts WHERE run_id=%s)) WHERE id=%s''',(run_id,run_id))
         if all(s in TERMINAL for s in states):
             state='FAILED' if 'FAILED' in states else 'CANCELLED' if 'CANCELLED' in states else 'SKIPPED' if all(s=='SKIPPED' for s in states) else 'SUCCESS'
-            conn.execute('UPDATE kumo_task_engine.runs SET state=%s,ended_at=COALESCE(ended_at,clock_timestamp()) WHERE id=%s',(state,run_id))
+            conn.execute('''UPDATE kumo_task_engine.runs SET state=%s,ended_at=COALESCE(ended_at,
+                (SELECT MAX(ended_at) FROM kumo_task_engine.attempts WHERE run_id=%s),clock_timestamp()) WHERE id=%s''',(state,run_id,run_id))
             if not run['terminal_event_written']:
                 self.event(conn,run_id,'FINISHED',state=state)
                 conn.execute('UPDATE kumo_task_engine.runs SET terminal_event_written=true WHERE id=%s',(run_id,))
+                self.queue_dependency_work(conn,run_id)
         else:
             state='UNKNOWN' if 'UNKNOWN' in states else 'QUEUED' if all(s=='QUEUED' for s in states) else 'RUNNING'
             conn.execute('UPDATE kumo_task_engine.runs SET state=%s WHERE id=%s',(state,run_id))
+            if state=='UNKNOWN' and run['state']!='UNKNOWN':self.queue_dependency_work(conn,run_id)
+
+    @staticmethod
+    def queue_dependency_work(conn,run_id):
+        # This outbox update commits with the outcome. No external dispatch can
+        # fail or change a successful parent's workload result.
+        conn.execute('''INSERT INTO kumo_task_engine.dependency_work(cascade_id)
+            SELECT cascade_id FROM kumo_task_engine.cascade_nodes WHERE run_id=%s
+            ON CONFLICT(cascade_id) DO UPDATE SET state='PENDING',next_check_at=clock_timestamp(),attempts=0,error=NULL''',(run_id,))
 
     def claim(self,owner):
         with self.transaction() as conn:
@@ -183,7 +201,7 @@ class Store:
             return job
 
     def update(self,job,owner,**changes):
-        allowed={'state','task_id','native_group_id','native_attempt','query_id','submit_started_at','observed_at','ended_at','error','recovery_checks','next_check_at','cleanup_state','cleanup_attempts','cleanup_error'}
+        allowed={'state','task_id','native_group_id','native_attempt','query_id','submit_started_at','native_started_at','observed_at','ended_at','error','recovery_checks','next_check_at','cleanup_state','cleanup_attempts','cleanup_error'}
         if not changes or set(changes)-allowed:raise ValueError('Invalid attempt update')
         with self.transaction() as conn:
             row=conn.execute('SELECT * FROM kumo_task_engine.attempts WHERE id=%s AND lease_owner=%s AND lease_until>clock_timestamp() FOR UPDATE',(job['id'],owner)).fetchone()
