@@ -19,8 +19,9 @@ this experiment, is preserved at commit `aacf516`, branch
 `checkpoint/stream-queue-20261123` and tag `rollback/stream-queue-20261123`.
 The trial is developed on `feat/postgres-task-engine`. These references are
 local; they have not been pushed. Existing workflows continue to use their
-current stream engine. This first stage exercises disposable SQL jobs only;
-catalog migration, dbt jobs and production scheduling are later work.
+current stream engine. The trial supports disposable SQL jobs and PostgreSQL
+cron schedules for those examples. Catalog migration, dbt jobs and production
+schedule migration are later work.
 
 The existing Flask app accepts trial runs into PostgreSQL. A separate worker
 from that same app creates one unscheduled Snowflake task per job attempt,
@@ -55,19 +56,66 @@ cd backend
 python -m flask --env-file ../.env.postgres.local --app app task-engine init
 python -m flask --env-file ../.env.postgres.local --app app task-engine work
 # In another terminal, with the same Python environment and working directory:
+python -m flask --env-file ../.env.postgres.local --app app task-engine schedule
+# In another terminal:
 python -m flask --env-file ../.env.postgres.local --app app run --host 127.0.0.1 --port 5000 --no-reload
 ```
 
 Run the maintained frontend with `npm run dev` in `frontend/`. Open
 `http://localhost:3000/?page=orchestrationMonitor` and use **DEV task engine
 trial** for success, failure/skip, timeout, parallel and cancellation examples.
-Manual submissions also require `KUMO_ORCHESTRATION_RUNS_ENABLED=true` in the
-backend environment. Trial status/API reads use PostgreSQL; the monitor's
+Submissions and scheduled admissions require `KUMO_ORCHESTRATION_RUNS_ENABLED=true`
+in the backend environment. Trial status/API reads use PostgreSQL; the monitor's
 existing business-workflow readers still follow connected browser sessions.
 
+Under **Trial schedules**, create a paused schedule, review its cron/timezone,
+then enable it. The default `* * * * *` runs every minute: pause it after testing
+if you do not want further warehouse executions. Editing supports the name,
+cron, timezone and grace period; the copied example plan stays immutable.
+Pausing prevents later admissions without cancelling an admitted execution.
+Resuming starts with the next future occurrence and does not replay paused time.
+
+Schedule intent (Enabled/Paused/Invalid), next planned time, scheduler health,
+occurrence decisions and actual run outcomes are separate UI fields. Schedule
+state and heartbeat refresh from PostgreSQL every five seconds while the view
+is mounted, including between runs. A healthy scheduler heartbeat is at most
+10 seconds old; 10–30 seconds is delayed and older heartbeats are unavailable.
+An overdue schedule also reports delayed health. A worker with admission
+disabled reports `EXECUTION_DISABLED`. Flask startup does not start either CLI
+worker. They run independently of logged-in users; a future SPCS deployment
+must keep its scheduler process available rather than suspending it with the UI.
+
+Scheduling is PostgreSQL-only until work is admitted. The scheduler locks a due
+schedule and records its occurrence, frozen run/attempts and next due time in
+one transaction. A unique `(schedule_id, scheduled_for)` key prevents replay
+across restarts or schedule edits. Schedule changes use expected revisions,
+and creation uses an idempotent request ID. Changes and occurrence snapshots
+are retained for review. `task-engine init` applies the incremental PostgreSQL
+[schedule migration](backend/task_engine/migrations/002_schedules.sql); existing
+runs and their history are preserved. No Snowflake DDL is needed.
+
+The grace period is 0–3600 seconds, default 60. After downtime, at most the
+latest due occurrence within grace is admitted; older occurrences are retained
+as one `MISSED` time window, with an exclusive end. Nothing outside grace is
+replayed. Zero grace requires exact punctuality and normally records a miss
+with a periodically checking worker. Runs sharing a `workflowKey` admit only
+one outstanding execution, including queued or unresolved `UNKNOWN` executions.
+The UI assigns the same key to manual and scheduled copies of an example, and
+competing schedules for that example share this guard. A due overlap records
+`SKIPPED_OVERLAP` and advances the schedule. Calls omitting `workflowKey` retain
+the first prototype's independent-run behavior; business catalog identities
+have not yet been migrated.
+
+Calendars use five numeric cron fields with lists, ranges and steps; day of
+month and weekday use OR semantics when both are restricted. IANA timezone
+names are stored alongside UTC due times. Missing local times during a daylight
+saving transition are skipped; repeated local times run at their first
+occurrence only. This policy is tested explicitly and is not an automatic
+promise of identical behavior to every existing native Snowflake schedule.
+
 The worker CLI also provides `task-engine status` and `task-engine submit
-PLAN.json`. Plans contain a stable `requestId`, optional `SEQUENTIAL` or
-`PARALLEL` mode, and jobs with `key`, `sql`, optional `timeoutSeconds` (1–300)
+PLAN.json`. Plans contain a stable `requestId`, optional `workflowKey`,
+`SEQUENTIAL` or `PARALLEL` mode, and jobs with `key`, `sql`, optional `timeoutSeconds` (1–300)
 and `dependsOn` (preceding keys only). SQL is restricted to single SELECT
 expressions from a small function allowlist. Business table reads, DML, CALLs
 and dbt execution are excluded from this prototype. Leases prevent concurrent
@@ -84,7 +132,14 @@ environment files before invoking it; the script does not read secrets files.
 Its targeted report is written to `review/`. Generated tasks are excluded from
 saved Snowflake DDL.
 
-To return to the saved queue code, stop admitting trial runs, let the worker
+The opt-in `backend/tests/live_postgres_schedules.py --run` waits for a real
+minute boundary, admits and executes a disposable native task, replaces the
+scheduler identity after admission, then checks 90 seconds with an enabled
+future schedule and no Snowflake calls. Stop other trial workers while it
+drives its own worker. It pauses its own fixture schedules on exit.
+
+To return to the saved queue code, pause all trial schedules, stop the scheduler,
+stop admitting trial runs, let the execution worker
 finish and confirm that there are no active, `UNKNOWN`, or pending/error
 cleanup attempts. Stop the local worker/API, commit or stash trial changes,
 then `git switch checkpoint/stream-queue-20261123` and restart the existing app
@@ -107,6 +162,17 @@ All disposable tasks were absent after cleanup. A 90-second idle window made
 87 PostgreSQL checks, zero Snowflake adapter calls and zero prototype-tagged
 Snowflake queries. This proves the prototype worker's idle behavior, not the
 shared warehouse's suspension while other services or users are active.
+
+The schedule extension passed 376 backend tests (58 prototype tests, with real
+isolated PostgreSQL where applicable), seven browser tests and the frontend
+build. The [live schedule report](review/dev-postgres-schedules-20261123-135257.json)
+records a real cron boundary, one native submission, successful cleanup and a
+90-second idle window with an enabled future schedule: 84 combined scheduler /
+execution-worker checks, zero Snowflake calls and zero prototype-tagged queries.
+The [localhost UI report](review/dev-postgres-schedules-local-ui.json) covers
+creation, enablement, real cron admission, pausing future work and successful
+completion/cleanup of two dependent jobs. All test fixture schedules were left
+paused. The local scheduler and execution worker remain available for testing.
 
 ## DEV/TST configuration and migration
 

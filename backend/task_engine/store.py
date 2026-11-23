@@ -18,9 +18,16 @@ class Conflict(ValueError):
     pass
 
 
+class WorkflowBusy(Conflict):
+    pass
+
+
 def normalize(body):
-    if not isinstance(body, dict) or set(body)-{'requestId','jobs','mode'}:
-        raise ValueError('Use requestId, jobs and optional SEQUENTIAL/PARALLEL mode')
+    if not isinstance(body, dict) or set(body)-{'requestId','jobs','mode','workflowKey'}:
+        raise ValueError('Use requestId, jobs, optional workflowKey and SEQUENTIAL/PARALLEL mode')
+    workflow_key = body.get('workflowKey')
+    if workflow_key is not None and (not isinstance(workflow_key,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',workflow_key)):
+        raise ValueError('workflowKey must be a simple identifier of at most 64 characters')
     request_id = body.get('requestId')
     jobs, mode = body.get('jobs'), body.get('mode', 'SEQUENTIAL')
     if not isinstance(request_id,str) or not 1 <= len(request_id.strip()) <= 128:
@@ -50,7 +57,9 @@ def normalize(body):
             raise ValueError('Dependencies must reference distinct preceding job keys')
         normalized.append(dict(key=key,sql=sql.strip(),timeoutSeconds=timeout,dependsOn=deps))
         keys.append(key)
-    return request_id.strip(),dict(mode=mode,jobs=normalized,version=1)
+    definition=dict(mode=mode,jobs=normalized,version=1)
+    if workflow_key is not None:definition['workflowKey']=workflow_key
+    return request_id.strip(),definition
 
 
 class Store:
@@ -66,6 +75,8 @@ class Store:
     def initialize(self):
         with self.connect() as conn:
             conn.execute(Path(__file__).with_name('schema.sql').read_text())
+            for path in sorted(Path(__file__).with_name('migrations').glob('*.sql')):
+                conn.execute(path.read_text())
 
     @contextmanager
     def transaction(self):
@@ -80,22 +91,29 @@ class Store:
                      (run_id,attempt_id,kind,Jsonb(facts)))
 
     def submit(self,body,actor):
+        with self.transaction() as conn:
+            return self.submit_in_transaction(conn,body,actor)
+
+    def submit_in_transaction(self,conn,body,actor):
+        """Caller holds the admission transaction; schedules advance atomically."""
         from psycopg.types.json import Jsonb
         request_id,definition=normalize(body)
         digest=hashlib.sha256(json.dumps(definition,sort_keys=True).encode()).hexdigest()
-        with self.transaction() as conn:
-            previous=conn.execute('SELECT * FROM kumo_task_engine.runs WHERE request_id=%s',(request_id,)).fetchone()
-            if previous:
-                if previous['definition_hash']!=digest:raise Conflict('requestId already belongs to a different frozen plan')
-                return dict(ok=True,runId=str(previous['id']),status=previous['state'],reused=True)
-            run_id=uuid.uuid4()
-            conn.execute("INSERT INTO kumo_task_engine.runs(id,request_id,definition,definition_hash,requested_by,state) VALUES(%s,%s,%s,%s,%s,'QUEUED')",
-                         (run_id,request_id,Jsonb(definition),digest,str(actor)[:256]))
-            for position,job in enumerate(definition['jobs']):
-                attempt=uuid.uuid4();address=self.settings.namespace+'.TMP_PG_ORCH_'+attempt.hex.upper()
-                conn.execute("INSERT INTO kumo_task_engine.attempts(id,run_id,job_key,position,snapshot,depends_on,state,task_fqn) VALUES(%s,%s,%s,%s,%s,%s,'QUEUED',%s)",
-                             (attempt,run_id,job['key'],position,Jsonb(job),job['dependsOn'],address))
-            self.event(conn,run_id,'ADMITTED')
+        previous=conn.execute('SELECT * FROM kumo_task_engine.runs WHERE request_id=%s',(request_id,)).fetchone()
+        if previous:
+            if previous['definition_hash']!=digest:raise Conflict('requestId already belongs to a different frozen plan')
+            return dict(ok=True,runId=str(previous['id']),status=previous['state'],reused=True)
+        workflow_key=definition.get('workflowKey')
+        if workflow_key and conn.execute("SELECT id FROM kumo_task_engine.runs WHERE workflow_key=%s AND state IN ('QUEUED','RUNNING','UNKNOWN') LIMIT 1",(workflow_key,)).fetchone():
+            raise WorkflowBusy('A run is already outstanding for this trial workflow')
+        run_id=uuid.uuid4()
+        conn.execute("INSERT INTO kumo_task_engine.runs(id,request_id,definition,definition_hash,requested_by,state,workflow_key) VALUES(%s,%s,%s,%s,%s,'QUEUED',%s)",
+                     (run_id,request_id,Jsonb(definition),digest,str(actor)[:256],workflow_key))
+        for position,job in enumerate(definition['jobs']):
+            attempt=uuid.uuid4();address=self.settings.namespace+'.TMP_PG_ORCH_'+attempt.hex.upper()
+            conn.execute("INSERT INTO kumo_task_engine.attempts(id,run_id,job_key,position,snapshot,depends_on,state,task_fqn) VALUES(%s,%s,%s,%s,%s,%s,'QUEUED',%s)",
+                         (attempt,run_id,job['key'],position,Jsonb(job),job['dependsOn'],address))
+        self.event(conn,run_id,'ADMITTED')
         return dict(ok=True,runId=str(run_id),status='QUEUED',reused=False)
 
     def read(self,run_id):

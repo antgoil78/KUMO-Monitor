@@ -7,3 +7,8 @@
 .task-trial-table table { width: 100%; border-collapse: collapse; }
 .task-trial-table th, .task-trial-table td { padding: 8px; text-align: left; border-bottom: 1px solid var(--corona-border, var(--line)); overflow-wrap: anywhere; }
 .task-trial small { color: var(--corona-muted, var(--muted)); }
+.task-trial-schedules { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--corona-border, var(--line)); }
+.task-trial-schedule-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 14px 0; }
+.task-trial-schedule-form label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+.task-trial-schedule-form input, .task-trial-schedule-form select { min-height: 36px; padding: 6px 10px; max-width: 240px; }
+.task-trial-schedules > small { display: block; margin-bottom: 14px; }

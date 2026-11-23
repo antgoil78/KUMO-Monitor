@@ -54,6 +54,28 @@ def read(run_id):return jsonify(encode(store().read(run_id)))
 def cancel(run_id):return jsonify(encode(store().cancel(run_id)))
 
 
+@blueprint.route(PREFIX+'/schedules')
+def schedules():
+    from .schedules import Schedules
+    return jsonify(encode(Schedules(store()).status()))
+
+
+@blueprint.route(PREFIX+'/schedules',methods=['POST'])
+def create_schedule():
+    from .schedules import Schedules
+    if os.getenv('KUMO_ORCHESTRATION_RUNS_ENABLED','').lower()!='true':raise PermissionError('Execution controls are disabled')
+    actor=current_app.extensions['task_prototype_actor_context']()
+    return jsonify(encode(Schedules(store()).create(request.get_json(silent=True),actor.get('userName') or 'LOCAL_DEV'))),201
+
+
+@blueprint.route(PREFIX+'/schedules/<schedule_id>',methods=['PATCH'])
+def update_schedule(schedule_id):
+    from .schedules import Schedules
+    if os.getenv('KUMO_ORCHESTRATION_RUNS_ENABLED','').lower()!='true':raise PermissionError('Execution controls are disabled')
+    actor=current_app.extensions['task_prototype_actor_context']()
+    return jsonify(encode(Schedules(store()).update(schedule_id,request.get_json(silent=True),actor.get('userName') or 'LOCAL_DEV')))
+
+
 def register(app,actor_context):
     app.register_blueprint(blueprint)
     app.extensions['task_prototype_actor_context']=actor_context
@@ -75,6 +97,23 @@ def register(app,actor_context):
     def enqueue(plan):
         with open(plan) as stream:body=json.load(stream)
         click.echo(json.dumps(store().submit(body,'LOCAL_DEV_CLI'),indent=2))
+
+    @commands.command('schedule')
+    @click.option('--once',is_flag=True,help='Evaluate at most one due schedule')
+    def schedule(once):
+        from .schedules import Scheduler
+        worker=Scheduler(store())
+        click.echo('DEV trial scheduler started; scheduling checks use PostgreSQL only')
+        while True:
+            try:
+                processed=worker.step(execution_enabled=os.getenv('KUMO_ORCHESTRATION_RUNS_ENABLED','').lower()=='true')
+            except Exception as exc:
+                if once:raise click.ClickException('Scheduler paused: '+type(exc).__name__) from None
+                click.echo('Scheduler paused; durable due times retained: '+type(exc).__name__,err=True)
+                time.sleep(5)
+                continue
+            if once:return
+            if not processed:time.sleep(1)
 
     @commands.command('work')
     @click.option('--once',is_flag=True,help='Perform at most one durable step')

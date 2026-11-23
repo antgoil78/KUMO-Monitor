@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "scheduleId": "547e22c9-b1b4-446e-a4a4-8b562c3a3c9e",
+  "runId": "9d3c728f-6dce-4eac-a222-a0bc99189497",
+  "plannedAt": "2026-11-23T12:54:00+00:00",
+  "scheduleState": "PAUSED",
+  "runState": "SUCCESS",
+  "jobs": 2,
+  "cleanup": "DONE",
+  "scheduler": "HEALTHY",
+  "pageErrors": [],
+  "steps": [
+    "create paused",
+    "enable",
+    "real cron admission",
+    "pause without cancellation",
+    "view native task outcomes"
+  ]
+}

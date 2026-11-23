@@ -27,7 +27,8 @@ RUN pip install --no-cache-dir \
     Flask==3.0.0 \
     Flask-CORS==4.0.0 \
     python-dotenv==1.0.0 \
-    'psycopg[binary]==3.3.9'
+    'psycopg[binary]==3.3.9' \
+    croniter==7.0.0
 
 # Copy backend files
 COPY backend/ /app/backend/

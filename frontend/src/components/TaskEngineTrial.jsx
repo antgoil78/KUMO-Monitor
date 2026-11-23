@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api.js'
 import StatusBadge from './StatusBadge.jsx'
+import TaskEngineSchedules from './TaskEngineSchedules.jsx'
 import './TaskEngineTrial.css'
 
 const examples = {
@@ -52,7 +53,7 @@ export default function TaskEngineTrial() {
     if (busyRef.current) return
     busyRef.current = true; setBusy(true); setError('')
     const value = examples[example]
-    pending.current ||= { requestId: `trial-${window.crypto.randomUUID()}`, mode: value.mode, jobs: value.jobs }
+    pending.current ||= { requestId: `trial-${window.crypto.randomUUID()}`, workflowKey: `trial-${example}`, mode: value.mode, jobs: value.jobs }
     try {
       const result = await api.submitTaskPrototype(pending.current)
       pending.current = null; setSelected(result.runId)
@@ -80,7 +81,8 @@ export default function TaskEngineTrial() {
       <button className="button primary" type="button" onClick={submit} disabled={busy}>{busy ? 'Working…' : 'Run example'}</button>
       <button className="button" type="button" onClick={() => setRevision(value => value + 1)} disabled={busy}>Refresh trials</button>
       <select aria-label="Task trial run" value={selected || current?.id || ''} onChange={event => setSelected(event.target.value)}>
-        {!status?.runs?.length && <option value="">No trial runs yet</option>}
+        {!status?.runs?.length && !selected && <option value="">No trial runs yet</option>}
+        {selected && !status?.runs?.some(run => run.id === selected) && <option value={selected}>Selected run · {selected}</option>}
         {status?.runs?.map(run => <option key={run.id} value={run.id}>{run.request_id} · {run.state}</option>)}
       </select>
       {current && ['QUEUED', 'RUNNING'].includes(current.state) && <button className="button" type="button" disabled={busy || current.cancel_requested} onClick={cancel}>{current.cancel_requested ? 'Cancellation requested' : 'Cancel run'}</button>}
@@ -92,5 +94,6 @@ export default function TaskEngineTrial() {
       {current.state === 'UNKNOWN' && <p role="status">Execution needs review. The worker has stopped automatic recovery and will not resubmit it.</p>}
     </>}
     <small>Status reads use PostgreSQL. Automatic refresh stops once runs and cleanup finish.</small>
+    <TaskEngineSchedules examples={examples} onSelectRun={id => { setSelected(id); setRevision(value => value + 1) }} />
   </details>
 }

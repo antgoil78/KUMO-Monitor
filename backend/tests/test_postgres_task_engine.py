@@ -82,7 +82,7 @@ class PostgresWorkerTests(unittest.TestCase):
         with self.store.connect() as conn:
             assert conn.execute('SELECT current_database() AS name').fetchone()['name'].endswith('_test'),'Never truncate a non-test database'
         self.store.initialize()
-        with self.store.connect() as conn:conn.execute('TRUNCATE kumo_task_engine.events,kumo_task_engine.attempts,kumo_task_engine.runs RESTART IDENTITY CASCADE')
+        with self.store.connect() as conn:conn.execute('TRUNCATE kumo_task_engine.schedules,kumo_task_engine.scheduler_workers,kumo_task_engine.events,kumo_task_engine.attempts,kumo_task_engine.runs RESTART IDENTITY CASCADE')
         self.tasks=FakeTasks(self.store);self.worker=Worker(self.store,self.tasks)
 
     def submit(self,body=None):
@@ -337,6 +337,23 @@ class ApiTests(unittest.TestCase):
             response=self.client.post(self.integration.PREFIX+'/runs',json=plan())
         self.assertEqual(response.status_code,503)
         self.database.submit.assert_not_called()
+
+    def test_schedule_routes_use_trusted_actor_and_never_access_snowflake(self):
+        with patch('task_engine.schedules.Schedules') as service,patch.dict(self.application.app.extensions,task_prototype_actor_context=lambda:dict(userName='TRUSTED')):
+            service.return_value.status.return_value=dict(ok=True,schedules=[])
+            service.return_value.create.return_value=dict(ok=True,schedule={})
+            service.return_value.update.return_value=dict(ok=True,schedule={})
+            self.assertEqual(self.client.get(self.integration.PREFIX+'/schedules').status_code,200)
+            self.assertEqual(self.client.post(self.integration.PREFIX+'/schedules',json={'name':'Test'}).status_code,201)
+            service.return_value.create.assert_called_once_with({'name':'Test'},'TRUSTED')
+            self.assertEqual(self.client.patch(self.integration.PREFIX+'/schedules/id',json={'expectedRevision':1,'enabled':False}).status_code,200)
+            service.return_value.update.assert_called_once_with('id',{'expectedRevision':1,'enabled':False},'TRUSTED')
+
+    def test_disabled_execution_controls_block_schedule_mutations(self):
+        with patch('task_engine.schedules.Schedules') as service,patch.dict(os.environ,KUMO_ORCHESTRATION_RUNS_ENABLED='false'):
+            for method,path in [('post','/schedules'),('patch','/schedules/id')]:
+                self.assertEqual(getattr(self.client,method)(self.integration.PREFIX+path,json={}).status_code,503)
+            service.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()
