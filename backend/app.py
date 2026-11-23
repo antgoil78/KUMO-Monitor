@@ -31,6 +31,7 @@ from orchestration_cache import orchestration_cache
 from mock_data import MOCK_HISTORY, MOCK_MONITOR
 from realtime_events import realtime_broker
 from activity_log import activity_journal
+from task_engine.integration import PREFIX as TASK_PROTOTYPE_PREFIX, register as register_task_prototype
 
 # Warehouse access follows actual user demand, never process startup or probes.
 _environment_lock = Lock()
@@ -1371,6 +1372,7 @@ def bind_request_context():
         _renew_activity_lease()
     g.activity_log_id = None
     if (request.path.startswith('/api/') and request.path not in _CACHE_ONLY_PATHS
+            and not request.path.startswith(TASK_PROTOTYPE_PREFIX)
             and request.method != 'OPTIONS'):
         try:
             _ensure_environment()
@@ -1402,7 +1404,8 @@ def bind_request_context():
 
 @app.after_request
 def log_response(response):
-    if (request.path.startswith('/api/orchestration/') and request.method in ('POST', 'PUT', 'PATCH', 'DELETE')
+    if (request.path.startswith('/api/orchestration/') and not request.path.startswith(TASK_PROTOTYPE_PREFIX)
+            and request.method in ('POST', 'PUT', 'PATCH', 'DELETE')
             and response.status_code < 400 and not request.path.endswith('/dag-preview')):
         orchestration_cache.refresh_async(metadata=not request.path.endswith('/runs'))
     if request.path.startswith("/api/"):
@@ -1503,6 +1506,7 @@ def _health_snapshot():
         "environmentReady": _environment_ready,
         "environmentError": _environment_error,
         "streamDispatchEnabled": config.STREAM_DISPATCH_ENABLED,
+        "taskPrototypeEnabled": os.getenv('KUMO_TASK_PROTOTYPE_ENABLED','').lower() == 'true' and config.ENVIRONMENT == 'DEV',
         "objectContext": {
             "environment": config.ENVIRONMENT or None,
             "environmentTable": config.T_APPLICATION_PARAMETERS,
@@ -2876,3 +2880,6 @@ def not_found(error):
     if request.path.startswith("/api/"):
         return jsonify({"ok": False, "error": "API route not found", "path": request.path}), 404
     return send_from_directory(app.static_folder, "index.html")
+
+
+register_task_prototype(app, _request_activity_actor)

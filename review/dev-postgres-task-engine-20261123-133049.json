@@ -1,0 +1,129 @@
+{
+  "ok": true,
+  "environment": "DEV",
+  "fixture": "e4032ed5ff",
+  "cases": {
+    "cancel": {
+      "runId": "51219745-b797-41d7-b8f9-fea046dfb4d8",
+      "state": "CANCELLED",
+      "jobs": [
+        {
+          "state": "CANCELLED",
+          "cleanup": "DONE",
+          "task": "KUMO_DEV.MONITOR_APP.TMP_PG_ORCH_E23DA27D5A5346FD96C31901AEE1FF93",
+          "queryId": "01c89a6a-010c-036c-0004-a4f20893c792",
+          "nativeGroup": "134938b8-387c-44fb-babc-f6c70eededd3",
+          "error": "SQL execution canceled"
+        }
+      ]
+    },
+    "parallel": {
+      "runId": "5b2f111c-3714-4d9e-b515-37fc25bcf09d",
+      "state": "SUCCESS",
+      "jobs": [
+        {
+          "state": "SUCCESS",
+          "cleanup": "DONE",
+          "task": "KUMO_DEV.MONITOR_APP.TMP_PG_ORCH_80DB351169BD4A63B7643BF1A023D6B5",
+          "queryId": "01c89a6a-010c-055a-0004-a4f208947102",
+          "nativeGroup": "fdd4e9d7-d1ed-42cc-b4c5-bed18d0c4ccf",
+          "error": null
+        },
+        {
+          "state": "SUCCESS",
+          "cleanup": "DONE",
+          "task": "KUMO_DEV.MONITOR_APP.TMP_PG_ORCH_779426F04077430B9F1FF535103A17AA",
+          "queryId": "01c89a6a-010c-055a-0004-a4f208947152",
+          "nativeGroup": "bddd46e4-42a1-4b0a-92cf-f45cafef4b21",
+          "error": null
+        }
+      ]
+    },
+    "success": {
+      "runId": "0aee5c77-fb99-48da-8586-e632ccdcd0ce",
+      "state": "SUCCESS",
+      "jobs": [
+        {
+          "state": "SUCCESS",
+          "cleanup": "DONE",
+          "task": "KUMO_DEV.MONITOR_APP.TMP_PG_ORCH_EA9E0A3315144556ACF0DD25EB768745",
+          "queryId": "01c89a6a-010c-0300-0004-a4f208945772",
+          "nativeGroup": "b6b6d7a6-3fb0-420b-973e-c210da412fc7",
+          "error": null
+        },
+        {
+          "state": "SUCCESS",
+          "cleanup": "DONE",
+          "task": "KUMO_DEV.MONITOR_APP.TMP_PG_ORCH_DA3129CD1B9D451CBBFB1F3A6453C0F2",
+          "queryId": "01c89a6b-010c-0300-0004-a4f20894583a",
+          "nativeGroup": "d4fb2cf0-66c3-479b-95ca-4eab2bf697c2",
+          "error": null
+        }
+      ]
+    },
+    "failure": {
+      "runId": "32eea55b-a234-4788-99f4-787a57b8f877",
+      "state": "FAILED",
+      "jobs": [
+        {
+          "state": "FAILED",
+          "cleanup": "DONE",
+          "task": "KUMO_DEV.MONITOR_APP.TMP_PG_ORCH_97074547C0F243EE85FD1D4E4E613D0D",
+          "queryId": "01c89a6a-010c-036c-0004-a4f20893c79a",
+          "nativeGroup": "2c612134-a91f-49f3-bb7b-50fec01e6903",
+          "error": "Division by zero"
+        },
+        {
+          "state": "SKIPPED",
+          "cleanup": "NONE",
+          "task": "KUMO_DEV.MONITOR_APP.TMP_PG_ORCH_325E822B02D1488AAC008AE2DBDB3228",
+          "queryId": null,
+          "nativeGroup": null,
+          "error": "Dependency did not succeed"
+        }
+      ]
+    },
+    "timeout": {
+      "runId": "4a8e78c2-30d7-4f94-a576-6350fba94cf4",
+      "state": "FAILED",
+      "jobs": [
+        {
+          "state": "FAILED",
+          "cleanup": "DONE",
+          "task": "KUMO_DEV.MONITOR_APP.TMP_PG_ORCH_1A15A1DD051843D6952BE19ED20581F3",
+          "queryId": "01c89a6b-010c-036c-0004-a4f20893c79e",
+          "nativeGroup": "6d4732d6-4837-4145-a818-6b07d07f178e",
+          "error": "Statement reached its statement or warehouse timeout of 5 second(s) and was canceled."
+        }
+      ]
+    },
+    "lost_ack": {
+      "runId": "b452d319-3992-4207-8ce8-ef75fcfc982b",
+      "state": "SUCCESS",
+      "jobs": [
+        {
+          "state": "SUCCESS",
+          "cleanup": "DONE",
+          "task": "KUMO_DEV.MONITOR_APP.TMP_PG_ORCH_26E30DE63AC44D5DBC1DCF5C1556BE22",
+          "queryId": "01c89a6b-010c-036c-0004-a4f20893c7a2",
+          "nativeGroup": "f59ecbae-743e-4bd9-ac0f-c9abf7969ed5",
+          "error": null
+        }
+      ]
+    }
+  },
+  "assertions": {
+    "idempotentAdmission": true,
+    "nativeExecutionOnce": true,
+    "lostAcknowledgmentWorkerRestart": true,
+    "parallelOverlap": true,
+    "terminalTasksAbsent": true
+  },
+  "idle": {
+    "start": "2026-11-23T12:29:15.322513+00:00",
+    "end": "2026-11-23T12:30:46.071680+00:00",
+    "postgresChecks": 87,
+    "snowflakeAdapterCalls": 0,
+    "taggedSnowflakeQueries": 0
+  }
+}

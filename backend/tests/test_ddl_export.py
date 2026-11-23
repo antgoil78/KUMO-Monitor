@@ -89,6 +89,7 @@ class DdlExportTests(unittest.TestCase):
                      ("TABLE", "KUMO_TST.MONITOR_META.WORKFLOWS"),
                      ("TASK", "KUMO_DEV.MONITOR_APP.TMP_WF_EXAMPLE"),
                      ("TASK", "KUMO_DEV.MONITOR_APP.TMP_ORCH_WF_1234ABCD_1234"),
+                     ("TASK", "KUMO_DEV.MONITOR_APP.TMP_PG_ORCH_1234ABCD"),
                      ("TASK", "KUMO_DEV.MONITOR_APP.TASK_ORCH_WF_1234ABCD_1234_1234_1234_123456789ABC"),
                      ("TASK", "KUMO_DEV.MONITOR_APP.TASK_WF_1234ABCD_SCHEDULER"),
                      ("PROCEDURE", "KUMO_DEV.MONITOR_APP.SP_TEST")]:

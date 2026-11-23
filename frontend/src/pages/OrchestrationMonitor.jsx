@@ -9,6 +9,7 @@ import EditorDialog from '../components/EditorDialog.jsx'
 import HierarchyToggle from '../components/HierarchyToggle.jsx'
 import ActionIcon from '../components/ActionIcon.jsx'
 import OrchestrationTimeline from '../components/OrchestrationTimeline.jsx'
+import TaskEngineTrial from '../components/TaskEngineTrial.jsx'
 import useOrchestrationMonitor, { activeWorkflowStatuses, applySubmission } from '../utils/useOrchestrationMonitor.js'
 import { RunWorkflowDialog } from './WorkflowExecution.jsx'
 import './OrchestrationMonitor.css'
@@ -309,6 +310,7 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
 
   return <section className="page om-page">
     <PageHeader breadcrumb="Workflow / Monitor" title="Workflow Monitor" subtitle="Workflow and job execution status." actions={<button className="button" type="button" disabled={refreshing} onClick={() => { refresh(); setTimelineRefresh(value => value + 1) }}>{refreshing ? 'Refreshing…' : '↻ Refresh'}</button>} />
+    <TaskEngineTrial />
     {error && <div className="alert error" role="alert">{error}{data && ' Showing the last successful refresh.'}</div>}
     {saveError && !scheduleSelection && <div className="alert error" role="alert">{saveError}</div>}
     {notice && <div className="alert info" role="status">{notice}</div>}

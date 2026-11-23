@@ -12,6 +12,102 @@ stay local to each developer machine.
 
 Use `.env.example` as the non-secret template for required variables.
 
+## Local PostgreSQL and native-task trial
+
+The queue/stream implementation, including the working changes present before
+this experiment, is preserved at commit `aacf516`, branch
+`checkpoint/stream-queue-20261123` and tag `rollback/stream-queue-20261123`.
+The trial is developed on `feat/postgres-task-engine`. These references are
+local; they have not been pushed. Existing workflows continue to use their
+current stream engine. This first stage exercises disposable SQL jobs only;
+catalog migration, dbt jobs and production scheduling are later work.
+
+The existing Flask app accepts trial runs into PostgreSQL. A separate worker
+from that same app creates one unscheduled Snowflake task per job attempt,
+executes it, observes only outstanding submissions/executions, commits the
+native outcome, then drops the task. Completed jobs are never polled again.
+Cleanup has a separate bounded retry state and cannot change the job outcome.
+The idle worker checks PostgreSQL once a second and opens no Snowflake session.
+It does not depend on a logged-in browser to finish admitted work.
+
+Admission freezes SQL, dependencies and timeouts in one PostgreSQL transaction.
+A repeated request ID reuses the same run; a changed plan with that ID is
+rejected. Submission ambiguity is persisted before `EXECUTE TASK`. After a
+lost acknowledgment or worker restart, the worker checks that unique task's
+history and never automatically executes the attempt again. Unresolved history
+or changed native task identity becomes `UNKNOWN` after bounded recovery and
+requires operator review. Dependants of an unknown attempt remain blocked.
+There is deliberately no automatic retry/reset button for ambiguous attempts.
+
+Create a local, ignored `.env.postgres.local` with permissions `0600`. It needs
+`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB=kumo_engine_dev`,
+`KUMO_TASK_PROTOTYPE_ENABLED=true` and a `KUMO_POSTGRES_DSN` connection URI for
+that database at `127.0.0.1:55432`. Use a generated password and URI-encode it.
+Keep the existing Snowflake credentials in `.env`. Do not commit either file.
+The trial is restricted to DEV and `KUMO_DEV.MONITOR_APP.TMP_PG_ORCH_*` tasks.
+Its default warehouse is `KUMO_ELT_GEN_1` and role is `KUMO_ADMIN`.
+
+```bash
+docker volume create kumo-monitor-postgres-dev
+docker compose --env-file .env.postgres.local -f compose.task-engine.yml up -d
+# Activate a Python environment with requirements.txt installed, then:
+cd backend
+python -m flask --env-file ../.env.postgres.local --app app task-engine init
+python -m flask --env-file ../.env.postgres.local --app app task-engine work
+# In another terminal, with the same Python environment and working directory:
+python -m flask --env-file ../.env.postgres.local --app app run --host 127.0.0.1 --port 5000 --no-reload
+```
+
+Run the maintained frontend with `npm run dev` in `frontend/`. Open
+`http://localhost:3000/?page=orchestrationMonitor` and use **DEV task engine
+trial** for success, failure/skip, timeout, parallel and cancellation examples.
+Manual submissions also require `KUMO_ORCHESTRATION_RUNS_ENABLED=true` in the
+backend environment. Trial status/API reads use PostgreSQL; the monitor's
+existing business-workflow readers still follow connected browser sessions.
+
+The worker CLI also provides `task-engine status` and `task-engine submit
+PLAN.json`. Plans contain a stable `requestId`, optional `SEQUENTIAL` or
+`PARALLEL` mode, and jobs with `key`, `sql`, optional `timeoutSeconds` (1–300)
+and `dependsOn` (preceding keys only). SQL is restricted to single SELECT
+expressions from a small function allowlist. Business table reads, DML, CALLs
+and dbt execution are excluded from this prototype. Leases prevent concurrent
+claims; the PostgreSQL implementation uses one transaction lock for this small
+trial, so it is not a throughput benchmark. Cancellation is given priority
+over queued submissions, and requires native confirmation. A job that has
+already finished retains its actual outcome when cancellation arrives late.
+
+For automated PostgreSQL tests, create a separate database ending in `_test`
+and set `KUMO_TASK_ENGINE_TEST_DSN` to it. The tests truncate only that isolated
+database. The opt-in `backend/tests/live_postgres_task_engine.py --run` performs
+disposable DEV native-task tests and a 90-second idle check. Load the local
+environment files before invoking it; the script does not read secrets files.
+Its targeted report is written to `review/`. Generated tasks are excluded from
+saved Snowflake DDL.
+
+To return to the saved queue code, stop admitting trial runs, let the worker
+finish and confirm that there are no active, `UNKNOWN`, or pending/error
+cleanup attempts. Stop the local worker/API, commit or stash trial changes,
+then `git switch checkpoint/stream-queue-20261123` and restart the existing app
+without the trial environment file. The tag remains available even if the
+checkpoint branch moves. Git switching does not cancel native executions or
+undo PostgreSQL state. Retain the PostgreSQL volume until any unresolved
+attempts have been reviewed; do not reset them to queued.
+
+This is local/DEV scaffolding for an SPCS-hosted backend architecture. It does
+not provision PostgreSQL for SPCS, replace existing workflow schedules, update
+SPCS services, publish images, or modify TST.
+
+Validated on 2026-11-23: 348 backend tests (including 30 prototype tests with
+real isolated PostgreSQL where applicable), three new browser tests, frontend
+production build, and the actual localhost panel. The
+[native DEV test report](review/dev-postgres-task-engine-20261123-133049.json)
+covers success, failure/dependent skip, timeout, confirmed cancellation,
+parallel overlap and lost-acknowledgment recovery after worker replacement.
+All disposable tasks were absent after cleanup. A 90-second idle window made
+87 PostgreSQL checks, zero Snowflake adapter calls and zero prototype-tagged
+Snowflake queries. This proves the prototype worker's idle behavior, not the
+shared warehouse's suspension while other services or users are active.
+
 ## DEV/TST configuration and migration
 
 Set the full parameter table path when starting the service:
