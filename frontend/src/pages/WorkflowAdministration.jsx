@@ -72,7 +72,7 @@ export default function WorkflowAdministration({ onNavigate, workflowId = '', wo
   async function load() {
     setLoading(true); setError('')
     try {
-      const [configuration, status] = await Promise.allSettled([configurationApiClient.orchestrationConfiguration(), trial ? Promise.resolve({ installed: false, runsEnabled: false, message: 'Run the full WF1 trial from Monitor / Workflow dependency trial.' }) : api.orchestrationEngine()])
+      const [configuration, status] = await Promise.allSettled([configurationApiClient.orchestrationConfiguration(), trial ? Promise.resolve({ installed: false, runsEnabled: false, message: 'Run supported workflows from Monitor. Starting a root runs its complete dependency group.' }) : api.orchestrationEngine()])
       if (configuration.status === 'rejected') throw configuration.reason
       setCatalog(configuration.value)
       setEngine(status.status === 'fulfilled' ? status.value : { installed: false, runsEnabled: false, message: 'Parallel engine is unavailable.' })

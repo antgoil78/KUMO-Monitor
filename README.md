@@ -19,10 +19,68 @@ this experiment, is preserved at commit `aacf516`, branch
 `checkpoint/stream-queue-20261123` and tag `rollback/stream-queue-20261123`.
 The trial is developed on `feat/postgres-task-engine`. These references are
 local; they have not been pushed. Existing workflows continue to use their
-current stream engine. The trial supports disposable SQL jobs and PostgreSQL
-cron schedules for those examples, plus an isolated WF1–WF4 dependency snapshot.
-Full business catalog migration, dbt jobs and production schedule migration are
-later work.
+current stream engine through the Snowflake source. The PostgreSQL source in
+the maintained Monitor now contains the complete DEV workflow/job catalog.
+WF1–WF10 SQL test workflows are compatible with the worker. DBT/business SQL
+execution, graph schedules and production migration are later work.
+
+### Complete PostgreSQL Monitor
+
+Use **Workflow / Monitor → PostgreSQL · DEV workflows**. The existing table,
+timeline, history and execution log read PostgreSQL. The complete catalog is
+the `dev-workflow-catalog` graph's `catalog` JSONB value in
+`kumo_task_engine.dependency_graphs`; executable graph nodes are derived from
+that master. All workflow/job definitions, commands, assignments, dependency
+rules and source schedule settings are retained. Unsupported definitions remain
+visible with an explanation and disabled execution controls. Unassigned jobs
+are shown in a separate group. Editing uses the same Workflow, Job and
+Dependencies screens, with revision conflict protection and audit history.
+
+For a fresh local database, from `backend/` after initialization:
+
+```bash
+# Explicit read of the three DEV application configuration tables; preview only.
+python -m flask --env-file ../.env.postgres.local --app app task-engine import-catalog
+# One-time promotion. Existing PostgreSQL WF1 edits and executions are preserved.
+python -m flask --env-file ../.env.postgres.local --app app task-engine import-catalog --apply
+```
+
+Import never starts tasks or enables schedules and cannot overwrite an
+installed master. It performs no Snowflake catalog or DDL writes. Existing
+Snowflake history remains available through the Snowflake source; it is not
+copied into PostgreSQL. Earlier PostgreSQL trial execution history remains
+visible under the original source workflow IDs.
+
+**Run workflow** on a supported root starts its complete connected dependency
+group, shown in the run dialog. With the current DEV definitions, **Run WF1**
+now includes **WF1–WF10**. Child/individual-job/from-job starts are unavailable.
+Independent groups may execute concurrently. Overlap checks use stable workflow
+keys, including waiting nodes, so an edge edit cannot bypass an outstanding
+older group. Cancellation targets the whole group and waits for confirmation.
+Configuration changes never rewrite an accepted group's snapshot. SQL jobs
+validated against the current SELECT-expression restrictions retain that guard
+when edited; unsupported business commands can be retained as configuration
+without becoming executable.
+
+The backend worker alone polls Snowflake's Information Schema `TASK_HISTORY`
+for recorded outstanding native submissions, including native queue states.
+It persists results in PostgreSQL, cleans up, then stops polling those tasks.
+It continues admitted work without connected browsers. Browser status refreshes
+read PostgreSQL every two seconds; timeline/history reads also use PostgreSQL.
+PostgreSQL presence connections do not start the existing Snowflake cache,
+dashboard or lock readers. If a separate Snowflake-source client is connected,
+that client can still activate its existing readers. Missing feature discovery
+does not silently select Snowflake. Authentication may resolve identity through
+a warehouse-free Snowflake metadata connection; the header reports Snowflake
+as **on demand** on PostgreSQL pages.
+
+Migration `005_catalog_monitor.sql` preserves existing runs, gives cascade nodes
+stable view identities and replaces the graph-wide admission constraint with a
+per-group constraint. Initialization applies only unapplied numbered migrations;
+repeating it cannot recreate the superseded graph-wide index. Imported graph
+schedules stay inactive; the earlier standalone-example scheduler is separate.
+DBT progress/DAG execution, SQL conditions, business commands, definition
+creation/deletion and assignment additions/removals remain outside this stage.
 
 The existing Flask app accepts trial runs into PostgreSQL. A separate worker
 from that same app creates one unscheduled Snowflake task per job attempt,
@@ -63,8 +121,10 @@ python -m flask --env-file ../.env.postgres.local --app app run --host 127.0.0.1
 ```
 
 Run the maintained frontend with `npm run dev` in `frontend/`. Open
-`http://localhost:3000/?page=orchestrationMonitor` and use **DEV task engine
-trial** for success, failure/skip, timeout, parallel and cancellation examples.
+`http://localhost:3000/?page=orchestrationMonitor` and select the PostgreSQL source.
+Before complete-catalog promotion, **DEV task engine trial** in the Snowflake
+source provides success, failure/skip, timeout, parallel and cancellation examples.
+That temporary panel is hidden once the complete PostgreSQL catalog is installed.
 Submissions and scheduled admissions require `KUMO_ORCHESTRATION_RUNS_ENABLED=true`
 in the backend environment. Trial status/API reads use PostgreSQL; the monitor's
 existing business-workflow readers still follow connected browser sessions.
@@ -104,8 +164,8 @@ one outstanding execution, including queued or unresolved `UNKNOWN` executions.
 The UI assigns the same key to manual and scheduled copies of an example, and
 competing schedules for that example share this guard. A due overlap records
 `SKIPPED_OVERLAP` and advances the schedule. Calls omitting `workflowKey` retain
-the first prototype's independent-run behavior; business catalog identities
-have not yet been migrated.
+the first prototype's independent-run behavior. These example workflow keys
+remain separate from the complete catalog's workflow identities.
 
 Calendars use five numeric cron fields with lists, ranges and steps; day of
 month and weekday use OR semantics when both are restricted. IANA timezone
@@ -116,7 +176,7 @@ promise of identical behavior to every existing native Snowflake schedule.
 
 ### WF1 workflow dependency trial
 
-The **Workflow dependency trial** section of the same local Monitor tests
+Before complete-catalog promotion, the **Workflow dependency trial** section tests
 `WF1 → (WF2, WF3) → WF4` in PostgreSQL. Use its **Run WF1** button; the existing
 workflow controls farther down the page still use their current Snowflake
 engine. WF5–WF10 are outside this snapshot and are not released by it.
@@ -154,7 +214,8 @@ these four workflows is read; no live account inventory or DDL export is used.
 
 The existing **Workflow**, **Job** and **Dependencies** pages offer a
 **Configuration source** selector when the DEV task prototype is enabled.
-Select **PostgreSQL · WF1–WF4 DEV trial** (the default) to edit the trial.
+Select **PostgreSQL · DEV workflows** (the default). Before complete-catalog
+promotion this edits the WF1 trial; afterward it edits the complete catalog.
 The Snowflake selection continues to address the existing engine's catalog;
 these are distinct execution scopes and changes are never mirrored between them.
 The source choice persists for this browser tab. A PostgreSQL error leaves that
@@ -307,6 +368,23 @@ WF4 after both parents, one acknowledged submission per workflow, and all
 temporary-task cleanup complete. See the [validation summary](review/dev-postgres-master-configuration-validation.json)
 for scope and remaining limitations. No existing Snowflake catalog, static DDL,
 TST or SPCS service was changed.
+
+The complete-catalog Monitor extension was checked against 434 unique backend
+tests across the full and final targeted runs, 42 unique browser tests and 34
+frontend unit tests; the frontend build passed. The
+[catalog promotion report](review/dev-postgres-monitor-catalog.json) records all
+26 workflows and 51 jobs, with ten executable SQL test workflows and 16
+workflows requiring further execution support. No workflows were started by
+the import or Monitor verification, and no graph schedules were enabled.
+The [live localhost check](review/dev-postgres-monitor-local-ui.json) kept two
+real browser sessions connected for 90 seconds: 98 PostgreSQL Monitor reads,
+zero Snowflake database events from the API, zero Snowflake connections from
+the idle execution worker, and all three existing Snowflake background readers
+disabled. Existing PostgreSQL history/log navigation and all 26 dependency
+configuration groups were also checked. See the
+[validation summary](review/dev-postgres-monitor-validation.json) for coverage
+and remaining scope. No Snowflake static DDL, existing configuration, TST or
+SPCS service was changed.
 
 ## DEV/TST configuration and migration
 

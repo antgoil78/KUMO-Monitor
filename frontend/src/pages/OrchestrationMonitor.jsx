@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { api } from '../api.js'
+import { api, configurationApi } from '../api.js'
+import ConfigurationSource, { useConfigurationSource } from '../components/ConfigurationSource.jsx'
 import LoadingState from '../components/LoadingState.jsx'
 import PageHeader from '../components/PageHeader.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
@@ -14,12 +15,13 @@ import useOrchestrationMonitor, { activeWorkflowStatuses, applySubmission } from
 import { RunWorkflowDialog } from './WorkflowExecution.jsx'
 import './OrchestrationMonitor.css'
 
-const statuses = ['RUNNING', 'CLAIMED', 'QUEUED', 'FAILED', 'SUCCESS', 'WARNING', 'SKIPPED', 'CANCELLED', 'NOT RUN']
+const statuses = ['RUNNING', 'CLAIMED', 'QUEUED', 'FAILED', 'SUCCESS', 'WARNING', 'SKIPPED', 'CANCELLED', 'NOT RUN', 'WAITING', 'BLOCKED', 'UNKNOWN']
 const summaryStatuses = [
   ['SUCCESS', 'success', '✓', 'success'], ['FAILED', 'failed', '×', 'failed'],
   ['RUNNING', 'running', '▶', 'running/init'], ['QUEUED', 'queued', '●', 'queued'],
   ['NOT RUN', 'muted', '—', 'not run'], ['WARNING', 'warning', '!', 'warning'],
-  ['SKIPPED', 'skipped', '↷', 'skipped'], ['CANCELLED', 'muted', '—', 'cancelled']
+  ['SKIPPED', 'skipped', '↷', 'skipped'], ['CANCELLED', 'muted', '—', 'cancelled'],
+  ['WAITING', 'queued', '●', 'waiting'], ['BLOCKED', 'warning', '!', 'blocked'], ['UNKNOWN', 'warning', '!', 'needs review']
 ]
 const timeFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Stockholm', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 const dateFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Stockholm', day: '2-digit', month: 'short', year: 'numeric' })
@@ -54,7 +56,7 @@ function RunCells({ run, lastRun, now }) {
   return <><td><span className="om-live-status">{['INITIATING', 'CLAIMED', 'QUEUED', 'RUNNING'].includes(run.status) && <span className="om-spinner" role="img" aria-label={run.status === 'RUNNING' ? 'Execution in progress' : 'Preparing execution'} />}<StatusBadge status={run.status === 'CLAIMED' ? 'INITIATING' : run.status} /></span>{phase && <small>{phase}</small>}</td><td className="om-time" title={timing.start || ''}>{start ? <>{timeFormatter.format(start)}<small className={day.tone ? `om-day-${day.tone}` : ''}>{day.label}</small></> : '—'}</td><td className="om-time">{durationLabel(run, now)}</td></>
 }
 
-function RunActions({ name, displayName, disabled, reason, onRun, onHistory, onRunFrom, onDag, canDag, onLog, canLog, onState, enabled, busy, onSchedule, scheduleEnabled, onEditSchedule }) {
+function RunActions({ name, displayName, disabled, reason, onRun, onHistory, onRunFrom, onDag, canDag, onLog, canLog, onState, enabled, busy, onSchedule, scheduleEnabled, onEditSchedule, onCancel }) {
   const [menu, setMenu] = useState(null)
   const trigger = useRef(null)
   const options = useRef(null)
@@ -112,6 +114,7 @@ function RunActions({ name, displayName, disabled, reason, onRun, onHistory, onR
         <button type="button" onClick={() => act(onHistory)}><ActionIcon name="history" /><span>Execution history</span></button>
       </div>
       <div className="om-action-section">
+        {onCancel && <button type="button" disabled={busy} onClick={() => act(onCancel)}><ActionIcon name="pause" /><span>Cancel execution group</span></button>}
         <button type="button" disabled={busy || !onState} onClick={() => act(onState)}><ActionIcon name={enabled ? 'pause' : 'power'} /><span>{enabled ? 'Disable' : 'Enable'} {onRunFrom ? 'job' : 'workflow'}</span></button>
         {onSchedule && <><button type="button" disabled={busy} onClick={() => act(onSchedule)}><ActionIcon name={scheduleEnabled ? 'calendarOff' : 'calendar'} /><span>{scheduleEnabled ? 'Disable schedule' : 'Enable schedule'}</span></button><button type="button" disabled={busy} onClick={() => act(onEditSchedule)}><ActionIcon name="edit" /><span>Edit schedule…</span></button></>}
       </div>
@@ -178,6 +181,7 @@ function ScheduleDialog({ workflow, busy, error, onClose, onSave }) {
 function workflowDetail(workflow) {
   return [workflow.run.waitingFor?.length && `Waiting for ${workflow.run.waitingFor.map(item => `${item.name} (${item.status})`).join(', ')}`,
     workflow.run.message, workflow.WORKFLOW_GROUP || 'Ungrouped', !workflow.IS_ENABLED && 'Disabled',
+    workflow.source === 'POSTGRES' && workflow.runUnavailable,
     workflow.run.runId && workflow.run.mode?.replaceAll('_', ' '), workflow.run.requestedBy,
     workflow.parentWorkflowName && `After ${workflow.parentWorkflowName}`,
     workflow.queuedCount > 0 && `${workflow.queuedCount} queued`].filter(Boolean).join(' · ')
@@ -187,7 +191,7 @@ function jobDetail(job) {
   return [job.runOnly && 'No longer assigned', job.JOB_IS_ENABLED === false && 'Disabled', job.run.message || jobProgress(job)].filter(Boolean).join(' · ')
 }
 
-function WorkflowRows({ workflow, expanded, onToggle, onHistory, onRun, onDag, onLog, onState, onSchedule, onEditSchedule, busy, now }) {
+function WorkflowRows({ workflow, onCancel, expanded, onToggle, onHistory, onRun, onDag, onLog, onState, onSchedule, onEditSchedule, busy, now }) {
   const { total, succeeded, failed, skipped, cancelled = 0, completed = succeeded + failed + skipped + cancelled } = workflow.progress
   const parallel = (workflow.run.runId ? workflow.run.jobExecutionMode : workflow.JOB_EXECUTION_MODE) === 'PARALLEL'
   const percent = workflow.progress.percent ?? (total ? Math.round(completed / total * 100) : 0)
@@ -204,7 +208,7 @@ function WorkflowRows({ workflow, expanded, onToggle, onHistory, onRun, onDag, o
           <div className="om-name">
             <HierarchyToggle expanded={expanded} onClick={onToggle} aria-controls={bodyId} aria-label={`${expanded ? 'Hide' : 'Show'} jobs for ${workflow.WORKFLOW_NAME}`} />
             <div className="om-name-text"><button type="button" className="om-workflow-link" aria-label={`Execution history for ${workflow.WORKFLOW_NAME}`} onClick={onHistory}><strong title={workflow.WORKFLOW_NAME}>{workflow.WORKFLOW_NAME}</strong></button><small className={workflow.run.message ? 'om-name-detail om-error' : 'om-name-detail'} title={workflowDetail(workflow)}>{workflowDetail(workflow)}</small></div>
-            <RunActions name={`workflow ${workflow.WORKFLOW_NAME}`} displayName={workflow.WORKFLOW_NAME} disabled={runDisabled} reason={runReason} onRun={() => onRun()} onHistory={onHistory} onLog={() => onLog()} canLog={Boolean(workflow.run.runId)} onState={() => onState()} enabled={workflow.IS_ENABLED} busy={busy} onSchedule={onSchedule} scheduleEnabled={workflow.IS_SCHEDULE_ENABLED} onEditSchedule={onEditSchedule} />
+            <RunActions name={`workflow ${workflow.WORKFLOW_NAME}`} displayName={workflow.WORKFLOW_NAME} disabled={runDisabled} reason={runReason} onRun={() => onRun()} onHistory={onHistory} onLog={() => onLog()} canLog={Boolean(workflow.run.runId)} onState={workflow.isUnassigned ? null : () => onState()} onCancel={onCancel} enabled={workflow.IS_ENABLED} busy={busy} onSchedule={onSchedule} scheduleEnabled={workflow.IS_SCHEDULE_ENABLED} onEditSchedule={onEditSchedule} />
           </div>
         </th>
         <td><span className="om-kind">Workflow</span><small>{assignedCount} assigned {assignedCount === 1 ? 'job' : 'jobs'}{parallel ? ' · Parallel' : ''}</small></td>
@@ -217,7 +221,7 @@ function WorkflowRows({ workflow, expanded, onToggle, onHistory, onRun, onDag, o
     </tbody>
     <tbody id={bodyId} className="om-children" hidden={!expanded}>
       {workflow.jobs.map(job => <tr key={job.JOB_ID} className={!workflow.IS_ENABLED || job.JOB_IS_ENABLED === false ? 'om-row-disabled' : undefined}>
-        <th scope="row"><div className="om-job-name"><span className="om-sequence" title="Configured job order">{String(job.JOB_SEQUENCE || '—').padStart(2, '0')}</span><div className="om-name-text"><strong title={job.JOB_NAME}>{job.JOB_NAME}</strong><small className={job.run.status === 'FAILED' ? 'om-name-detail om-error' : 'om-name-detail'} title={jobDetail(job)}>{jobDetail(job)}</small></div><RunActions name={`${job.JOB_NAME} in ${workflow.WORKFLOW_NAME}`} displayName={job.JOB_NAME} disabled={runDisabled || job.runOnly || job.JOB_IS_ENABLED === false} reason={job.runOnly ? 'Job is no longer assigned.' : job.JOB_IS_ENABLED === false ? 'Job is disabled.' : runReason} onRun={() => onRun(job.JOB_ID)} onRunFrom={() => onRun(job.JOB_ID, 'FROM_JOB')} onHistory={() => onHistory(job)} onDag={job.JOB_TYPE === 'DBT' ? () => onDag(job) : undefined} canDag={Boolean(job.lastRun?.runId)} onLog={() => onLog(job)} canLog={Boolean(job.run.executionId || job.lastRun?.executionId)} onState={job.runOnly ? null : () => onState(job)} enabled={job.JOB_IS_ENABLED} busy={busy} /></div></th>
+        <th scope="row"><div className="om-job-name"><span className="om-sequence" title="Configured job order">{String(job.JOB_SEQUENCE || '—').padStart(2, '0')}</span><div className="om-name-text"><strong title={job.JOB_NAME}>{job.JOB_NAME}</strong><small className={job.run.status === 'FAILED' ? 'om-name-detail om-error' : 'om-name-detail'} title={jobDetail(job)}>{jobDetail(job)}</small></div><RunActions name={`${job.JOB_NAME} in ${workflow.WORKFLOW_NAME}`} displayName={job.JOB_NAME} disabled={workflow.source === 'POSTGRES' || runDisabled || job.runOnly || job.JOB_IS_ENABLED === false} reason={workflow.source === 'POSTGRES' ? 'Individual job execution is not available; start the complete dependency group.' : job.runOnly ? 'Job is no longer assigned.' : job.JOB_IS_ENABLED === false ? 'Job is disabled.' : runReason} onRun={() => onRun(job.JOB_ID)} onRunFrom={() => onRun(job.JOB_ID, 'FROM_JOB')} onHistory={() => onHistory(job)} onDag={job.JOB_TYPE === 'DBT' ? () => onDag(job) : undefined} canDag={workflow.source !== 'POSTGRES' && Boolean(job.lastRun?.runId)} onLog={() => onLog(job)} canLog={Boolean(job.run.executionId || job.lastRun?.executionId)} onState={job.runOnly ? null : () => onState(job)} enabled={job.JOB_IS_ENABLED} busy={busy} /></div></th>
         <td><span className="om-kind">{job.JOB_TYPE || '—'}</span><small>{job.JOB_LAYER || 'GENERAL'}</small></td>
         <RunCells run={job.run} lastRun={job.lastRun} now={now} />
         <td><JobProgress job={job} /></td>
@@ -230,7 +234,9 @@ function WorkflowRows({ workflow, expanded, onToggle, onHistory, onRun, onDag, o
 }
 
 export default function OrchestrationMonitor({ onNavigate, monitorState = null }) {
-  const { data, error, loading, refreshing, refresh, acceptSubmission } = useOrchestrationMonitor()
+  const selection = useConfigurationSource()
+  const { source, trial: postgres } = selection
+  const { data, error, loading, refreshing, refresh, acceptSubmission } = useOrchestrationMonitor(!!source, source)
   const [now, setNow] = useState(Date.now())
   const [search, setSearch] = useState(monitorState?.search || '')
   const [status, setStatus] = useState(monitorState?.status || '')
@@ -247,7 +253,7 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
   const statusAgeSeconds = Math.max(0, Math.floor((now - Date.parse(data?.generatedAt)) / 1000))
   const statusDelayed = statusAgeSeconds > Math.max(15, (data?.refreshSeconds || 5) * 3)
   const rows = useMemo(() => (data?.rows || []).map(workflow => applySubmission(workflow, data?.submissions)), [data])
-  const summary = useMemo(() => rows.reduce((counts, workflow) => {
+  const summary = useMemo(() => rows.filter(workflow => !workflow.isUnassigned).reduce((counts, workflow) => {
     const state = ['SUBMITTING', 'INITIATING', 'CLAIMED'].includes(workflow.run.status) ? 'RUNNING' : workflow.run.status
     counts[state] = (counts[state] || 0) + 1
     return counts
@@ -276,7 +282,13 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
     if (savingRef.current) return
     savingRef.current = true; setSaving(true); setSaveError(''); setNotice('')
     try {
-      const result = job ? await api.setOrchestrationJobState(job.JOB_ID, !job.JOB_IS_ENABLED, job.JOB_IS_ENABLED)
+      let result
+      if (postgres) {
+        const client = configurationApi(source)
+        result = job ? await client.updateOrchestrationJob(job.JOB_ID, { revision: data.configurationRevision, enabled: !job.JOB_IS_ENABLED })
+          : await client.updateOrchestrationWorkflow(workflow.WORKFLOW_ID, { revision: data.configurationRevision, enabled: !workflow.IS_ENABLED })
+        result = { ...result, enabled: job ? !job.JOB_IS_ENABLED : !workflow.IS_ENABLED }
+      } else result = job ? await api.setOrchestrationJobState(job.JOB_ID, !job.JOB_IS_ENABLED, job.JOB_IS_ENABLED)
         : await api.setOrchestrationWorkflowState(workflow.WORKFLOW_ID, !workflow.IS_ENABLED, workflow.IS_ENABLED)
       setNotice(result.warning || `${job ? job.JOB_NAME : workflow.WORKFLOW_NAME} ${result.enabled ? 'enabled' : 'disabled'}.${job ? ' Applies wherever this job is used.' : ''}`)
       refresh()
@@ -305,12 +317,15 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
     onNavigate(kind === 'log' ? 'executionLog' : 'dag', { workflowId: workflow.WORKFLOW_ID,
       workflowName: job ? `${workflow.WORKFLOW_NAME} / ${job.JOB_NAME}` : workflow.WORKFLOW_NAME,
       runId, returnPage: 'orchestrationMonitor',
-      orchestration: { runId, jobId: job?.JOB_ID || '', latest: kind === 'dag' } })
+      orchestration: { runId, jobId: job?.JOB_ID || '', latest: kind === 'dag', source } })
   }
 
   return <section className="page om-page">
     <PageHeader breadcrumb="Workflow / Monitor" title="Workflow Monitor" subtitle="Workflow and job execution status." actions={<button className="button" type="button" disabled={refreshing} onClick={() => { refresh(); setTimelineRefresh(value => value + 1) }}>{refreshing ? 'Refreshing…' : '↻ Refresh'}</button>} />
-    <TaskEngineTrial />
+    <ConfigurationSource selection={selection} disabled={saving || !!runSelection || !!scheduleSelection} revision={data?.configurationRevision} />
+    {!postgres && <TaskEngineTrial />}
+    {postgres && data && <div className="om-notice om-engine-status"><strong>Execution worker: {data.worker?.state}</strong><span>{data.workflowsCount} workflows · {data.jobsCount} jobs · {data.unassignedJobs || 0} unassigned</span></div>}
+    {postgres && data?.scheduleMessage && <p className="om-footnote">{data.scheduleMessage}</p>}
     {error && <div className="alert error" role="alert">{error}{data && ' Showing the last successful refresh.'}</div>}
     {saveError && !scheduleSelection && <div className="alert error" role="alert">{saveError}</div>}
     {notice && <div className="alert info" role="status">{notice}</div>}
@@ -331,7 +346,7 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
           {summaryStatuses.filter(([value], index) => index < 5 || summary[value]).map(([value, tone, icon, label]) => <span className={`summary-item ${tone}`} key={value}>
             <span className="summary-icon" aria-hidden="true">{icon}</span><strong>{summary[value] || 0}</strong><span>{label}</span>
           </span>)}
-          <span className="summary-total"><strong>{rows.length}</strong> total</span>
+          <span className="summary-total"><strong>{data.workflowsCount ?? rows.length}</strong> total</span>
           {visible.length !== rows.length && <span className="om-summary-filtered">{visible.length} shown</span>}
         </div>
         <span className={`summary-updated${statusDelayed ? ' om-status-delayed' : ''}`} title="Latest database status read · Europe/Stockholm">
@@ -340,12 +355,12 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
         </span>
       </div>
       <div className="om-list-heading"><span>Workflow / Job hierarchy</span><div><button className="button" type="button" disabled={!visible.length} onClick={() => setExpanded(current => new Set([...current, ...visible.map(workflow => workflow.WORKFLOW_ID)]))}>Expand all</button><button className="button" type="button" disabled={!visible.length} onClick={() => setExpanded(new Set())}>Collapse all</button></div></div>
-      {view === 'timeline' ? <OrchestrationTimeline workflows={visible} expanded={expanded} onToggle={toggle} now={now} liveGeneratedAt={data.generatedAt} refreshVersion={timelineRefresh} onNavigate={onNavigate} initialState={monitorState?.timeline} monitorFilters={{ search, status, group, expanded: [...expanded] }} onWorkflowControls={workflowId => { setView('table'); setExpanded(current => new Set([...current, workflowId])) }} /> : <div className="om-table-wrap">
+      {view === 'timeline' ? <OrchestrationTimeline source={source} workflows={visible} expanded={expanded} onToggle={toggle} now={now} liveGeneratedAt={data.generatedAt} refreshVersion={timelineRefresh} onNavigate={onNavigate} initialState={monitorState?.timeline} monitorFilters={{ search, status, group, expanded: [...expanded] }} onWorkflowControls={workflowId => { setView('table'); setExpanded(current => new Set([...current, workflowId])) }} /> : <div className="om-table-wrap">
         <table className="om-table om-monitor-table">
           <caption className="visually-hidden">Live workflows with expandable jobs. Times are in Europe/Stockholm. Each workflow and its jobs share the displayed execution.</caption>
           <colgroup><col className="om-name-col" /><col /><col /><col /><col /><col /><col className="om-trigger-col" /><col className="om-next-col" /></colgroup>
           <thead><tr>{['Workflow / Job', 'Type / Layer', 'Run status', 'Last Run', 'Duration', 'Job progress', 'Schedule', 'Next Run'].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>
-          {visible.map(workflow => <WorkflowRows key={workflow.WORKFLOW_ID} workflow={workflow} expanded={expanded.has(workflow.WORKFLOW_ID)} onToggle={() => toggle(workflow.WORKFLOW_ID)} onHistory={job => onNavigate('orchestrationHistory', { workflowId: workflow.WORKFLOW_ID, workflowName: workflow.WORKFLOW_NAME, jobId: job?.JOB_ID || '', jobName: job?.JOB_NAME || '' })} onRun={(jobId, mode) => setRunSelection({ workflow, jobId, mode })} now={now} busy={saving || !data.runsEnabled} onState={job => changeState(workflow, job)} onSchedule={() => toggleSchedule(workflow)} onEditSchedule={() => { setSaveError(''); setScheduleSelection(workflow) }} onDag={job => openDetail(workflow, job, 'dag')} onLog={job => openDetail(workflow, job, 'log')} />)}
+          {visible.map(workflow => <WorkflowRows key={workflow.WORKFLOW_ID} workflow={workflow} expanded={expanded.has(workflow.WORKFLOW_ID)} onToggle={() => toggle(workflow.WORKFLOW_ID)} onHistory={job => workflow.isUnassigned ? onNavigate('orchestrationJob') : onNavigate('orchestrationHistory', { workflowId: workflow.WORKFLOW_ID, workflowName: workflow.WORKFLOW_NAME, jobId: job?.JOB_ID || '', jobName: job?.JOB_NAME || '' })} onRun={(jobId, mode) => setRunSelection({ workflow, jobId, mode })} now={now} busy={saving || !data.runsEnabled} onState={job => changeState(workflow, job)} onSchedule={postgres ? undefined : () => toggleSchedule(workflow)} onEditSchedule={postgres ? undefined : () => { setSaveError(''); setScheduleSelection(workflow) }} onCancel={postgres && workflow.canCancel && !workflow.cancelRequested ? async () => { try { await api.cancelTaskPrototypeCascade(workflow.cascadeId); refresh() } catch (failure) { setSaveError(failure.message) } } : undefined} onDag={job => openDetail(workflow, job, 'dag')} onLog={job => openDetail(workflow, job, 'log')} />)}
           {!visible.length && <tbody><tr><td colSpan={8} className="om-empty-jobs">{rows.length ? 'No workflows match your filters.' : 'No workflows configured. Add workflows and jobs on the Workflow page.'}</td></tr></tbody>}
         </table>
       </div>}

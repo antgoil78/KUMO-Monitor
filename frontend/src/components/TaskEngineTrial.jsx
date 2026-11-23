@@ -38,6 +38,7 @@ export default function TaskEngineTrial() {
         const value = await api.taskPrototypeStatus()
         if (!alive) return
         setStatus(value); setReadError('')
+        if (value.catalogInstalled) return
         const id = selected || value.runs[0]?.id
         if (id) {
           const run = await api.taskPrototypeRun(id)
@@ -70,7 +71,7 @@ export default function TaskEngineTrial() {
     finally { busyRef.current = false; setBusy(false) }
   }
 
-  if (!enabled) return null
+  if (!enabled || status?.catalogInstalled) return null
   const current = detail?.run
   return <details className="task-trial" open>
     <summary>DEV task engine trial</summary>

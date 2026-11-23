@@ -12,7 +12,7 @@ from orchestration_monitor import run_state
 import snowflake_client as sf
 from utils import to_jsonable
 
-STATUSES = {'QUEUED', 'CLAIMED', 'RUNNING', 'INITIATING', 'PENDING', 'SUCCESS', 'WARNING', 'FAILED', 'SKIPPED', 'CANCELLED'}
+STATUSES = {'QUEUED', 'CLAIMED', 'RUNNING', 'INITIATING', 'PENDING', 'SUCCESS', 'WARNING', 'FAILED', 'SKIPPED', 'CANCELLED', 'WAITING', 'BLOCKED', 'UNKNOWN'}
 
 
 def filters(args):

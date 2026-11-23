@@ -67,6 +67,8 @@ export const api = {
   taskPrototypeStatus: () => requestJson('/api/orchestration/task-engine'),
   taskPrototypeSchedules: () => requestJson('/api/orchestration/task-engine/schedules'),
   taskPrototypeGraphs: () => requestJson('/api/orchestration/task-engine/graphs'),
+  postgresMonitor: () => requestJson('/api/orchestration/task-engine/monitor'),
+  postgresLog: (workflowId, runId, jobId = '') => requestJson(`/api/orchestration/task-engine/workflows/${encodeURIComponent(workflowId)}/runs/${encodeURIComponent(runId)}/log?${new URLSearchParams({ jobId })}`),
   startTaskPrototypeGraph: (id, body) => requestJson(`/api/orchestration/task-engine/graphs/${id}/runs`, { method: 'POST', body: JSON.stringify(body) }),
   taskPrototypeCascade: id => requestJson(`/api/orchestration/task-engine/cascades/${id}`),
   cancelTaskPrototypeCascade: id => requestJson(`/api/orchestration/task-engine/cascades/${id}/cancel`, { method: 'POST' }),
@@ -113,7 +115,7 @@ export const api = {
   previewOrchestrationJobDag: jobId => requestJson(`/api/orchestration/jobs/${encodeURIComponent(jobId)}/dag-preview`, { method: 'POST', timeoutMs: 210000 }),
   orchestrationDag: (workflowId, runId = '', jobId = '') => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/dag?${new URLSearchParams({ ...(runId ? { runId } : {}), ...(jobId ? { jobId } : {}) })}`),
   orchestrationLog: (workflowId, runId, jobId = '') => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/log?${new URLSearchParams({ runId, ...(jobId ? { jobId } : {}) })}`),
-  orchestrationHistory: (filters, refresh = false) => requestJson(`/api/orchestration/history?${new URLSearchParams({ ...filters, ...(refresh ? { refresh: '1' } : {}) })}`, { timeoutMs: 120000 }),
+  orchestrationHistory: (filters, refresh = false, source = 'SNOWFLAKE') => requestJson(`/api/orchestration/${source === 'POSTGRES' ? 'task-engine/' : ''}history?${new URLSearchParams({ ...filters, ...(refresh ? { refresh: '1' } : {}) })}`, { timeoutMs: 120000 }),
   orchestrationRuns: workflowId => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/runs`),
   runOrchestrationWorkflow: (workflowId, payload) => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/runs`, { method: 'POST', body: JSON.stringify(payload), timeoutMs: 120000 }),
   reconcileOrchestrationWorkflow: workflowId => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/reconcile`, { method: 'POST' }),
@@ -207,7 +209,7 @@ export function createKumoEventSource(onEvent, onError, options = {}) {
   }
 
   const clientId = kumoClientId()
-  const params = new URLSearchParams({ clientId, page: options.page || 'Unknown page' })
+  const params = new URLSearchParams({ clientId, page: options.page || 'Unknown page', orchestrationSource: options.orchestrationSource || 'SNOWFLAKE' })
   const source = new window.EventSource(`/api/events?${params.toString()}`)
   const eventTypes = ['connected', 'heartbeat', 'orchestration_update', 'realtime_state', 'monitor_update', 'monitor_refresh_started', 'monitor_refresh_completed', 'workflow_run_requested', 'workflow_run_queued', 'workflow_run_status', 'workflow_run_failed']
   function handle(event) {

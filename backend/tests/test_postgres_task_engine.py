@@ -315,6 +315,7 @@ class ApiTests(unittest.TestCase):
         self.database.status.return_value=dict(ok=True,counts={},runs=[],cleanupRetrying=0)
         self.database.submit.return_value=dict(ok=True,runId=str(uuid.uuid4()),reused=False)
         for item in (patch.object(integration,'store',return_value=self.database),
+                     patch('task_engine.catalog.master',return_value=None),
                      patch.object(application,'_ensure_environment',side_effect=AssertionError('No Snowflake bootstrap')),
                      patch.object(application.orchestration_cache,'refresh_async',side_effect=AssertionError('No Snowflake refresh')),
                      patch.object(application.sf,'connection',side_effect=AssertionError('No Snowflake connection')),
@@ -357,6 +358,21 @@ class ApiTests(unittest.TestCase):
         with patch('task_engine.configuration.Configuration') as service:
             service.return_value.workflow.side_effect=Conflict('Configuration changed; refresh')
             self.assertEqual(self.client.patch(self.integration.PREFIX+'/configuration/workflows/WF2',json={'revision':1}).status_code,409)
+
+    def test_postgres_monitor_history_and_log_never_bootstrap_or_refresh_snowflake(self):
+        with patch('task_engine.monitor.Monitor') as service:
+            for name in ['payload','history','log']:getattr(service.return_value,name).return_value=dict(ok=True)
+            self.assertEqual(self.client.get(self.integration.PREFIX+'/monitor').status_code,200)
+            self.assertEqual(self.client.get(self.integration.PREFIX+'/history?limit=2').status_code,200)
+            self.assertEqual(self.client.get(self.integration.PREFIX+'/workflows/workflow/runs/run/log?jobId=job').status_code,200)
+            service.return_value.log.assert_called_once_with('workflow','run','job')
+
+    def test_postgres_presence_stream_does_not_bootstrap_snowflake(self):
+        with patch.dict(os.environ,KUMO_TASK_PROTOTYPE_ENABLED='true'),patch.object(self.application.config,'ENVIRONMENT','DEV'),\
+             patch.object(self.application.realtime_broker,'stream',return_value=iter(['data: {}\n\n'])):
+            response=self.client.get('/api/events?orchestrationSource=POSTGRES&page=orchestrationMonitor')
+            self.assertEqual(response.status_code,200)
+            self.assertIn('data:',response.get_data(as_text=True))
 
     def test_feature_flag_and_non_dev_environment_prevent_database_access(self):
         with patch.object(self.integration,'store',wraps=lambda:Store(Settings.from_environment())):

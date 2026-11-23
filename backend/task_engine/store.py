@@ -76,7 +76,9 @@ class Store:
         with self.connect() as conn:
             conn.execute(Path(__file__).with_name('schema.sql').read_text())
             for path in sorted(Path(__file__).with_name('migrations').glob('*.sql')):
-                conn.execute(path.read_text())
+                version=int(path.name.split('_',1)[0])
+                if not conn.execute('SELECT version FROM kumo_task_engine.schema_version WHERE version=%s',(version,)).fetchone():
+                    conn.execute(path.read_text())
 
     @contextmanager
     def transaction(self):
@@ -133,7 +135,8 @@ class Store:
             cleanup=conn.execute("SELECT count(*) AS count FROM kumo_task_engine.attempts WHERE cleanup_state IN ('PENDING','ERROR')").fetchone()['count']
             retrying=conn.execute("SELECT count(*) AS count FROM kumo_task_engine.attempts WHERE cleanup_state='PENDING'").fetchone()['count']
             runs=conn.execute('SELECT id,state,request_id,created_at,ended_at FROM kumo_task_engine.runs ORDER BY created_at DESC LIMIT 30').fetchall()
-        return dict(ok=True,mode='POSTGRES_TASK_PROTOTYPE',environment='DEV',counts={r['state']:r['count'] for r in counts},cleanupPending=cleanup,cleanupRetrying=retrying,runs=runs)
+            catalog=conn.execute("SELECT EXISTS(SELECT 1 FROM kumo_task_engine.dependency_graphs WHERE key='dev-workflow-catalog') AS installed").fetchone()['installed']
+        return dict(ok=True,mode='POSTGRES_TASK_PROTOTYPE',environment='DEV',counts={r['state']:r['count'] for r in counts},cleanupPending=cleanup,cleanupRetrying=retrying,runs=runs,catalogInstalled=catalog)
 
     def cancel(self,run_id):
         run_id=uuid.UUID(str(run_id))

@@ -104,3 +104,14 @@
 .om-monitor-table .om-progress { gap: 3px; }
 .om-monitor-table .om-progress > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .om-monitor-table .om-dependency { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.om-engine-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border-color, #333946);
+  border-radius: 4px;
+  font-size: 12px;
+}

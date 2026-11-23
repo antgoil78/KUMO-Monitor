@@ -15,6 +15,9 @@ def digest(value):
 
 
 def graph_definition(body):
+    if isinstance(body,dict) and 'catalog' in body:
+        from .catalog import compile_catalog
+        return compile_catalog(body)
     if not isinstance(body, dict) or set(body)-{'key','name','enabled','nodes'}:
         raise ValueError('Use key, name, enabled and nodes for a dependency trial')
     key, name, enabled, nodes = body.get('key'), body.get('name'), body.get('enabled', True), body.get('nodes')
@@ -22,8 +25,8 @@ def graph_definition(body):
         raise ValueError('Graph key must be a simple identifier of at most 64 characters')
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100 or not isinstance(enabled, bool):
         raise ValueError('Supply a graph name and a boolean enabled flag')
-    if not isinstance(nodes, list) or not 1 <= len(nodes) <= 16:
-        raise ValueError('Use 1–16 SQL-only workflow nodes')
+    if not isinstance(nodes, list) or not 1 <= len(nodes) <= 512:
+        raise ValueError('Use 1–512 SQL-only workflow nodes')
     definitions = {}
     for node in nodes:
         if not isinstance(node, dict) or set(node)-{'key','name','enabled','allow','plan','parents','description','group'}:
@@ -156,26 +159,48 @@ class Graphs:
     def start(self, graph_id, body, actor):
         from psycopg.types.json import Jsonb
         graph_id = uuid.UUID(str(graph_id))
-        if not isinstance(body, dict) or set(body)-{'requestId'} or not isinstance(body.get('requestId'), str) or not 1 <= len(body['requestId'].strip()) <= 128:
+        if not isinstance(body, dict) or set(body)-{'requestId','workflowId'} or not isinstance(body.get('requestId'), str) or not 1 <= len(body['requestId'].strip()) <= 128:
             raise ValueError('Start a full dependency trial using a stable requestId')
         request_id = body['requestId'].strip()
+        if 'workflowId' in body and (not isinstance(body['workflowId'],str) or len(body['workflowId'])>128):
+            raise ValueError('Select a workflow using its catalog identity')
         with self.store.transaction() as conn:
             previous = conn.execute('SELECT * FROM kumo_task_engine.cascades WHERE request_id=%s', (request_id,)).fetchone()
             if previous:
                 if previous['graph_id'] != graph_id:
                     raise Conflict('requestId belongs to another graph')
+                if previous['snapshot'].get('requestedWorkflowId')!=body.get('workflowId'):
+                    raise Conflict('requestId belongs to another workflow selection')
                 return dict(ok=True, cascadeId=str(previous['id']), reused=True)
             graph = conn.execute('SELECT * FROM kumo_task_engine.dependency_graphs WHERE id=%s', (graph_id,)).fetchone()
             if not graph:
                 raise LookupError('Dependency trial graph not found')
             if not graph['enabled']:
                 raise Conflict('Dependency trial graph is disabled')
-            if conn.execute("SELECT id FROM kumo_task_engine.cascades WHERE graph_id=%s AND state IN ('QUEUED','RUNNING','UNKNOWN')", (graph_id,)).fetchone():
-                raise WorkflowBusy('This graph already has an outstanding trial; finish or review it first')
+            snapshot=graph['definition'];scope='FULL'
+            if 'catalog' in snapshot:
+                from .monitor import execution_scope
+                selected=execution_scope(snapshot,body.get('workflowId'))
+                if selected['issues']:raise Conflict('; '.join(selected['issues']))
+                if not selected['isRoot']:raise Conflict('Start the complete dependency group from '+', '.join(selected['roots']))
+                requested=next(w for w in snapshot['catalog']['workflows'] if w['WORKFLOW_ID']==body['workflowId'])
+                if not requested['IS_ENABLED'] or not requested.get('ALLOW_MANUAL_TRIGGER',True):raise Conflict('Workflow is disabled or manual execution is not allowed')
+                keys=selected['keys'];scope=digest(sorted(keys))
+                snapshot=dict(key=snapshot['key'],name=snapshot['name'],enabled=True,version=1,
+                    nodes=[n for n in snapshot['nodes'] if n['key'] in keys],catalogRevision=graph['revision'],
+                    workflowIds={key:identity for identity,key in snapshot['workflowKeys'].items() if key in keys},requestedWorkflowId=body['workflowId'])
+            elif body.get('workflowId') is not None:
+                raise ValueError('Select a workflow through the complete PostgreSQL catalog')
+            elif graph['key']=='wf1-sql-trial' and conn.execute("SELECT id FROM kumo_task_engine.dependency_graphs WHERE key='dev-workflow-catalog'").fetchone():
+                raise Conflict('Use the PostgreSQL Monitor; the WF1 trial has been promoted to the complete catalog')
+            keys=[n['key'] for n in snapshot['nodes']]
+            if conn.execute("""SELECT c.id FROM kumo_task_engine.cascades c JOIN kumo_task_engine.cascade_nodes n ON n.cascade_id=c.id
+                WHERE c.graph_id=%s AND c.state IN ('QUEUED','RUNNING','UNKNOWN') AND n.node_key=ANY(%s) LIMIT 1""",(graph_id,keys)).fetchone():
+                raise WorkflowBusy('This workflow group already has an outstanding execution; finish or review it first')
             cascade_id = uuid.uuid4()
-            conn.execute('''INSERT INTO kumo_task_engine.cascades(id,graph_id,request_id,graph_revision,snapshot,requested_by,state)
-                VALUES(%s,%s,%s,%s,%s,%s,'QUEUED')''', (cascade_id, graph_id, request_id, graph['revision'], Jsonb(graph['definition']), str(actor)[:256]))
-            for node in graph['definition']['nodes']:
+            conn.execute('''INSERT INTO kumo_task_engine.cascades(id,graph_id,request_id,graph_revision,snapshot,requested_by,state,scope_key)
+                VALUES(%s,%s,%s,%s,%s,%s,'QUEUED',%s)''', (cascade_id, graph_id, request_id, graph['revision'], Jsonb(snapshot), str(actor)[:256],scope))
+            for node in snapshot['nodes']:
                 conn.execute("INSERT INTO kumo_task_engine.cascade_nodes(cascade_id,node_key,workflow_key,state) VALUES(%s,%s,%s,'WAITING')",
                              (cascade_id, node['key'], 'dep-'+graph_id.hex+'-'+node['key']))
             enqueue(conn, cascade_id)

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 
 async function setup(page, { failStart = false } = {}) {
   await page.clock.install({ time: new Date('2026-11-23T14:00:00Z') })
-  await page.addInitScript(() => { window.EventSource = class { addEventListener() {} close() {} } })
+  await page.addInitScript(() => { window.sessionStorage.setItem('kumoConfigurationSource', 'SNOWFLAKE'); window.EventSource = class { addEventListener() {} close() {} } })
   const definitions = [['WF1', []], ['WF2', ['WF1']], ['WF3', ['WF1']], ['WF4', ['WF2', 'WF3']]].map(([key, parents]) => ({ key, name: key,
     plan: { jobs: [{ key: 'sql', sql: 'SELECT 1' }] }, parents: parents.map(key => ({ key, parentMustBeNewer: key !== 'WF3' })) }))
   const graph = { id: 'graph-1', name: 'WF1 SQL dependency trial', revision: 1, enabled: true, definition: { nodes: definitions } }

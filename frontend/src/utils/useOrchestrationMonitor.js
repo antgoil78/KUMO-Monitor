@@ -26,13 +26,14 @@ export function applySubmission(workflow, submissions = []) {
     }) }
 }
 
-export default function useOrchestrationMonitor(enabled = true) {
+export default function useOrchestrationMonitor(enabled = true, source = 'SNOWFLAKE') {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [reload, setReload] = useState(0)
   const manual = useRef(false)
   const latest = useRef(null)
+  useEffect(() => { setData(null); latest.current = null; setError('') }, [source])
   const refresh = useCallback(() => { manual.current = true; setReload(value => value + 1) }, [])
   useEffect(() => {
     if (!enabled) return undefined
@@ -48,13 +49,13 @@ export default function useOrchestrationMonitor(enabled = true) {
       if (fetching) return
       fetching = true
       setRefreshing(true)
-      try { receive(await api.orchestrationMonitor(force)) }
+      try { receive(await (source === 'POSTGRES' ? api.postgresMonitor() : api.orchestrationMonitor(force))) }
       catch (failure) { if (active) setError(failure.message) }
       finally { fetching = false; if (active) setRefreshing(false) }
     }
     function realtime(event) {
       const message = event.detail
-      if (message?.type === 'orchestration_update') { lastUpdate = Date.now(); receive(message.data) }
+      if (source !== 'POSTGRES' && message?.type === 'orchestration_update') { lastUpdate = Date.now(); receive(message.data) }
       if (message?.type === 'connected') snapshot()
     }
     window.addEventListener('kumo:realtime', realtime)
@@ -62,9 +63,9 @@ export default function useOrchestrationMonitor(enabled = true) {
     manual.current = false
     // A disconnected browser may read the shared Python snapshot. This never
     // starts a separate Snowflake refresh for that browser.
-    const timer = window.setInterval(() => { if (Date.now() - lastUpdate > 20000) snapshot() }, 15000)
+    const timer = window.setInterval(() => { if (source === 'POSTGRES' || Date.now() - lastUpdate > 20000) snapshot() }, source === 'POSTGRES' ? 2000 : 15000)
     return () => { active = false; window.clearInterval(timer); window.removeEventListener('kumo:realtime', realtime) }
-  }, [reload, enabled])
+  }, [reload, enabled, source])
   const acceptSubmission = useCallback(receipt => setData(previous => {
     if (!previous || previous.rows.some(row => row.WORKFLOW_ID === receipt.workflowId && row.run.requestId === receipt.requestId)) return previous
     const existing = previous.submissions?.find(row => row.requestId === receipt.requestId)

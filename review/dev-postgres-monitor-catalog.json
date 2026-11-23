@@ -1,0 +1,89 @@
+{
+  "ok": true,
+  "graphId": "364c85b0-94ac-44ec-846b-8e9710914ba3",
+  "revision": 1,
+  "workflows": 26,
+  "jobs": 51,
+  "unassignedJobs": 0,
+  "executableWorkflows": [
+    "WF1",
+    "WF2",
+    "WF3",
+    "WF4",
+    "WF5",
+    "WF6",
+    "WF7",
+    "WF9",
+    "WF8",
+    "WF10"
+  ],
+  "blockedWorkflows": {
+    "ADTX LOAD": [
+      "DBT execution is not enabled in this worker",
+      "Job dependency gates require additional execution support"
+    ],
+    "ARAC LOAD": [
+      "DBT execution is not enabled in this worker",
+      "Job dependency gates require additional execution support"
+    ],
+    "AUTH (MISC) SDL": [
+      "DBT execution is not enabled in this worker"
+    ],
+    "CACT LOAD": [
+      "DBT execution is not enabled in this worker",
+      "Job dependency gates require additional execution support"
+    ],
+    "CARD LOAD": [
+      "DBT execution is not enabled in this worker",
+      "Job dependency gates require additional execution support"
+    ],
+    "CUAR LOAD": [
+      "DBT execution is not enabled in this worker",
+      "Job dependency gates require additional execution support"
+    ],
+    "DISB LOAD": [
+      "DBT execution is not enabled in this worker",
+      "Job dependency gates require additional execution support"
+    ],
+    "GEOG LOAD": [
+      "DBT execution is not enabled in this worker",
+      "Job dependency gates require additional execution support"
+    ],
+    "LOAD RAW DAILY": [
+      "Prototype jobs must be single SELECT expressions without table references; SYSTEM$WAIT is allowed"
+    ],
+    "MAINTENANCE - CLEANUP": [
+      "Prototype jobs must be single SELECT expressions without table references; SYSTEM$WAIT is allowed"
+    ],
+    "PAAR LOAD": [
+      "DBT execution is not enabled in this worker",
+      "Job dependency gates require additional execution support"
+    ],
+    "POST LOAD": [
+      "DBT execution is not enabled in this worker",
+      "Job dependency gates require additional execution support"
+    ],
+    "PROD LOAD": [
+      "DBT execution is not enabled in this worker",
+      "Job dependency gates require additional execution support"
+    ],
+    "PYMT LOAD": [
+      "DBT execution is not enabled in this worker",
+      "Job dependency gates require additional execution support"
+    ],
+    "SEBK LOAD": [
+      "DBT execution is not enabled in this worker",
+      "Job dependency gates require additional execution support"
+    ],
+    "TPAC LOAD": [
+      "DBT execution is not enabled in this worker",
+      "Job dependency gates require additional execution support"
+    ]
+  },
+  "sourceSchedulesEnabled": 0,
+  "postgresSchedulesEnabled": 0,
+  "existingPostgresHistoryPreserved": true,
+  "snowflakeConfigurationChanged": false,
+  "sourceRead": "Three explicit application catalog queries; reused captured data for promotion",
+  "runsAdmittedByImport": 0
+}

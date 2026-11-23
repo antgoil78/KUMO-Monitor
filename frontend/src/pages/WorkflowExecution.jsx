@@ -22,7 +22,9 @@ export function RunWorkflowDialog({ workflow, jobId, jobs, onClose, onAccepted, 
     if (busy || unavailable) return
     setBusy(true); setSubmitted(true); setError('')
     try {
-      const result = await api.runOrchestrationWorkflow(workflow.WORKFLOW_ID, { mode, jobId: jobId || null, requestId, fullRefresh: Boolean(dbtJob && fullRefresh) })
+      const result = workflow.source === 'POSTGRES'
+        ? await api.startTaskPrototypeGraph(workflow.graphId, { workflowId: workflow.WORKFLOW_ID, requestId })
+        : await api.runOrchestrationWorkflow(workflow.WORKFLOW_ID, { mode, jobId: jobId || null, requestId, fullRefresh: Boolean(dbtJob && fullRefresh) })
       if (result.warning) { setQueued(result); setError(result.warning) }
       else onAccepted(result)
     } catch (failure) { setError(failure.message) }
@@ -38,6 +40,7 @@ export function RunWorkflowDialog({ workflow, jobId, jobs, onClose, onAccepted, 
         <input type="checkbox" checked={fullRefresh} disabled={busy || submitted} onChange={event => setFullRefresh(event.target.checked)} />
         <span><strong>Full refresh</strong><small>Rebuild incremental models for {jobs[index].JOB_NAME} in this run. Supported for dbt build, run and seed. Later jobs use their saved commands.</small></span>
       </label>}
+      {workflow.source === 'POSTGRES' && <div className="alert info"><strong>Run the full dependency group</strong><p>{workflow.runScope?.join(', ')}</p><p>Every workflow in this group uses the saved PostgreSQL configuration. Parent rules determine execution order. Disabled workflows or jobs are skipped.</p></div>}
       <ol className="wa-run-jobs">{selected.map(job => <li key={job.JOB_ID}><strong>{job.JOB_NAME}</strong><span>{job.JOB_TYPE} · {job.JOB_LAYER || 'GENERAL'}</span></li>)}</ol>
       <p className="form-help">{mode !== 'WORKFLOW' ? 'Earlier jobs are not run. ' : ''}{parallel && selected.length > 1 ? 'Selected jobs start together and run independently. ' : ''}Disabled jobs are omitted. Job conditions apply. {mode === 'WORKFLOW' ? 'Downstream workflows are evaluated after completion.' : 'This partial run does not start downstream workflows.'}</p>
       <div className="modal-actions"><button className="button" type="button" disabled={busy} onClick={onClose}>Cancel</button><button className="button primary" type="submit" disabled={busy || unavailable || !selected.length}>{busy ? 'Submitting…' : queued ? 'Retry start' : mode === 'JOB_ONLY' ? 'Run job' : mode === 'FROM_JOB' ? 'Run from job' : 'Run workflow'}</button></div>

@@ -180,7 +180,7 @@ class ConfigurationTests(unittest.TestCase):
         with self.store.connect() as conn:
             conn.execute('DROP TABLE kumo_task_engine.graph_revisions')
             conn.execute('ALTER TABLE kumo_task_engine.dependency_graphs DROP COLUMN configuration_managed')
-            conn.execute('DELETE FROM kumo_task_engine.schema_version WHERE version=4')
+            conn.execute('DELETE FROM kumo_task_engine.schema_version WHERE version>=4')
         self.store.initialize();self.store.initialize()
         self.assertEqual(self.graphs.read(cascade),before)
         self.assertEqual(len(self.read()['revisions']),1)

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 
 async function trial(page, { enabled = true, failFirst = false } = {}) {
   await page.clock.install({ time: new Date('2026-11-23T12:00:00Z') })
-  await page.addInitScript(() => { window.EventSource = class { addEventListener() {} close() {} } })
+  await page.addInitScript(() => { window.sessionStorage.setItem('kumoConfigurationSource', 'SNOWFLAKE'); window.EventSource = class { addEventListener() {} close() {} } })
   const state = { reads: 0, submissions: [], run: null, cleanup: 'NONE', status: 'QUEUED', cancel: false }
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname

@@ -272,7 +272,7 @@ export function JobCatalog() {
       actions={<div className="page-header-actions"><button className="button" type="button" onClick={load} disabled={loading}>↻ Refresh</button><button className="button primary" type="button" disabled={trial || loading} onClick={() => openEditor()}>+ Job</button></div>}
     />
     <ConfigurationSource selection={selection} disabled={loading || saving || editorOpen} revision={catalog?.revision} revisions={catalog?.revisions} />
-    <div className="orchestration-context"><span>New orchestration model</span><strong>{catalog?.source || 'Loading catalog…'}</strong><small>{trial ? 'PostgreSQL master · WF1–WF4 SQL settings' : 'Configuration only · Snowflake tasks are not created yet'}</small></div>
+    <div className="orchestration-context"><span>New orchestration model</span><strong>{catalog?.source || 'Loading catalog…'}</strong><small>{trial ? 'PostgreSQL master · Workflow and job settings' : 'Configuration only · Snowflake tasks are not created yet'}</small></div>
     {error && <div className="alert error">{error}</div>}
     {loading && !catalog && <LoadingState>Loading orchestration catalog…</LoadingState>}
     {catalog && rows.length === 0 && <div className="soft-empty">No jobs have been created.</div>}

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 
 async function setup(page, { failCreate = false } = {}) {
   await page.clock.install({ time: new Date('2026-11-23T13:00:00Z') })
-  await page.addInitScript(() => { window.EventSource = class { addEventListener() {} close() {} } })
+  await page.addInitScript(() => { window.sessionStorage.setItem('kumoConfigurationSource', 'SNOWFLAKE'); window.EventSource = class { addEventListener() {} close() {} } })
   const state = { schedules: [], occurrences: [], mutations: [], scheduler: 'HEALTHY', failPatch: false }
   await page.route('**/api/**', async route => {
     const req = route.request(), path = new URL(req.url()).pathname

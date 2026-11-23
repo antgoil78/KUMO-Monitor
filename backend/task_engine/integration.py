@@ -87,7 +87,8 @@ def graphs():
 @blueprint.route(PREFIX+'/configuration/<kind>/<object_id>',methods=['PATCH'])
 def configuration(kind=None,object_id=None):
     from .configuration import Configuration
-    service=Configuration(store())
+    from .catalog import CatalogConfiguration,master
+    db=store();service=CatalogConfiguration(db) if master(db) else Configuration(db)
     if request.method=='GET':
         return jsonify(encode(service.read()))
     actor=current_app.extensions['task_prototype_actor_context']().get('userName') or 'LOCAL_DEV'
@@ -98,6 +99,24 @@ def configuration(kind=None,object_id=None):
     elif request.method=='PATCH' and kind=='jobs':result=service.job(object_id,body,actor)
     else:raise LookupError('Unknown PostgreSQL configuration action')
     return jsonify(encode(result))
+
+
+@blueprint.route(PREFIX+'/monitor')
+def monitor():
+    from .monitor import Monitor
+    return jsonify(encode(Monitor(store()).payload()))
+
+
+@blueprint.route(PREFIX+'/history')
+def history():
+    from .monitor import Monitor
+    return jsonify(encode(Monitor(store()).history(request.args)))
+
+
+@blueprint.route(PREFIX+'/workflows/<workflow_id>/runs/<run_id>/log')
+def execution_log(workflow_id,run_id):
+    from .monitor import Monitor
+    return jsonify(encode(Monitor(store()).log(workflow_id,run_id,request.args.get('jobId'))))
 
 
 @blueprint.route(PREFIX+'/graphs/<graph_id>/runs',methods=['POST'])
@@ -154,6 +173,17 @@ def register(app,actor_context):
         db=store();body,source=snapshot(read_source())
         if apply:click.echo(json.dumps(encode(Graphs(db).install(body,'LOCAL_DEV_CLI',source,expected_revision)),indent=2))
         else:click.echo(json.dumps(dict(ok=True,applied=False,graph=body,source=source),indent=2))
+
+    @commands.command('import-catalog')
+    @click.option('--apply',is_flag=True,help='Promote all DEV workflow/job definitions to PostgreSQL once')
+    def import_complete_catalog(apply):
+        from .catalog import compile_catalog,import_catalog,read_source,master
+        db=store()
+        if apply and master(db):raise click.ClickException('The PostgreSQL master is already installed; no Snowflake definitions were read')
+        raw=read_source()
+        graph=import_catalog(db,raw,'LOCAL_DEV_CLI')['definition'] if apply else compile_catalog(dict(key='dev-workflow-catalog',name='DEV workflow catalog',catalog=raw))
+        click.echo(json.dumps(dict(ok=True,applied=apply,workflows=len(raw['workflows']),jobs=len(raw['jobs']),executableWorkflows=len(graph['nodes']),
+            blockedWorkflows={w['WORKFLOW_NAME']:graph['executionIssues'][w['WORKFLOW_ID']] for w in raw['workflows'] if graph['executionIssues'][w['WORKFLOW_ID']]}),indent=2))
 
     @commands.command('schedule')
     @click.option('--once',is_flag=True,help='Evaluate at most one due schedule')
