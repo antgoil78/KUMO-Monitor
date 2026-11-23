@@ -81,6 +81,11 @@ try {
     }
     var workflow = rows('SELECT * FROM ' + ns + '.WORKFLOW WHERE WORKFLOW_ID = ?', [P_WORKFLOW_ID])[0];
     if (!workflow.IS_ENABLED) fail('Workflow is disabled');
+    if (scheduled && rows('SELECT EXECUTION_ID FROM ' + log +
+        " WHERE WORKFLOW_ID = ? AND JOB_ID IS NULL AND TRIGGER_SOURCE = 'SCHEDULED' AND STATUS IN ('QUEUED','CLAIMED','RUNNING')", [P_WORKFLOW_ID]).length) {
+        execute('COMMIT'); started = false;
+        return {ok: true, skipped: true, reason: 'SCHEDULE_OVERLAP', status: 'SKIPPED'};
+    }
     var jobExecutionMode = workflow.JOB_EXECUTION_MODE || 'SEQUENTIAL';
     if (['SEQUENTIAL', 'PARALLEL'].indexOf(jobExecutionMode) < 0) fail('Invalid workflow job execution mode');
     if (scheduled) {
@@ -191,6 +196,8 @@ try {
              job.initialStatus, job.position, requestedBy, expectedTask, JSON.stringify(job), job.skipReason, job.initialStatus]);
         if (job.selected) parentExecution = job.executionId;
     });
+    // The run and its launch signal commit together; Python/browser survival is irrelevant.
+    execute('INSERT INTO ' + ns + ".ORCH_DISPATCH_EVENTS (KIND, RUN_ID) VALUES ('LAUNCH', ?)", [runId]);
     execute('COMMIT'); started = false;
     return {ok: true, runId: runId, status: 'QUEUED', taskFqn: expectedTask, jobCount: executions.filter(function(job) { return job.selected; }).length, totalJobs: executions.length, reused: false};
 } catch (error) {

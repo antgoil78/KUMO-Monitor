@@ -18,22 +18,6 @@ load_dotenv()
 import config
 import snowflake_client as sf
 
-# Hydrate routing before importing blueprints/repositories that build SQL.
-if not config.USE_MOCK and sf.is_configured():
-    if not os.getenv("KUMO_ENVIRONMENT_TABLE", "").strip():
-        raise ValueError("Set KUMO_ENVIRONMENT_TABLE to the full environment parameter table path")
-    config.apply_environment(sf.query(
-        f"SELECT PARAMETER_KEY, CASE WHEN IS_SECRET THEN NULL ELSE PARAMETER_VALUE END AS PARAMETER_VALUE, "
-        f"VALUE_TYPE, ACTIVE_FL, IS_SECRET FROM {config.PARAMETER_STORE} "
-        "WHERE INSTANCE_NAME = 'DEFAULT' AND PARAMETER_GROUP = 'ENVIRONMENT'",
-        force_service=True, include_context=False,
-    ))
-    config.apply_orchestration_settings(sf.query(
-        f"SELECT PARAMETER_KEY, PARAMETER_VALUE, VALUE_TYPE, ACTIVE_FL FROM {config.PARAMETER_STORE} "
-        "WHERE INSTANCE_NAME = 'DEFAULT' AND PARAMETER_GROUP = 'ORCHESTRATION'",
-        force_service=True, include_context=False,
-    ))
-
 from notification_admin import notification_admin_bp
 from file_ingestion import file_ingestion_bp
 from batch_control import batch_control_bp
@@ -47,6 +31,57 @@ from orchestration_cache import orchestration_cache
 from mock_data import MOCK_HISTORY, MOCK_MONITOR
 from realtime_events import realtime_broker
 from activity_log import activity_journal
+
+# Warehouse access follows actual user demand, never process startup or probes.
+_environment_lock = Lock()
+_environment_ready = bool(config.USE_MOCK or not sf.is_configured())
+_environment_error = None
+_environment_retry_at = 0.0
+
+
+def _ensure_environment():
+    global _environment_ready, _environment_error, _environment_retry_at
+    if _environment_ready:
+        return
+    with _environment_lock:
+        if _environment_ready:
+            return
+        if time.monotonic() < _environment_retry_at:
+            raise RuntimeError(_environment_error or 'Environment configuration is unavailable')
+        try:
+            if not os.getenv("KUMO_ENVIRONMENT_TABLE", "").strip():
+                raise ValueError("Set KUMO_ENVIRONMENT_TABLE to the full environment parameter table path")
+            config.apply_environment(sf.query(
+                f"SELECT PARAMETER_KEY, CASE WHEN IS_SECRET THEN NULL ELSE PARAMETER_VALUE END AS PARAMETER_VALUE, "
+                f"VALUE_TYPE, ACTIVE_FL, IS_SECRET FROM {config.PARAMETER_STORE} "
+                "WHERE INSTANCE_NAME = 'DEFAULT' AND PARAMETER_GROUP = 'ENVIRONMENT'",
+                force_service=True, include_context=False,
+            ))
+            config.apply_orchestration_settings(sf.query(
+                f"SELECT PARAMETER_KEY, PARAMETER_VALUE, VALUE_TYPE, ACTIVE_FL FROM {config.PARAMETER_STORE} "
+                "WHERE INSTANCE_NAME = 'DEFAULT' AND PARAMETER_GROUP = 'ORCHESTRATION'",
+                force_service=True, include_context=False,
+            ))
+            # These modules cache identifiers/SQL at import. Rebind them once,
+            # under the bootstrap lock, before any reader or data route starts.
+            import batch_control, file_ingestion, notification_admin
+            batch_control.configure_routes()
+            file_ingestion.configure_routes()
+            notification_admin.configure_routes()
+            _environment_ready, _environment_error = True, None
+        except Exception as exc:
+            _environment_error = str(exc)
+            _environment_retry_at = time.monotonic() + 30
+            raise
+
+
+_CACHE_ONLY_PATHS = frozenset((
+    '/api/health', '/api/activity', '/api/session', '/api/dashboard',
+    '/api/snowflake/ping', '/api/users/active', '/api/admin/activity-log',
+    '/api/admin/activity-log/download', '/api/orchestration/monitor',
+    '/api/settings/refresh',
+))
+
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 
@@ -1335,6 +1370,12 @@ def bind_request_context():
     if request.path.startswith("/api/") and request.path != "/api/health":
         _renew_activity_lease()
     g.activity_log_id = None
+    if (request.path.startswith('/api/') and request.path not in _CACHE_ONLY_PATHS
+            and request.method != 'OPTIONS'):
+        try:
+            _ensure_environment()
+        except Exception as exc:
+            return _json_error('Environment configuration is unavailable: ' + str(exc), 503)
     if config.LEGACY_ENGINE_RETIRED and (
         (request.method not in ('GET', 'HEAD', 'OPTIONS') and (
             request.path.startswith('/api/workflows/') or request.path.startswith('/api/dependencies/')
@@ -1459,6 +1500,9 @@ def _health_snapshot():
         "environment": config.ENVIRONMENT or None,
         "deploymentEnvironment": config.DEPLOYMENT_ENVIRONMENT or None,
         "legacyEngineRetired": config.LEGACY_ENGINE_RETIRED,
+        "environmentReady": _environment_ready,
+        "environmentError": _environment_error,
+        "streamDispatchEnabled": config.STREAM_DISPATCH_ENABLED,
         "objectContext": {
             "environment": config.ENVIRONMENT or None,
             "environmentTable": config.T_APPLICATION_PARAMETERS,

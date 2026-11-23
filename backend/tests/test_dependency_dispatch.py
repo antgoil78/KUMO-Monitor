@@ -23,6 +23,7 @@ function report(){
   return {ok:true,evaluated:true,children:[{workflowId:'wf',eligible:!input.notReady && (!pass || input.changedParent),rules}]};
 }
 function query(sql,b){
+ if(sql.includes('CURRENT_TASK_NAME'))return [{NAME:'KUMO_DEV.MONITOR_APP.TASK_ORCH_DISPATCH'}];
  queries.push({sql,binds:b});
  if(sql.includes('SP_GET_ENVIRONMENT'))return [{SP_GET_ENVIRONMENT:{DATABASE:'KUMO_DEV',META_SCHEMA:'MONITOR_META',MONITOR_APP_SCHEMA:'MONITOR_APP'}}];
  if(sql.includes('SP_ORCH_EVALUATE_DEPENDENCIES'))return [{SP_ORCH_EVALUATE_DEPENDENCIES:report()}];

@@ -2,7 +2,7 @@
 CREATE OR REPLACE PROCEDURE KUMO_DEV.MONITOR_APP.SP_ORCH_RUN_SCHEDULED(P_WORKFLOW_ID VARCHAR)
 RETURNS VARIANT
 LANGUAGE JAVASCRIPT
-COMMENT='KUMO parallel orchestration v2: snapshot and run enabled jobs inside the persistent workflow scheduler'
+COMMENT='KUMO parallel orchestration v2: snapshot scheduled jobs and commit a stream launch signal'
 EXECUTE AS CALLER
 AS $$
 function value(sql, binds) {
@@ -21,7 +21,6 @@ var group = String(runtime.getColumnValue(1));
 var result = value('CALL ' + app + '.SP_ORCH_REQUEST_RUN(?, ?, ?, ?, ?)',
     [P_WORKFLOW_ID, 'SCHEDULED', null, 'SCHEDULED:' + group, 'SCHEDULER']);
 if (!result.ok) throw new Error(result.error);
-var executed = value('CALL ' + app + '.SP_ORCH_EXECUTE_WORKFLOW(?)', [result.runId]);
-if (executed.waiting) value('CALL ' + app + '.SP_ORCH_START_RUN(?)', [result.runId]);
-return executed;
+// Execution belongs to the stream dispatcher, never this scheduler.
+return result;
 $$;

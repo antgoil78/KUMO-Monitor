@@ -95,6 +95,59 @@ class ConfigurationTests(unittest.TestCase):
         source['raw_records'].append(source['raw_records'][0])
         self.assertEqual(model.normalize_dependencies(source)['invalidWorkflows'], ['w2'])
 
+    def test_additional_parent_can_be_created_with_a_new_uuid_and_removed(self):
+        self.catalog['workflows'].append(dict(WORKFLOW_ID='w3', WORKFLOW_NAME='WF3'))
+        self.catalog['records'].append(record('h3', 'w3'))
+        rows = model.configuration_rows(self.catalog)
+        extra = dict(next(row for row in rows if row['id'] == 'w2'),
+                     id=str(model.uuid.uuid4()), parentId='w3', success=True,
+                     warning=None, error=False, sql='SELECT TRUE', parentMustBeNewer=True)
+        rows.append(extra)
+        with patch.object(model, 'read_catalog', return_value=self.catalog), patch.object(model.sf, 'execute_service') as execute:
+            model.save(rows, model.revision(self.catalog))
+        writes = [call for call in execute.call_args_list if call.args[0].startswith(('INSERT', 'DELETE'))]
+        self.assertEqual(len(writes), 1)
+        self.assertTrue(writes[0].args[0].startswith('INSERT'))
+        self.assertEqual(writes[0].args[1]['WORKFLOW_ID'], 'w2')
+        self.assertEqual(writes[0].args[1]['PARENT_ID'], 'w3')
+        self.assertIs(writes[0].args[1]['ERROR'], False)
+        self.assertEqual(writes[0].args[1]['SQL'], 'SELECT TRUE')
+        self.assertTrue(writes[0].args[1]['PARENT_MUST_BE_NEWER'])
+
+        self.catalog['records'].append(record(extra['id'], 'w2', parent_workflow='w3'))
+        rows = model.configuration_rows(self.catalog)
+        rows = [row for row in rows if row['id'] != 'w2']
+        next(row for row in rows if row['id'] == extra['id'])['id'] = 'w2'
+        with patch.object(model, 'read_catalog', return_value=self.catalog), patch.object(model.sf, 'execute_service') as execute:
+            model.save(rows, model.revision(self.catalog))
+        writes = [call for call in execute.call_args_list if call.args[0].startswith(('INSERT', 'DELETE'))]
+        self.assertEqual(len(writes), 1)
+        self.assertTrue(writes[0].args[0].startswith('DELETE'))
+        self.assertEqual(writes[0].args[1]['PARENT_ID'], 'w1')
+        self.assertIn('AND PARENT_ID = %(PARENT_ID)s', writes[0].args[0])
+
+    def test_new_parent_rules_cannot_reuse_assignment_ids_or_move_existing_rules(self):
+        for identity in ('a2', 'a1', 'not-a-uuid'):
+            with self.subTest(identity=identity):
+                rows = copy.deepcopy(self.rows)
+                rows.append(dict(rows[2], id=identity, parentId=None, trigger=None))
+                # Remove the assignment to ensure the identity check handles it.
+                rows = [row for row in rows if row['id'] != identity or not row['jobId']]
+                with self.assertRaisesRegex(ValueError, 'identity'):
+                    model.validate_rows(rows, self.catalog)
+
+    def test_last_parent_removal_saves_an_external_rule_and_preserves_jobs(self):
+        rows = copy.deepcopy(self.rows)
+        next(row for row in rows if row['id'] == 'w2').update(
+            parentId=None, trigger=None, success=None, warning=None, error=None,
+            parentMustBeNewer=False, sql='', allow=True)
+        with patch.object(model, 'read_catalog', return_value=self.catalog), patch.object(model.sf, 'execute_service') as execute:
+            model.save(rows, model.revision(self.catalog))
+        writes = [call for call in execute.call_args_list if call.args[0].startswith(('INSERT', 'DELETE'))]
+        self.assertEqual(len(writes), 2)
+        self.assertEqual({call.args[1]['PARENT_ID'] for call in writes}, {'w1', None})
+        self.assertTrue(all(call.args[1]['JOB_ID'] is None for call in writes))
+
     def test_definition_names_cannot_be_overwritten_through_the_grid(self):
         self.rows[0]['name'] = 'Spoofed'
         self.rows[-1]['name'] = 'Spoofed'

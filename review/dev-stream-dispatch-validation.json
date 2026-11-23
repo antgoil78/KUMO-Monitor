@@ -1,0 +1,80 @@
+{
+  "environment": "DEV",
+  "status": "implemented_and_dev_validated",
+  "backend_tests": {
+    "passed": 318,
+    "failed": 0
+  },
+  "reports": {
+    "deployment": "review/dev-stream-dispatch-deployment.json",
+    "hardening": "review/dev-stream-dispatch-hardening.json",
+    "recovery-hardening": "review/dev-stream-dispatch-recovery-hardening.json",
+    "integration": "review/dev-stream-dispatch-integration.json",
+    "modes": "review/dev-stream-dispatch-modes.json",
+    "scopes": "review/dev-stream-dispatch-scopes.json",
+    "batching": "review/dev-stream-dispatch-batching.json",
+    "duplicate-completion": "review/dev-stream-dispatch-duplicate-completion.json",
+    "delivery-recovery": "review/dev-stream-dispatch-delivery-recovery.json",
+    "runtime": "review/dev-stream-dispatch-runtime.json",
+    "shared-warehouse": "review/dev-stream-dispatch-shared-warehouse.json",
+    "idle": "review/dev-stream-dispatch-idle.json"
+  },
+  "maintenance": {
+    "state": "SUSPENDED",
+    "schedule": null
+  },
+  "dispatch": {
+    "task": "TASK_ORCH_DISPATCH",
+    "mode": "STREAM",
+    "schedule": null
+  },
+  "idle_observation": {
+    "environment": "DEV",
+    "idle_seconds": 180,
+    "dispatcher_queries": 0,
+    "maintenance_schedule": null,
+    "warehouse_state_at_end": "STARTED",
+    "warehouse_shared_with_tst": true,
+    "note": "No query was submitted during observation. Shared warehouse state can reflect other applications.",
+    "observed_from": "2026-11-23 11:24:36.864000+00:00",
+    "tst_changed": false
+  },
+  "acceptance": [
+    "Native dispatch independent of browser and Python confirmation",
+    "Queue serialization and dependency activity gates",
+    "SQL failures, timeouts and cancellation",
+    "Fork/join with an older parent success",
+    "Frozen commands and JOB_ONLY/FROM_JOB scope",
+    "Parallel sibling timeout isolation",
+    "Enqueue-only native scheduling and scheduled overlap suppression",
+    "105 duplicate signals with bounded native continuation",
+    "Three-attempt quarantine",
+    "Explicit missing-signal and interrupted-delivery repair without replay",
+    "Duplicate completion after graph cleanup",
+    "No dispatcher SQL during a query-free idle window"
+  ],
+  "scope": {
+    "tst_changed": false,
+    "spcs_services_changed": false,
+    "images_published": false,
+    "business_workflows_executed": false
+  },
+  "application_source": [
+    "Lazy environment bootstrap on data demand",
+    "Warehouse-free startup and health/cache probes",
+    "Environment readiness and bootstrap error diagnostics",
+    "Per-environment dispatch capability with existing direct-engine compatibility"
+  ],
+  "limits": [
+    "App source changes are not yet deployed to SPCS",
+    "An overnight/weekend soak remains before TST promotion",
+    "Warehouse is shared with TST; its other callers can still resume it",
+    "Real email delivery was not exercised",
+    "Long outages or stale streams require explicit operator review; no periodic repair",
+    "Extended execution scenarios preceded final batch/recovery hardening; final delivery/recovery and idle checks followed it"
+  ],
+  "dev_dispatcher_idle_proven": true,
+  "warehouse_wide_idle_proven": false,
+  "promotion_ready": false,
+  "impact_guide": "snowflake/README.md#impact-and-operating-limits"
+}

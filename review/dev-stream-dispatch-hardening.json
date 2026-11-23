@@ -1,0 +1,14 @@
+{
+  "environment": "DEV",
+  "applied": true,
+  "installed_body_sha256": {
+    "SP_ORCH_DISPATCH": "37c0e25c920fb1913aca621b6736afe1059d9ddf0974598b0d86e9a7f91b5906",
+    "SP_ORCH_RECONCILE": "8ad28d062e25424a266a82d1edf1659b10910743bdf339688f1b014836d1b66e"
+  },
+  "changes": [
+    "Bound dispatcher batches by time as well as count",
+    "Explicit repair can rearm interrupted final-attempt deliveries"
+  ],
+  "tst_changed": false,
+  "service_changed": false
+}

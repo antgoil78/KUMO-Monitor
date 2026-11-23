@@ -233,12 +233,15 @@ Pull requests to `main` run these checks in `validate-pr.yml`.
 That workflow does not publish images or change a service; the existing image
 workflow continues to publish on merges to `main`.
 
-The DEV engine now dispatches eligible downstream workflows after completion,
-including joins with multiple parents and duplicate-request protection. Two
-known legacy parity gaps remain: completion notifications and dbt warning/artifact
-classification. Before promoting the new engine for workloads relying on them,
-complete their integration and DEV validation. Fixture browser tests also do
-not replace live DEV checks for accepted run IDs, task permissions, workload
+The DEV engine dispatches eligible downstream workflows after completion,
+including joins with multiple parents and duplicate-request protection. DEV
+completion emails are restored through the current workflow catalog; see the
+[notification migration guide](snowflake/README.md#workflow-notifications-in-dev-and-tst).
+dbt warning/artifact classification remains a legacy parity gap. Before promoting
+the engine for workloads relying on it, complete its integration and DEV validation.
+The TST/ACC notification migration enables failure emails for every workflow;
+DEV restores existing notification rules only. Fixture
+browser tests also do not replace live DEV checks for accepted run IDs, task permissions, workload
 execution, and schedule controls. See the
 [engine validation instructions](snowflake/README.md).
 
@@ -370,8 +373,10 @@ column. Live activity indicators identify the workflow and current job.
 
 Manual API execution requires `KUMO_ORCHESTRATION_RUNS_ENABLED=true` in the
 running backend; the code default is false. Initial deployment prepares workflow
-schedulers suspended; enable individual schedules from the Monitor. A static housekeeping task advances accepted
-requests, recovers interrupted runs, and removes leftover temporary tasks.
+schedulers suspended; enable individual schedules from the Monitor. DEV now uses a
+stream-triggered dispatcher and per-execution finalizers to advance accepted
+requests, recover native failures and clean temporary tasks. There is no
+periodic maintenance schedule. TST has not been promoted to this dispatch change.
 TST retains its existing engine until the new engine has been tested and accepted. See the [parallel engine guide](snowflake/README.md#parallel-orchestration-engine).
 
 The Dashboard uses the same shared workflow/job snapshot as Workflow Monitor,
@@ -400,7 +405,8 @@ execution tasks, procedures, queue and stream are suspended/archived with `X_`
 names; old history remains available. DEV's environment-specific retirement
 parameter blocks the old controls and recovery worker. TST is unchanged.
 See [DEV retirement](snowflake/README.md#dev-retirement-of-the-old-execution-engine)
-for the targeted migration and remaining dispatch/notification integration.
+for the targeted migration. DEV supports downstream dispatch and
+[workflow completion emails](snowflake/README.md#workflow-notifications-in-dev-and-tst).
 
 The new Monitor includes Log shortcuts on workflow/job rows and Latest DAG Run
 for DBT jobs, quick enable/disable controls, and a schedule editor. Latest DAG Run
@@ -423,11 +429,12 @@ do not query Snowflake per browser. Manual refresh wakes the shared reader.
 Manual Run returns HTTP 202 with a native Snowflake query receipt, request ID,
 and `INITIATING` status. Snapshot preparation and temporary workflow task startup
 continue in the background; SSE reports validation errors and execution states.
-The idempotent request ID prevents duplicate executions on retry. Reconciliation
-is handled by the static maintenance task, outside the submission path. Run
+The idempotent request ID prevents duplicate executions on retry. In DEV, the
+execution snapshot and its launch event commit together. A native stream task
+launches it independently of browser connections or Python confirmation workers. Run
 controls for the workflow and its jobs are disabled while submitting, queued,
 initiating, or running and become available again after completion. No database
-DDL changes are required for this transport/lifecycle change.
+DDL changes are required for the HTTP receipt and SSE transport themselves.
 
 Background monitor/dashboard refreshes follow the instance's live SSE client
 count: the first connection starts the shared readers and the last disconnect
@@ -436,7 +443,10 @@ start polling. A refresh already in progress can finish; no further refresh
 batches begin while the client count is zero. Reconnecting resumes fresh data.
 Submission-confirmation workers also wait for a connected client before their
 next Snowflake call. Accepted workflows and native scheduled tasks continue
-independently in Snowflake, including recovery by the static maintenance task.
+independently in Snowflake. DEV completion/failure recovery follows native
+finalizer events; no maintenance clock queries the warehouse. Bootstrap
+configuration loads on the first data request, with a retry cooldown on failure.
+App import, readiness probes and cache-only reads do not query Snowflake.
 
 Workflow / History reads `WORKFLOW_EXECUTION_LOG`, with workflow/job,
 status, period and text filters and cursor pagination. Workflow and job Actions

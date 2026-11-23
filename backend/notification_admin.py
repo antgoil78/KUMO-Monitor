@@ -8,6 +8,8 @@ configuration overview used by the React Notifications page.
 
 from flask import Blueprint, current_app, jsonify, request
 from snowflake.connector import DictCursor
+import re
+import uuid
 
 import config
 import snowflake_client as sf
@@ -21,6 +23,11 @@ EMAIL_GROUPS_TABLE = config.T_EMAIL_GROUPS
 # Useful for local UI development when KUMO_USE_MOCK=true.
 _MOCK_GROUPS = []
 _MOCK_WORKFLOWS = []
+
+
+def configure_routes():
+    global EMAIL_GROUPS_TABLE
+    EMAIL_GROUPS_TABLE = config.T_EMAIL_GROUPS
 
 
 def _clean(value):
@@ -65,7 +72,7 @@ def _load_notification_admin():
                     n.FAIL_GROUP,
                     n.EMAIL_INTEGRATION,
                     n.ENVIRONMENT
-                FROM {config.T_WORKFLOWS} w
+                FROM {config.T_ORCHESTRATION_WORKFLOW if config.LEGACY_ENGINE_RETIRED else config.T_WORKFLOWS} w
                 LEFT JOIN {config.T_NOTIFICATIONS} n
                     ON n.WORKFLOW_ID = w.WORKFLOW_ID
                 ORDER BY
@@ -81,6 +88,56 @@ def _load_notification_admin():
         "groups": groups,
         "workflows": workflows,
     }
+
+
+def _notification_values(payload):
+    if not isinstance(payload, dict):
+        raise ValueError('A JSON object is required')
+    for field in ('onFailEmail', 'onSuccessEmail'):
+        if type(payload.get(field)) is not bool:
+            raise ValueError(f'{field} must be true or false')
+    values = dict(on_fail=payload['onFailEmail'], on_success=payload['onSuccessEmail'],
+                  fail_group=_clean(payload.get('failGroup')), success_group=_clean(payload.get('successGroup')),
+                  integration=_clean(payload.get('emailIntegration')), environment=config.ENVIRONMENT)
+    if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_$]*', values['integration']):
+        raise ValueError('Choose a valid Snowflake email integration name')
+    for channel in ('fail', 'success'):
+        if values['on_' + channel] and not values[channel + '_group']:
+            raise ValueError(f'Choose a recipient group for {channel} emails')
+    return values
+
+
+@notification_admin_bp.patch('/api/notification-workflows/<workflow_id>')
+def update_workflow_notifications(workflow_id):
+    try:
+        workflow_id = str(uuid.UUID(workflow_id))
+        values = _notification_values(request.get_json(silent=True))
+        if config.USE_MOCK or not sf.is_configured():
+            return _json_error('Connect to Snowflake to edit workflow notifications.', 503)
+        catalog = config.T_ORCHESTRATION_WORKFLOW if config.LEGACY_ENGINE_RETIRED else config.T_WORKFLOWS
+        with sf.connection_scope(force_service=True):
+            if not sf.query_one_service(f'SELECT WORKFLOW_ID FROM {catalog} WHERE WORKFLOW_ID = %(workflow_id)s', {'workflow_id': workflow_id}):
+                return _json_error('Workflow not found', 404)
+            for channel in ('fail', 'success'):
+                if values['on_' + channel]:
+                    group = sf.query_one_service(f'SELECT RECIPIENTS FROM {config.T_EMAIL_GROUPS} WHERE GROUP_NAME = %(group)s', {'group': values[channel + '_group']})
+                    if not group or not _clean(group.get('RECIPIENTS')):
+                        raise ValueError('Choose an email group with recipients')
+            sf.execute_service(f'''
+                MERGE INTO {config.T_NOTIFICATIONS} t
+                USING (SELECT %(workflow_id)s AS WORKFLOW_ID) s ON t.WORKFLOW_ID = s.WORKFLOW_ID
+                WHEN MATCHED THEN UPDATE SET ON_FAIL_EMAIL=%(on_fail)s, ON_SUCCESS_EMAIL=%(on_success)s,
+                    FAIL_GROUP=%(fail_group)s, SUCCESS_GROUP=%(success_group)s,
+                    EMAIL_INTEGRATION=%(integration)s, ENVIRONMENT=%(environment)s, UPDATED_AT=SYSDATE()
+                WHEN NOT MATCHED THEN INSERT (WORKFLOW_ID,ON_FAIL_EMAIL,ON_SUCCESS_EMAIL,FAIL_GROUP,SUCCESS_GROUP,EMAIL_INTEGRATION,ENVIRONMENT)
+                    VALUES (s.WORKFLOW_ID,%(on_fail)s,%(on_success)s,%(fail_group)s,%(success_group)s,%(integration)s,%(environment)s)
+            ''', {**values, 'workflow_id': workflow_id})
+        return jsonify(ok=True, workflowId=workflow_id)
+    except (ValueError, TypeError, AttributeError) as exc:
+        return _json_error(exc, 400)
+    except Exception as exc:
+        current_app.logger.exception('Failed to save workflow notifications %s', workflow_id)
+        return _json_error(exc, 500)
 
 
 def _create_email_group(group_name, recipients="", description=""):

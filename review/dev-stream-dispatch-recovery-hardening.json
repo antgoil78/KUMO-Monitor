@@ -1,0 +1,14 @@
+{
+  "environment": "DEV",
+  "applied": true,
+  "installed_body_sha256": {
+    "SP_ORCH_FINISH_RUN": "6e902d3b96d9914f3519e9246ff204c1d88f72c715cf2362fc4dfae7250c4774",
+    "SP_ORCH_RECONCILE": "21b664d815ed1bf9a20cb0db3e45f4747590c86873a81a90013f3965bef23d73"
+  },
+  "changes": [
+    "Finalization restores missing per-job dependency signals",
+    "Explicit repair restores missing workflow and job completion signals without workload replay"
+  ],
+  "tst_changed": false,
+  "service_changed": false
+}

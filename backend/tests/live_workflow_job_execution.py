@@ -1,4 +1,4 @@
-"""Opt-in DEV validation of parallel jobs, frozen mode, timeout and sequential order."""
+"""Opt-in validation of parallel jobs, frozen mode, timeout and sequential order."""
 import argparse
 import json
 from pathlib import Path
@@ -14,7 +14,11 @@ APP, META = 'KUMO_DEV.MONITOR_APP', 'KUMO_DEV.MONITOR_META'
 TERMINAL = ('SUCCESS', 'FAILED', 'SKIPPED', 'CANCELLED')
 
 
-def run(timeout_only=False):
+def run(timeout_only=False, environment='DEV'):
+    if environment not in ('DEV', 'TST'):
+        raise ValueError('Select DEV or TST explicitly')
+    database = 'KUMO_' + environment
+    APP, META = database + '.MONITOR_APP', database + '.MONITOR_META'
     workflows = {mode: str(uuid.uuid4()) for mode in ('PARALLEL', 'SEQUENTIAL')}
     jobs = {mode: [str(uuid.uuid4()) for _ in range(3)] for mode in workflows}
     marker = 'KUMO job execution validation ' + str(uuid.uuid4())
@@ -59,9 +63,9 @@ def run(timeout_only=False):
                 time.sleep(2)
             raise AssertionError(dict(timeout=run_id, rows=rows))
 
-        environment = next(iter(query('CALL ' + META + '.SP_GET_ENVIRONMENT()')[0].values()))
-        environment = json.loads(environment) if isinstance(environment, str) else environment
-        assert (environment['DATABASE'], environment['META_SCHEMA'], environment['MONITOR_APP_SCHEMA']) == ('KUMO_DEV', 'MONITOR_META', 'MONITOR_APP')
+        routing = next(iter(query('CALL ' + META + '.SP_GET_ENVIRONMENT()')[0].values()))
+        routing = json.loads(routing) if isinstance(routing, str) else routing
+        assert (routing['DATABASE'], routing['META_SCHEMA'], routing['MONITOR_APP_SCHEMA']) == (database, 'MONITOR_META', 'MONITOR_APP')
         warehouse = query('SELECT CURRENT_WAREHOUSE() NAME')[0]['NAME']
         try:
             query('BEGIN')
@@ -80,7 +84,7 @@ def run(timeout_only=False):
                         PARENT_ID=workflow_id if index == 0 else jobs[mode][index - 1], ALLOW=True,
                         SUCCESS=True, ERROR=False, WARNING=False, SQL='SELECT FALSE' if index == 2 else None))
             query('COMMIT')
-            print('Created isolated DEV validation workflows; no schedules or downstream triggers.', flush=True)
+            print('Created isolated ' + environment + ' validation workflows; no schedules or downstream triggers.', flush=True)
             if not timeout_only:
                 parallel = request('PARALLEL')
                 # Queued snapshots must retain the mode that was accepted.
@@ -144,6 +148,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run', action='store_true')
     parser.add_argument('--timeout-only', action='store_true')
+    parser.add_argument('--environment', choices=('DEV', 'TST'), default='DEV')
     args = parser.parse_args()
-    if args.run: run(timeout_only=args.timeout_only)
+    if args.run: run(timeout_only=args.timeout_only, environment=args.environment)
     else: parser.print_help()

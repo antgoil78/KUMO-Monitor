@@ -1,0 +1,11 @@
+{
+  "environment": "DEV",
+  "idle_seconds": 180,
+  "dispatcher_queries": 0,
+  "maintenance_schedule": null,
+  "warehouse_state_at_end": "STARTED",
+  "warehouse_shared_with_tst": true,
+  "note": "No query was submitted during observation. Shared warehouse state can reflect other applications.",
+  "observed_from": "2026-11-23 11:24:36.864000+00:00",
+  "tst_changed": false
+}

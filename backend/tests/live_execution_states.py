@@ -14,12 +14,17 @@ import config
 META, APP = 'KUMO_DEV.MONITOR_META', 'KUMO_DEV.MONITOR_APP'
 
 
-def run(progress_only=False):
+def run(progress_only=False, environment='DEV'):
+    if environment not in ('DEV','TST'):
+        raise ValueError('Select DEV or TST explicitly')
+    META, APP = 'KUMO_'+environment+'.MONITOR_META', 'KUMO_'+environment+'.MONITOR_APP'
     workflow = str(uuid.uuid4()); jobs = [str(uuid.uuid4()) for _ in range(4)]
     telemetry = str(uuid.uuid4())
     with connect() as connection, connection.cursor(DictCursor) as cursor:
         def query(sql, params=()):
             cursor.execute(sql, params); return cursor.fetchall()
+        config.PARAMETER_STORE = META+'.APPLICATION_PARAMETERS'
+        config.apply_environment(query(f"SELECT PARAMETER_KEY,PARAMETER_VALUE,VALUE_TYPE,ACTIVE_FL,IS_SECRET FROM {META}.APPLICATION_PARAMETERS WHERE INSTANCE_NAME='DEFAULT' AND PARAMETER_GROUP='ENVIRONMENT'"))
         def call(name, params):
             value = next(iter(query(f'CALL {APP}.{name}(' + ','.join('%s' for _ in params) + ')', params)[0].values()))
             value = json.loads(value) if isinstance(value, str) else value
@@ -90,4 +95,10 @@ def run(progress_only=False):
             print('Fixture rows and tasks removed',flush=True)
 
 
-if __name__=='__main__': run(progress_only='--progress-only' in sys.argv)
+if __name__=='__main__':
+    import argparse
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--progress-only',action='store_true')
+    parser.add_argument('--environment',choices=('DEV','TST'),default='DEV')
+    args=parser.parse_args()
+    run(args.progress_only,args.environment)

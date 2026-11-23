@@ -1,0 +1,33 @@
+{
+  "environment": "DEV",
+  "observed_from": "2026-11-23 11:24:36.864000+00:00",
+  "idle_seconds": 180,
+  "callers": [
+    {
+      "application": "KUMO_TST monitor service",
+      "query_tag": "KUMO_MONITOR_SHARED_CACHE",
+      "query_type": "SELECT",
+      "queries": 42
+    },
+    {
+      "application": "KUMO_TST monitor service",
+      "query_tag": "KUMO_MONITOR_APP",
+      "query_type": "SELECT",
+      "queries": 14
+    },
+    {
+      "application": "KUMO_TST monitor service",
+      "query_tag": "KUMO_MONITOR_SHARED_CACHE",
+      "query_type": "UPDATE",
+      "queries": 12
+    },
+    {
+      "application": "Other Streamlit application",
+      "query_type": "EXECUTE_STREAMLIT",
+      "overlapping_executions": 1
+    }
+  ],
+  "note": "Exact observation window. TST service queries and another application overlapped it; their user presence was not assessed. No query text, result rows or personal identities are retained.",
+  "dev_dispatcher_queries": 0,
+  "warehouse_wide_idle_proven": false
+}

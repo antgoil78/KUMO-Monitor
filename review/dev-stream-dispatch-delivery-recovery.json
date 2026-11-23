@@ -1,0 +1,16 @@
+{
+  "environment": "DEV",
+  "marker": "STREAM_TEST_1f3a429dac92",
+  "checks": [
+    "committed run launches through the stream with no browser or SP_ORCH_START_RUN call",
+    "native finalization and both temporary tasks clean up",
+    "terminal compatibility wakeup cannot replay work",
+    "launch and completion deliveries drain without a periodic task",
+    "explicit scoped repair restores lost completion/job dependency signals and exhausted delivery without replay",
+    "105 duplicate delivery events cross the native batch limit without lost work or replay",
+    "invalid delivery stops after three attempts and remains visible for explicit repair",
+    "all success, failure and cancellation graphs clean up"
+  ],
+  "tst_changed": false,
+  "business_workflows_executed": false
+}

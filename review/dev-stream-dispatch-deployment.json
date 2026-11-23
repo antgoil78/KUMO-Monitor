@@ -1,0 +1,31 @@
+{
+  "applied": true,
+  "environment": "DEV",
+  "procedures": [
+    "SP_ORCH_LAUNCH_RUN",
+    "SP_ORCH_FINISH_RUN",
+    "SP_ORCH_DISPATCH",
+    "SP_ORCH_START_RUN",
+    "SP_ORCH_DISPATCH_DEPENDENCIES",
+    "SP_ORCH_EXECUTE_WORKFLOW",
+    "SP_ORCH_RECONCILE",
+    "SP_ORCH_RUN_SCHEDULED",
+    "SP_ORCH_REQUEST_RUN"
+  ],
+  "dispatch": "STREAM",
+  "periodic_maintenance": false,
+  "tst_changed": false,
+  "service_changed": false,
+  "previous_task_states": [
+    {
+      "name": "TASK_ORCH_DISPATCH",
+      "state": "suspended",
+      "schedule": null
+    },
+    {
+      "name": "TASK_ORCH_MAINTENANCE",
+      "state": "suspended",
+      "schedule": null
+    }
+  ]
+}

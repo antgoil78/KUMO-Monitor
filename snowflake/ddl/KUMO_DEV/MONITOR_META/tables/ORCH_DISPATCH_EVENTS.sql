@@ -1,0 +1,14 @@
+-- Immutable stream signals. Mutable delivery receipts live in ORCH_DISPATCH_DELIVERIES.
+-- The STATE/ATTEMPTS/error columns retain their initial values in this source.
+CREATE TABLE IF NOT EXISTS KUMO_DEV.MONITOR_META.ORCH_DISPATCH_EVENTS (
+    EVENT_ID VARCHAR(36) NOT NULL DEFAULT UUID_STRING(),
+    KIND VARCHAR(20) NOT NULL,
+    RUN_ID VARCHAR(36),
+    TASK_RUN_GROUP_ID VARCHAR(100),
+    STATE VARCHAR(20) NOT NULL DEFAULT 'NEW',
+    ATTEMPTS NUMBER(9,0) NOT NULL DEFAULT 0,
+    LAST_ERROR VARCHAR,
+    CREATED_AT TIMESTAMP_NTZ NOT NULL DEFAULT SYSDATE(),
+    UPDATED_AT TIMESTAMP_NTZ NOT NULL DEFAULT SYSDATE()
+) DATA_RETENTION_TIME_IN_DAYS = 7
+COMMENT='KUMO stream dispatch: durable launch/completion events; delivery retries never replay completed workloads';

@@ -126,7 +126,7 @@ class EnvironmentConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "KUMO_DEPLOYMENT_ENV"):
             load_config(KUMO_ENV="DEV", KUMO_DEPLOYMENT_ENV="PRODD")
 
-    def test_live_startup_hydrates_routing_before_importing_blueprints(self):
+    def test_live_startup_is_warehouse_free_and_first_demand_rebinds_routes(self):
         script = """
 import json, os
 import dotenv
@@ -140,6 +140,12 @@ def query(sql, **kwargs):
     return rows
 sf.query = query
 import app, batch_control, file_ingestion
+assert queries == [], queries
+with app.app.test_client() as client:
+    assert client.get('/api/health').status_code == 200
+    assert client.get('/api/activity').status_code == 200
+assert queries == [], queries
+app._ensure_environment()
 assert 'CONTROL.CONFIG.SETTINGS' in queries[0][0]
 assert queries[0][1]['include_context'] is False
 assert batch_control.TABLE == 'ANOTHER_DB.APPDATA.LIM_BATCH_CTRL'
@@ -192,6 +198,40 @@ with app.app.test_client() as client:
             dotenv_path = Path(directory) / ".env"
             dotenv_path.write_text("KUMO_ENV=DEV\nKUMO_USE_MOCK=true\n")
             result = subprocess.run([sys.executable, "-c", script, str(dotenv_path)], cwd=CONFIG.parent, env=environment, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_warehouse_outage_does_not_query_on_import_or_probes_or_restart_process(self):
+        script = """
+import os
+import dotenv
+dotenv.load_dotenv = lambda: None
+import snowflake_client as sf
+sf.is_configured = lambda: True
+calls = []
+def unavailable(sql, **kwargs):
+    calls.append(sql)
+    raise RuntimeError('Warehouse quota exceeded')
+sf.query = unavailable
+import app
+assert not calls
+with app.app.test_client() as client:
+    for path in ('/api/health', '/api/activity', '/api/dashboard', '/api/orchestration/monitor'):
+        assert client.get(path).status_code == 200, path
+    assert not calls, calls
+    assert client.get('/api/orchestration/engine').status_code == 503
+    assert len(calls) == 1
+    assert client.get('/api/orchestration/engine').status_code == 503
+    assert len(calls) == 1  # Cooldown, not a per-request retry loop.
+    assert client.get('/api/health').status_code == 200
+    assert len(calls) == 1
+    assert not app._environment_ready
+"""
+        environment = {key: value for key, value in os.environ.items()
+                       if not key.startswith(('KUMO_', 'SNOWFLAKE_', 'PYTHON_DOTENV_'))}
+        environment.update(PYTHONPATH=str(CONFIG.parent),
+                           KUMO_ENVIRONMENT_TABLE='KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS')
+        result = subprocess.run([sys.executable, '-c', script], cwd=CONFIG.parent,
+                                env=environment, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
 
 

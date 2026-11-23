@@ -1,0 +1,1330 @@
+{
+  "environment": "TST",
+  "requestedAt": "2026-11-12T11:10:02.592854+00:00",
+  "schedules": [
+    {
+      "workflowId": "7bd217dc-319c-5ee6-833d-cebe361cb26e",
+      "workflowName": "LOAD RAW DAILY",
+      "enabled": true,
+      "taskFqn": "KUMO_TST.MONITOR_APP.TASK_ORCH_WF_7BD217DC_319C_5EE6_833D_CEBE361CB26E_SCHEDULER",
+      "nativeState": "started",
+      "schedule": "USING CRON 0 6 * * 1-5 UTC",
+      "verifiedAt": "2026-11-12T11:24:37.669476+00:00"
+    },
+    {
+      "workflowId": "1a080d0d-2f09-5d09-90e5-ac6e3b0eda59",
+      "workflowName": "MAINTENANCE - CLEANUP",
+      "enabled": true,
+      "taskFqn": "KUMO_TST.MONITOR_APP.TASK_ORCH_WF_1A080D0D_2F09_5D09_90E5_AC6E3B0EDA59_SCHEDULER",
+      "nativeState": "started",
+      "schedule": "USING CRON 0 14 * * 1-5 UTC",
+      "verifiedAt": "2026-11-12T11:24:37.669508+00:00"
+    }
+  ],
+  "runs": [
+    {
+      "workflowId": "4fb79385-3ed4-50cc-8c05-ec0ecfe4d8b0",
+      "workflowName": "ADTX LOAD",
+      "requestId": "9938c0bf-8b62-4b0e-bf1e-2ceaabcf54ef",
+      "mode": "WORKFLOW",
+      "state": "COMPLETED",
+      "jobCount": 3,
+      "ok": true,
+      "reused": false,
+      "runId": "73dc9928-95b8-48ea-9cbb-eb87949b304d",
+      "status": "SUCCESS",
+      "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_4FB79385_3ED4_50CC_8C05_EC0ECFE4D8B0_73DC9928_95B8_48EA_9CBB_EB87949B304D",
+      "totalJobs": 3,
+      "startResult": {
+        "ok": true,
+        "startedRunId": "73dc9928-95b8-48ea-9cbb-eb87949b304d",
+        "status": "CLAIMED",
+        "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_4FB79385_3ED4_50CC_8C05_EC0ECFE4D8B0_73DC9928_95B8_48EA_9CBB_EB87949B304D",
+        "wakeupScheduled": true
+      },
+      "requestedAt": "2026-11-12 11:10:37.627000",
+      "startedAt": "2026-11-12 11:11:03.930000",
+      "endedAt": "2026-11-12 11:16:23.862000",
+      "error": null,
+      "jobs": [
+        {
+          "EXECUTION_ID": "daa693e2-6ab3-4baa-821a-02491b1a08f4",
+          "WORKFLOW_RUN_ID": "73dc9928-95b8-48ea-9cbb-eb87949b304d",
+          "JOB_ID": "7622e5c7-2695-5592-9c0f-da05ba3552e1",
+          "JOB_NAME": "ADTX READY TO LOAD",
+          "JOB_POSITION": 1,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:10:38.242000",
+          "STARTED_AT": "2026-11-12 11:11:09.884000",
+          "ENDED_AT": "2026-11-12 11:11:44.435000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c3f-010b-db74-0004-a4f2082e181a"
+        },
+        {
+          "EXECUTION_ID": "157230d5-ba54-4259-b8f3-2e343aa035f9",
+          "WORKFLOW_RUN_ID": "73dc9928-95b8-48ea-9cbb-eb87949b304d",
+          "JOB_ID": "c9235f34-068f-51f0-a563-b1558b55e41d",
+          "JOB_NAME": "ADTX SDL",
+          "JOB_POSITION": 2,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:10:38.766000",
+          "STARTED_AT": "2026-11-12 11:11:46.975000",
+          "ENDED_AT": "2026-11-12 11:13:28.224000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c3f-010b-db74-0004-a4f2082e1a4e"
+        },
+        {
+          "EXECUTION_ID": "29574c65-538c-44eb-9ae8-117eb3eb4814",
+          "WORKFLOW_RUN_ID": "73dc9928-95b8-48ea-9cbb-eb87949b304d",
+          "JOB_ID": "65e103b6-ac93-5fdf-95be-0bc9bebddff0",
+          "JOB_NAME": "ADTX EDV",
+          "JOB_POSITION": 3,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:10:39.392000",
+          "STARTED_AT": "2026-11-12 11:13:36.746000",
+          "ENDED_AT": "2026-11-12 11:16:19.518000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c41-010b-db74-0004-a4f2082e55fa"
+        }
+      ]
+    },
+    {
+      "workflowId": "a1e6733b-5d8f-51df-b473-37ababf9922d",
+      "workflowName": "ARAC LOAD",
+      "requestId": "50da5902-d3f8-4345-a584-25ede9cf9f70",
+      "mode": "WORKFLOW",
+      "state": "COMPLETED",
+      "jobCount": 3,
+      "ok": true,
+      "reused": false,
+      "runId": "f47235f2-e4fb-40bf-a256-b51fd39ee015",
+      "status": "SUCCESS",
+      "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_A1E6733B_5D8F_51DF_B473_37ABABF9922D_F47235F2_E4FB_40BF_A256_B51FD39EE015",
+      "totalJobs": 3,
+      "startResult": {
+        "ok": true,
+        "startedRunId": "f47235f2-e4fb-40bf-a256-b51fd39ee015",
+        "status": "CLAIMED",
+        "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_A1E6733B_5D8F_51DF_B473_37ABABF9922D_F47235F2_E4FB_40BF_A256_B51FD39EE015",
+        "wakeupScheduled": true
+      },
+      "requestedAt": "2026-11-12 11:10:58.457000",
+      "startedAt": "2026-11-12 11:11:31.548000",
+      "endedAt": "2026-11-12 11:16:49.114000",
+      "error": null,
+      "jobs": [
+        {
+          "EXECUTION_ID": "fce72a70-5868-4a0a-b85c-f710ceadcea6",
+          "WORKFLOW_RUN_ID": "f47235f2-e4fb-40bf-a256-b51fd39ee015",
+          "JOB_ID": "b2260240-54be-57c6-a1a7-141f0c88c565",
+          "JOB_NAME": "ARAC READY TO LOAD",
+          "JOB_POSITION": 1,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:10:59.711000",
+          "STARTED_AT": "2026-11-12 11:11:35.401000",
+          "ENDED_AT": "2026-11-12 11:12:09.514000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c3f-010b-db32-0004-a4f2082e38e6"
+        },
+        {
+          "EXECUTION_ID": "85f4d6e6-5202-49aa-badf-36d8c209e225",
+          "WORKFLOW_RUN_ID": "f47235f2-e4fb-40bf-a256-b51fd39ee015",
+          "JOB_ID": "17000e50-b091-59a7-b1e6-74efb2994aae",
+          "JOB_NAME": "ARAC SDL",
+          "JOB_POSITION": 2,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:11:00.272000",
+          "STARTED_AT": "2026-11-12 11:12:16.343000",
+          "ENDED_AT": "2026-11-12 11:13:49.830000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c40-010b-db32-0004-a4f2082e3b1e"
+        },
+        {
+          "EXECUTION_ID": "b2f36749-ff34-48bc-b63f-94a583a329ca",
+          "WORKFLOW_RUN_ID": "f47235f2-e4fb-40bf-a256-b51fd39ee015",
+          "JOB_ID": "7d6d3edb-0b28-536f-a3be-51ab21b226d4",
+          "JOB_NAME": "ARAC EDV",
+          "JOB_POSITION": 3,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:11:00.710000",
+          "STARTED_AT": "2026-11-12 11:13:57.945000",
+          "ENDED_AT": "2026-11-12 11:16:47.831000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c41-010b-db32-0004-a4f2082e674e"
+        }
+      ]
+    },
+    {
+      "workflowId": "aaa94e8a-1752-5198-8007-6929eca04817",
+      "workflowName": "CACT LOAD",
+      "requestId": "58bb5f53-509c-4d3b-80c0-aa86f4f685d0",
+      "mode": "WORKFLOW",
+      "state": "COMPLETED",
+      "jobCount": 3,
+      "ok": true,
+      "reused": false,
+      "runId": "eacbbc86-1803-4eeb-bedc-a829cb1bf894",
+      "status": "SUCCESS",
+      "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_AAA94E8A_1752_5198_8007_6929ECA04817_EACBBC86_1803_4EEB_BEDC_A829CB1BF894",
+      "totalJobs": 3,
+      "startResult": {
+        "ok": true,
+        "startedRunId": "eacbbc86-1803-4eeb-bedc-a829cb1bf894",
+        "status": "CLAIMED",
+        "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_AAA94E8A_1752_5198_8007_6929ECA04817_EACBBC86_1803_4EEB_BEDC_A829CB1BF894",
+        "wakeupScheduled": true
+      },
+      "requestedAt": "2026-11-12 11:11:26.056000",
+      "startedAt": "2026-11-12 11:11:53.163000",
+      "endedAt": "2026-11-12 11:24:07.472000",
+      "error": null,
+      "jobs": [
+        {
+          "EXECUTION_ID": "b5ca0118-2681-4eb6-9a1b-9818534a6df5",
+          "WORKFLOW_RUN_ID": "eacbbc86-1803-4eeb-bedc-a829cb1bf894",
+          "JOB_ID": "45ed92fc-3255-53db-a99d-5a7ae7ec51e9",
+          "JOB_NAME": "CACT READY TO LOAD",
+          "JOB_POSITION": 1,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:11:26.578000",
+          "STARTED_AT": "2026-11-12 11:11:58.794000",
+          "ENDED_AT": "2026-11-12 11:12:22.834000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c3f-010b-db74-0004-a4f2082e1ace"
+        },
+        {
+          "EXECUTION_ID": "2918c7ed-03aa-4fa7-8830-700ae28cc395",
+          "WORKFLOW_RUN_ID": "eacbbc86-1803-4eeb-bedc-a829cb1bf894",
+          "JOB_ID": "ab172099-74a1-50f7-9191-51025b32c129",
+          "JOB_NAME": "CACT SDL",
+          "JOB_POSITION": 2,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:11:27.069000",
+          "STARTED_AT": "2026-11-12 11:12:26.111000",
+          "ENDED_AT": "2026-11-12 11:16:30.142000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c40-010b-db74-0004-a4f2082e1d7a"
+        },
+        {
+          "EXECUTION_ID": "9262462a-4b00-417c-a833-f2ffd3083932",
+          "WORKFLOW_RUN_ID": "eacbbc86-1803-4eeb-bedc-a829cb1bf894",
+          "JOB_ID": "f60c4bbf-1f7c-559a-b867-c462f0ba4c2d",
+          "JOB_NAME": "CACT EDV",
+          "JOB_POSITION": 3,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:11:27.632000",
+          "STARTED_AT": "2026-11-12 11:16:32.350000",
+          "ENDED_AT": "2026-11-12 11:24:02.672000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c44-010b-db74-0004-a4f2082ee1e6"
+        }
+      ]
+    },
+    {
+      "workflowId": "b7fb9770-084e-50b2-ba42-dacd578e7fda",
+      "workflowName": "CARD LOAD",
+      "requestId": "abded648-f320-4ff8-bb98-4074d359d054",
+      "mode": "WORKFLOW",
+      "state": "COMPLETED",
+      "jobCount": 2,
+      "ok": true,
+      "reused": false,
+      "runId": "6adbd3b2-820d-4bac-8f3c-30f111037698",
+      "status": "SUCCESS",
+      "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_B7FB9770_084E_50B2_BA42_DACD578E7FDA_6ADBD3B2_820D_4BAC_8F3C_30F111037698",
+      "totalJobs": 2,
+      "startResult": {
+        "ok": true,
+        "startedRunId": "6adbd3b2-820d-4bac-8f3c-30f111037698",
+        "status": "CLAIMED",
+        "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_B7FB9770_084E_50B2_BA42_DACD578E7FDA_6ADBD3B2_820D_4BAC_8F3C_30F111037698",
+        "wakeupScheduled": true
+      },
+      "requestedAt": "2026-11-12 11:11:47.666000",
+      "startedAt": "2026-11-12 11:12:17.188000",
+      "endedAt": "2026-11-12 11:15:41.289000",
+      "error": null,
+      "jobs": [
+        {
+          "EXECUTION_ID": "987ee12f-1cd5-4881-bc6c-0d1248a18dfb",
+          "WORKFLOW_RUN_ID": "6adbd3b2-820d-4bac-8f3c-30f111037698",
+          "JOB_ID": "0fdda82e-8f93-5d40-b422-e3ef22d59475",
+          "JOB_NAME": "CARD READY TO LOAD",
+          "JOB_POSITION": 1,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:11:48.428000",
+          "STARTED_AT": "2026-11-12 11:12:20.985000",
+          "ENDED_AT": "2026-11-12 11:12:41.195000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c40-010b-dc5d-0004-a4f2082d925a"
+        },
+        {
+          "EXECUTION_ID": "e85e1053-1687-43ab-b865-c2d0d5f81494",
+          "WORKFLOW_RUN_ID": "6adbd3b2-820d-4bac-8f3c-30f111037698",
+          "JOB_ID": "6e6ce643-6afc-5815-96d4-4fff8fc36f5a",
+          "JOB_NAME": "CARD SDL",
+          "JOB_POSITION": 2,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:11:48.925000",
+          "STARTED_AT": "2026-11-12 11:12:44.903000",
+          "ENDED_AT": "2026-11-12 11:15:38.412000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c40-010b-dc5d-0004-a4f2082d92f6"
+        }
+      ]
+    },
+    {
+      "workflowId": "8e04375a-b53d-5aec-950e-63c835818959",
+      "workflowName": "CUAR LOAD",
+      "requestId": "84cea7db-09f4-4745-b593-470f33a69067",
+      "mode": "WORKFLOW",
+      "state": "COMPLETED",
+      "jobCount": 3,
+      "ok": true,
+      "reused": false,
+      "runId": "056fb412-6228-4047-ac00-6c6d7cddca19",
+      "status": "SUCCESS",
+      "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_8E04375A_B53D_5AEC_950E_63C835818959_056FB412_6228_4047_AC00_6C6D7CDDCA19",
+      "totalJobs": 3,
+      "startResult": {
+        "ok": true,
+        "startedRunId": "056fb412-6228-4047-ac00-6c6d7cddca19",
+        "status": "CLAIMED",
+        "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_8E04375A_B53D_5AEC_950E_63C835818959_056FB412_6228_4047_AC00_6C6D7CDDCA19",
+        "wakeupScheduled": true
+      },
+      "requestedAt": "2026-11-12 11:12:10.584000",
+      "startedAt": "2026-11-12 11:12:40.477000",
+      "endedAt": "2026-11-12 11:24:07.957000",
+      "error": null,
+      "jobs": [
+        {
+          "EXECUTION_ID": "ac13909a-cd4b-4912-a05b-700edfcea56c",
+          "WORKFLOW_RUN_ID": "056fb412-6228-4047-ac00-6c6d7cddca19",
+          "JOB_ID": "1a43c624-68d1-54ae-8fbf-d95a5b6e4481",
+          "JOB_NAME": "CUAR READY TO LOAD",
+          "JOB_POSITION": 1,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:12:11.232000",
+          "STARTED_AT": "2026-11-12 11:12:44.550000",
+          "ENDED_AT": "2026-11-12 11:13:09.487000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c40-010b-db74-0004-a4f2082e1ea6"
+        },
+        {
+          "EXECUTION_ID": "7e27f580-bdce-42f6-9a3d-67e9e0c0cebf",
+          "WORKFLOW_RUN_ID": "056fb412-6228-4047-ac00-6c6d7cddca19",
+          "JOB_ID": "219b6f3b-cedb-5315-874e-73c4d48b0b26",
+          "JOB_NAME": "CUAR SDL",
+          "JOB_POSITION": 2,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:12:11.978000",
+          "STARTED_AT": "2026-11-12 11:13:13.217000",
+          "ENDED_AT": "2026-11-12 11:17:02.691000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c41-010b-db74-0004-a4f2082e52ce"
+        },
+        {
+          "EXECUTION_ID": "5a387b2c-fa69-4fc0-9db9-33b599189e56",
+          "WORKFLOW_RUN_ID": "056fb412-6228-4047-ac00-6c6d7cddca19",
+          "JOB_ID": "2fab39dd-ceab-57f1-95c4-fd6418c14146",
+          "JOB_NAME": "CUAR EDV",
+          "JOB_POSITION": 3,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:12:12.761000",
+          "STARTED_AT": "2026-11-12 11:17:04.999000",
+          "ENDED_AT": "2026-11-12 11:24:04.630000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c45-010b-db74-0004-a4f2082ee73a"
+        }
+      ]
+    },
+    {
+      "workflowId": "23835689-af94-5b69-bbe6-77639ee74abb",
+      "workflowName": "DISB LOAD",
+      "requestId": "b1f1aa66-9688-4f40-ba60-f78bd9228e20",
+      "mode": "WORKFLOW",
+      "state": "COMPLETED",
+      "jobCount": 3,
+      "ok": true,
+      "reused": false,
+      "runId": "d5fd71fa-17f2-43f6-9acd-98dc1e40aacd",
+      "status": "SUCCESS",
+      "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_23835689_AF94_5B69_BBE6_77639EE74ABB_D5FD71FA_17F2_43F6_9ACD_98DC1E40AACD",
+      "totalJobs": 3,
+      "startResult": {
+        "ok": true,
+        "startedRunId": "d5fd71fa-17f2-43f6-9acd-98dc1e40aacd",
+        "status": "CLAIMED",
+        "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_23835689_AF94_5B69_BBE6_77639EE74ABB_D5FD71FA_17F2_43F6_9ACD_98DC1E40AACD",
+        "wakeupScheduled": true
+      },
+      "requestedAt": "2026-11-12 11:12:35.268000",
+      "startedAt": "2026-11-12 11:13:04.565000",
+      "endedAt": "2026-11-12 11:18:34.239000",
+      "error": null,
+      "jobs": [
+        {
+          "EXECUTION_ID": "addd3bad-c30c-46c5-9c91-53f088c885c5",
+          "WORKFLOW_RUN_ID": "d5fd71fa-17f2-43f6-9acd-98dc1e40aacd",
+          "JOB_ID": "66cd7721-d664-595e-8445-23aea21d379c",
+          "JOB_NAME": "DISB READY TO LOAD",
+          "JOB_POSITION": 1,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:12:35.768000",
+          "STARTED_AT": "2026-11-12 11:13:08.098000",
+          "ENDED_AT": "2026-11-12 11:13:29.902000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c41-010b-db3a-0004-a4f2082e46d6"
+        },
+        {
+          "EXECUTION_ID": "17913605-16ca-4012-a291-02eb82462315",
+          "WORKFLOW_RUN_ID": "d5fd71fa-17f2-43f6-9acd-98dc1e40aacd",
+          "JOB_ID": "0a6cb661-5b88-509f-bee2-33617f9edd03",
+          "JOB_NAME": "DISB SDL",
+          "JOB_POSITION": 2,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:12:36.241000",
+          "STARTED_AT": "2026-11-12 11:13:37.952000",
+          "ENDED_AT": "2026-11-12 11:15:58.595000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c41-010b-db3a-0004-a4f2082e487e"
+        },
+        {
+          "EXECUTION_ID": "fe71006d-569f-4af3-805a-b52fc9beeaed",
+          "WORKFLOW_RUN_ID": "d5fd71fa-17f2-43f6-9acd-98dc1e40aacd",
+          "JOB_ID": "f0a8dd12-871b-5a2d-a21d-bd61d26310e5",
+          "JOB_NAME": "DISB EDV",
+          "JOB_POSITION": 3,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:12:36.811000",
+          "STARTED_AT": "2026-11-12 11:16:01.172000",
+          "ENDED_AT": "2026-11-12 11:18:31.705000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c44-010b-db3a-0004-a4f2082ec3be"
+        }
+      ]
+    },
+    {
+      "workflowId": "03ac3745-50ef-58b5-9b48-2975a973d175",
+      "workflowName": "GEOG LOAD",
+      "requestId": "123291cd-202e-4b5c-9397-6c8f8b47c6d6",
+      "mode": "WORKFLOW",
+      "state": "COMPLETED",
+      "jobCount": 3,
+      "ok": true,
+      "reused": false,
+      "runId": "3ada7030-1b9c-4115-ba4b-b3bdfc4b9482",
+      "status": "SUCCESS",
+      "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_03AC3745_50EF_58B5_9B48_2975A973D175_3ADA7030_1B9C_4115_BA4B_B3BDFC4B9482",
+      "totalJobs": 3,
+      "startResult": {
+        "ok": true,
+        "startedRunId": "3ada7030-1b9c-4115-ba4b-b3bdfc4b9482",
+        "status": "CLAIMED",
+        "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_03AC3745_50EF_58B5_9B48_2975A973D175_3ADA7030_1B9C_4115_BA4B_B3BDFC4B9482",
+        "wakeupScheduled": true
+      },
+      "requestedAt": "2026-11-12 11:12:59.513000",
+      "startedAt": "2026-11-12 11:13:27.360000",
+      "endedAt": "2026-11-12 11:18:58.478000",
+      "error": null,
+      "jobs": [
+        {
+          "EXECUTION_ID": "e17aac5e-11dc-4737-ac33-cc8709d629d3",
+          "WORKFLOW_RUN_ID": "3ada7030-1b9c-4115-ba4b-b3bdfc4b9482",
+          "JOB_ID": "d1bb2e3c-8741-504a-a3de-9f0a9e92fe4a",
+          "JOB_NAME": "GEOG READY TO LOAD",
+          "JOB_POSITION": 1,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:13:00.040000",
+          "STARTED_AT": "2026-11-12 11:13:34.157000",
+          "ENDED_AT": "2026-11-12 11:13:58.468000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c41-010b-db32-0004-a4f2082e657a"
+        },
+        {
+          "EXECUTION_ID": "74ea82f8-244a-4e48-a404-68a5da770d64",
+          "WORKFLOW_RUN_ID": "3ada7030-1b9c-4115-ba4b-b3bdfc4b9482",
+          "JOB_ID": "d7f4c718-bfaf-5b12-afdb-4a722da2d135",
+          "JOB_NAME": "GEOG SDL",
+          "JOB_POSITION": 2,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:13:00.559000",
+          "STARTED_AT": "2026-11-12 11:14:03.918000",
+          "ENDED_AT": "2026-11-12 11:16:18.319000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c42-010b-db32-0004-a4f2082e677e"
+        },
+        {
+          "EXECUTION_ID": "683bc8f0-1203-4a63-bb07-2f6c5ba8fd51",
+          "WORKFLOW_RUN_ID": "3ada7030-1b9c-4115-ba4b-b3bdfc4b9482",
+          "JOB_ID": "75bcb48c-84e7-5aaf-8116-411b2cc48db2",
+          "JOB_NAME": "GEOG EDV",
+          "JOB_POSITION": 3,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:13:01.259000",
+          "STARTED_AT": "2026-11-12 11:16:23.142000",
+          "ENDED_AT": "2026-11-12 11:18:56.980000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c44-010b-db32-0004-a4f2082ebf4a"
+        }
+      ]
+    },
+    {
+      "workflowId": "7e94f3e0-974f-5075-8d64-508a66ddbf24",
+      "workflowName": "PAAR LOAD",
+      "requestId": "4f49d9c5-acc3-481e-9ade-f237e2414a75",
+      "mode": "WORKFLOW",
+      "state": "COMPLETED",
+      "jobCount": 3,
+      "ok": true,
+      "reused": false,
+      "runId": "272e301d-8f6a-47f1-83ad-04b449fd368d",
+      "status": "SUCCESS",
+      "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_7E94F3E0_974F_5075_8D64_508A66DDBF24_272E301D_8F6A_47F1_83AD_04B449FD368D",
+      "totalJobs": 3,
+      "startResult": {
+        "ok": true,
+        "startedRunId": "272e301d-8f6a-47f1-83ad-04b449fd368d",
+        "status": "CLAIMED",
+        "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_7E94F3E0_974F_5075_8D64_508A66DDBF24_272E301D_8F6A_47F1_83AD_04B449FD368D",
+        "wakeupScheduled": true
+      },
+      "requestedAt": "2026-11-12 11:13:22.790000",
+      "startedAt": "2026-11-12 11:13:54.824000",
+      "endedAt": "2026-11-12 11:19:04.098000",
+      "error": null,
+      "jobs": [
+        {
+          "EXECUTION_ID": "0c435017-346e-4205-8396-40ffdd59982d",
+          "WORKFLOW_RUN_ID": "272e301d-8f6a-47f1-83ad-04b449fd368d",
+          "JOB_ID": "e62af3ff-b404-505e-8096-88152190153a",
+          "JOB_NAME": "PAAR READY TO LOAD",
+          "JOB_POSITION": 1,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:13:23.247000",
+          "STARTED_AT": "2026-11-12 11:13:59.008000",
+          "ENDED_AT": "2026-11-12 11:14:22.887000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c42-010b-db74-0004-a4f2082e57fe"
+        },
+        {
+          "EXECUTION_ID": "2082d743-08e2-4ca7-9055-947c34934d69",
+          "WORKFLOW_RUN_ID": "272e301d-8f6a-47f1-83ad-04b449fd368d",
+          "JOB_ID": "df867f65-2395-5225-8b34-72ad63769596",
+          "JOB_NAME": "PAAR SDL",
+          "JOB_POSITION": 2,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:13:23.731000",
+          "STARTED_AT": "2026-11-12 11:14:25.924000",
+          "ENDED_AT": "2026-11-12 11:16:24.223000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c42-010b-db74-0004-a4f2082e5e0e"
+        },
+        {
+          "EXECUTION_ID": "cf3e786b-ea96-458e-81a7-0d8ed2071014",
+          "WORKFLOW_RUN_ID": "272e301d-8f6a-47f1-83ad-04b449fd368d",
+          "JOB_ID": "bb4c2579-ea9b-5270-a4b6-8885557c5802",
+          "JOB_NAME": "PAAR EDV",
+          "JOB_POSITION": 3,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:13:24.286000",
+          "STARTED_AT": "2026-11-12 11:16:29.495000",
+          "ENDED_AT": "2026-11-12 11:19:02.696000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c44-010b-db74-0004-a4f2082ee1a6"
+        }
+      ]
+    },
+    {
+      "workflowId": "af756e9b-08dd-5fed-9afb-e0a60ba59540",
+      "workflowName": "POST LOAD",
+      "requestId": "3b322d37-1860-4b27-8b59-d23e7c58f8fb",
+      "mode": "WORKFLOW",
+      "state": "COMPLETED",
+      "jobCount": 3,
+      "ok": true,
+      "reused": false,
+      "runId": "0c600751-4880-443c-bd10-d08df46480d8",
+      "status": "SUCCESS",
+      "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_AF756E9B_08DD_5FED_9AFB_E0A60BA59540_0C600751_4880_443C_BD10_D08DF46480D8",
+      "totalJobs": 3,
+      "startResult": {
+        "ok": true,
+        "startedRunId": "0c600751-4880-443c-bd10-d08df46480d8",
+        "status": "CLAIMED",
+        "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_AF756E9B_08DD_5FED_9AFB_E0A60BA59540_0C600751_4880_443C_BD10_D08DF46480D8",
+        "wakeupScheduled": true
+      },
+      "requestedAt": "2026-11-12 11:13:49.834000",
+      "startedAt": "2026-11-12 11:14:18.676000",
+      "endedAt": "2026-11-12 11:23:36.509000",
+      "error": null,
+      "jobs": [
+        {
+          "EXECUTION_ID": "159eb3df-2ce3-47d2-8226-3fe742fb30fb",
+          "WORKFLOW_RUN_ID": "0c600751-4880-443c-bd10-d08df46480d8",
+          "JOB_ID": "252aa17c-b03f-5986-a39b-89f8b499ad15",
+          "JOB_NAME": "POST READY TO LOAD",
+          "JOB_POSITION": 1,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:13:50.301000",
+          "STARTED_AT": "2026-11-12 11:14:21.970000",
+          "ENDED_AT": "2026-11-12 11:14:43.812000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c42-010b-dc5d-0004-a4f2082d9f0a"
+        },
+        {
+          "EXECUTION_ID": "8ddfbc2f-f2f6-4642-aa90-a5a8e5a1ed91",
+          "WORKFLOW_RUN_ID": "0c600751-4880-443c-bd10-d08df46480d8",
+          "JOB_ID": "33b28515-2db8-52e9-bbd1-cac5abe7eb67",
+          "JOB_NAME": "POST SDL",
+          "JOB_POSITION": 2,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:13:51.180000",
+          "STARTED_AT": "2026-11-12 11:14:47.590000",
+          "ENDED_AT": "2026-11-12 11:20:12.969000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c42-010b-dc5d-0004-a4f2082e8362"
+        },
+        {
+          "EXECUTION_ID": "e25857ad-75a2-4d4e-809d-ea738797394e",
+          "WORKFLOW_RUN_ID": "0c600751-4880-443c-bd10-d08df46480d8",
+          "JOB_ID": "825f4c44-86b3-51c5-8287-e4d5e28bb836",
+          "JOB_NAME": "POST EDV",
+          "JOB_POSITION": 3,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:13:51.750000",
+          "STARTED_AT": "2026-11-12 11:20:15.728000",
+          "ENDED_AT": "2026-11-12 11:23:35.243000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c48-010b-dc5d-0004-a4f2082e8c7e"
+        }
+      ]
+    },
+    {
+      "workflowId": "c9d59ccf-6972-56fd-ace0-81f6aace99c8",
+      "workflowName": "PROD LOAD",
+      "requestId": "030eabbf-e93a-4432-8a87-69a706349598",
+      "mode": "WORKFLOW",
+      "state": "COMPLETED",
+      "jobCount": 3,
+      "ok": true,
+      "reused": false,
+      "runId": "a1d887d8-f56f-4b5c-8e67-9fe20be63a13",
+      "status": "SUCCESS",
+      "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_C9D59CCF_6972_56FD_ACE0_81F6AACE99C8_A1D887D8_F56F_4B5C_8E67_9FE20BE63A13",
+      "totalJobs": 3,
+      "startResult": {
+        "ok": true,
+        "startedRunId": "a1d887d8-f56f-4b5c-8e67-9fe20be63a13",
+        "status": "CLAIMED",
+        "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_C9D59CCF_6972_56FD_ACE0_81F6AACE99C8_A1D887D8_F56F_4B5C_8E67_9FE20BE63A13",
+        "wakeupScheduled": true
+      },
+      "requestedAt": "2026-11-12 11:14:14.037000",
+      "startedAt": "2026-11-12 11:14:40.725000",
+      "endedAt": "2026-11-12 11:24:03.226000",
+      "error": null,
+      "jobs": [
+        {
+          "EXECUTION_ID": "c7fc8d70-29f5-4c87-8008-324d47af077a",
+          "WORKFLOW_RUN_ID": "a1d887d8-f56f-4b5c-8e67-9fe20be63a13",
+          "JOB_ID": "15f46363-6a76-5fe2-b87d-a5f7989a42ba",
+          "JOB_NAME": "PROD READY TO LOAD",
+          "JOB_POSITION": 1,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:14:14.538000",
+          "STARTED_AT": "2026-11-12 11:14:43.776000",
+          "ENDED_AT": "2026-11-12 11:15:08.421000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c42-010b-db3a-0004-a4f2082e4b76"
+        },
+        {
+          "EXECUTION_ID": "c19ef79b-4e18-4971-b04a-a934513a9922",
+          "WORKFLOW_RUN_ID": "a1d887d8-f56f-4b5c-8e67-9fe20be63a13",
+          "JOB_ID": "e4b1e0f3-ae39-50fd-859c-d30ef29a3c66",
+          "JOB_NAME": "PROD SDL",
+          "JOB_POSITION": 2,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:14:15.045000",
+          "STARTED_AT": "2026-11-12 11:15:11.437000",
+          "ENDED_AT": "2026-11-12 11:18:31.462000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c43-010b-db3a-0004-a4f2082ec022"
+        },
+        {
+          "EXECUTION_ID": "ce054ff7-13a4-4641-919a-1bf64f88ceab",
+          "WORKFLOW_RUN_ID": "a1d887d8-f56f-4b5c-8e67-9fe20be63a13",
+          "JOB_ID": "e6109cbb-9bea-5557-8623-fc0b9cdab1bc",
+          "JOB_NAME": "PROD EDV",
+          "JOB_POSITION": 3,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:14:15.577000",
+          "STARTED_AT": "2026-11-12 11:18:34.550000",
+          "ENDED_AT": "2026-11-12 11:24:01.734000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c46-010b-db3a-0004-a4f2082f210a"
+        }
+      ]
+    },
+    {
+      "workflowId": "69737c84-e5df-54e8-83f7-39d29c5e3ea4",
+      "workflowName": "PYMT LOAD",
+      "requestId": "e0e52d7c-8a6a-4292-bcdb-057ae6608c20",
+      "mode": "WORKFLOW",
+      "state": "COMPLETED",
+      "jobCount": 3,
+      "ok": true,
+      "reused": false,
+      "runId": "87082ef1-7e41-4fc9-a520-25291af1c034",
+      "status": "SUCCESS",
+      "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_69737C84_E5DF_54E8_83F7_39D29C5E3EA4_87082EF1_7E41_4FC9_A520_25291AF1C034",
+      "totalJobs": 3,
+      "startResult": {
+        "ok": true,
+        "startedRunId": "87082ef1-7e41-4fc9-a520-25291af1c034",
+        "status": "CLAIMED",
+        "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_69737C84_E5DF_54E8_83F7_39D29C5E3EA4_87082EF1_7E41_4FC9_A520_25291AF1C034",
+        "wakeupScheduled": true
+      },
+      "requestedAt": "2026-11-12 11:14:35.438000",
+      "startedAt": "2026-11-12 11:14:52.875000",
+      "endedAt": "2026-11-12 11:20:52.416000",
+      "error": null,
+      "jobs": [
+        {
+          "EXECUTION_ID": "25f059c9-67da-45ea-a559-03cfe8a45955",
+          "WORKFLOW_RUN_ID": "87082ef1-7e41-4fc9-a520-25291af1c034",
+          "JOB_ID": "4fde9ad1-1ce0-5270-a819-8f16cb6fdf6a",
+          "JOB_NAME": "PYMT READY TO LOAD",
+          "JOB_POSITION": 1,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:14:36.448000",
+          "STARTED_AT": "2026-11-12 11:14:56.500000",
+          "ENDED_AT": "2026-11-12 11:15:20.002000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c42-010b-db6f-0004-a4f2082e720a"
+        },
+        {
+          "EXECUTION_ID": "2efe72b5-7e92-4324-8fdd-48d5ea8c7806",
+          "WORKFLOW_RUN_ID": "87082ef1-7e41-4fc9-a520-25291af1c034",
+          "JOB_ID": "bf7b4175-6ba8-572e-ac81-0588677c8b70",
+          "JOB_NAME": "PYMT SDL",
+          "JOB_POSITION": 2,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:14:37.005000",
+          "STARTED_AT": "2026-11-12 11:15:22.489000",
+          "ENDED_AT": "2026-11-12 11:17:10.797000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c43-010b-db6f-0004-a4f2082e73ee"
+        },
+        {
+          "EXECUTION_ID": "d68acf19-a6b2-48f9-9d90-92b51ff0687e",
+          "WORKFLOW_RUN_ID": "87082ef1-7e41-4fc9-a520-25291af1c034",
+          "JOB_ID": "9e5b6654-8085-5aef-9430-76fc530f7ebc",
+          "JOB_NAME": "PYMT EDV",
+          "JOB_POSITION": 3,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:14:37.537000",
+          "STARTED_AT": "2026-11-12 11:17:13.043000",
+          "ENDED_AT": "2026-11-12 11:20:50.918000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c45-010b-db6f-0004-a4f2082e7a62"
+        }
+      ]
+    },
+    {
+      "workflowId": "a65584fc-0e45-54ee-8244-881e8baaf830",
+      "workflowName": "SEBK LOAD",
+      "requestId": "618ed6fa-2a22-4405-b3c0-b6871818ef4c",
+      "mode": "WORKFLOW",
+      "state": "COMPLETED",
+      "jobCount": 3,
+      "ok": true,
+      "reused": false,
+      "runId": "32436f06-7839-473e-addf-bed703b59ed2",
+      "status": "SUCCESS",
+      "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_A65584FC_0E45_54EE_8244_881E8BAAF830_32436F06_7839_473E_ADDF_BED703B59ED2",
+      "totalJobs": 3,
+      "startResult": {
+        "ok": true,
+        "startedRunId": "32436f06-7839-473e-addf-bed703b59ed2",
+        "status": "CLAIMED",
+        "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_A65584FC_0E45_54EE_8244_881E8BAAF830_32436F06_7839_473E_ADDF_BED703B59ED2",
+        "wakeupScheduled": true
+      },
+      "requestedAt": "2026-11-12 11:15:03.102000",
+      "startedAt": "2026-11-12 11:15:34.394000",
+      "endedAt": "2026-11-12 11:20:15.412000",
+      "error": null,
+      "jobs": [
+        {
+          "EXECUTION_ID": "48c33035-4b13-479f-932d-3ef12e173d37",
+          "WORKFLOW_RUN_ID": "32436f06-7839-473e-addf-bed703b59ed2",
+          "JOB_ID": "b708fc01-207e-5594-a804-bf740d12a8fa",
+          "JOB_NAME": "SEBK READY TO LOAD",
+          "JOB_POSITION": 1,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:15:03.664000",
+          "STARTED_AT": "2026-11-12 11:15:38.894000",
+          "ENDED_AT": "2026-11-12 11:16:03.763000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c43-010b-db74-0004-a4f2082ed78e"
+        },
+        {
+          "EXECUTION_ID": "5c14f2ef-7fd1-4c89-8c00-cb71901799b2",
+          "WORKFLOW_RUN_ID": "32436f06-7839-473e-addf-bed703b59ed2",
+          "JOB_ID": "efe8d4f3-4ddc-56e3-817e-6577b51c3d3b",
+          "JOB_NAME": "SEBK SDL",
+          "JOB_POSITION": 2,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:15:04.209000",
+          "STARTED_AT": "2026-11-12 11:16:06.126000",
+          "ENDED_AT": "2026-11-12 11:18:10.334000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c44-010b-db74-0004-a4f2082ededa"
+        },
+        {
+          "EXECUTION_ID": "37eb0286-c11b-48a7-8dc8-7282a2f5a578",
+          "WORKFLOW_RUN_ID": "32436f06-7839-473e-addf-bed703b59ed2",
+          "JOB_ID": "9de162e0-7954-57ef-860d-82a37b04a131",
+          "JOB_NAME": "SEBK EDV",
+          "JOB_POSITION": 3,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:15:04.732000",
+          "STARTED_AT": "2026-11-12 11:18:12.201000",
+          "ENDED_AT": "2026-11-12 11:20:13.024000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c46-010b-db74-0004-a4f2082f1f2a"
+        }
+      ]
+    },
+    {
+      "workflowId": "2284f8d4-fe07-52bf-a577-4f8dcb44e01f",
+      "workflowName": "TPAC LOAD",
+      "requestId": "ad9633d4-5112-4199-a0b8-256a00b85eff",
+      "mode": "WORKFLOW",
+      "state": "COMPLETED",
+      "jobCount": 3,
+      "ok": true,
+      "reused": false,
+      "runId": "e5099ea8-7042-4118-b275-75bf465c7b7d",
+      "status": "SUCCESS",
+      "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_2284F8D4_FE07_52BF_A577_4F8DCB44E01F_E5099EA8_7042_4118_B275_75BF465C7B7D",
+      "totalJobs": 3,
+      "startResult": {
+        "ok": true,
+        "startedRunId": "e5099ea8-7042-4118-b275-75bf465c7b7d",
+        "status": "CLAIMED",
+        "taskFqn": "KUMO_TST.MONITOR_APP.TMP_ORCH_WF_2284F8D4_FE07_52BF_A577_4F8DCB44E01F_E5099EA8_7042_4118_B275_75BF465C7B7D",
+        "wakeupScheduled": true
+      },
+      "requestedAt": "2026-11-12 11:15:28.309000",
+      "startedAt": "2026-11-12 11:15:50.298000",
+      "endedAt": "2026-11-12 11:19:27.232000",
+      "error": null,
+      "jobs": [
+        {
+          "EXECUTION_ID": "e43b1d2e-3f5c-4bf2-b3d4-bf2b72c3bd1f",
+          "WORKFLOW_RUN_ID": "e5099ea8-7042-4118-b275-75bf465c7b7d",
+          "JOB_ID": "058b9cb7-bb9e-5b28-97f2-a6af50e80832",
+          "JOB_NAME": "TPAC READY TO LOAD",
+          "JOB_POSITION": 1,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:15:28.785000",
+          "STARTED_AT": "2026-11-12 11:15:53.382000",
+          "ENDED_AT": "2026-11-12 11:16:15.424000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c43-010b-db32-0004-a4f2082ebb06"
+        },
+        {
+          "EXECUTION_ID": "78373708-49c8-4f6b-9b7f-fa950601cdca",
+          "WORKFLOW_RUN_ID": "e5099ea8-7042-4118-b275-75bf465c7b7d",
+          "JOB_ID": "6a17433f-cb3e-5fd3-b403-ce9cb78382b4",
+          "JOB_NAME": "TPAC SDL",
+          "JOB_POSITION": 2,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:15:29.390000",
+          "STARTED_AT": "2026-11-12 11:16:17.466000",
+          "ENDED_AT": "2026-11-12 11:17:55.601000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c44-010b-db32-0004-a4f2082ebeee"
+        },
+        {
+          "EXECUTION_ID": "d0eb8c7a-c905-4137-aff2-0f4184b0066b",
+          "WORKFLOW_RUN_ID": "e5099ea8-7042-4118-b275-75bf465c7b7d",
+          "JOB_ID": "db1065d6-5ac1-5974-b1a0-20ba6ecacf6c",
+          "JOB_NAME": "TPAC EDV",
+          "JOB_POSITION": 3,
+          "STATUS": "SUCCESS",
+          "REQUESTED_AT": "2026-11-12 11:15:30.073000",
+          "STARTED_AT": "2026-11-12 11:17:57.962000",
+          "ENDED_AT": "2026-11-12 11:19:25.801000",
+          "ERROR_MESSAGE": null,
+          "QUERY_ID": "01c85c45-010b-db32-0004-a4f2082ef5fe"
+        }
+      ]
+    }
+  ],
+  "submissionCompletedAt": "2026-11-12T11:15:45.289387+00:00",
+  "telemetry": {
+    "MODEL_PROGRESS": [
+      {
+        "JOB_NAME": "ADTX EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 16
+      },
+      {
+        "JOB_NAME": "ADTX SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 1
+      },
+      {
+        "JOB_NAME": "ADTX SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 1
+      },
+      {
+        "JOB_NAME": "ARAC EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 41
+      },
+      {
+        "JOB_NAME": "ARAC SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 7
+      },
+      {
+        "JOB_NAME": "ARAC SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 7
+      },
+      {
+        "JOB_NAME": "CACT EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 22
+      },
+      {
+        "JOB_NAME": "CACT SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 4
+      },
+      {
+        "JOB_NAME": "CACT SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 4
+      },
+      {
+        "JOB_NAME": "CARD SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 21
+      },
+      {
+        "JOB_NAME": "CARD SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 21
+      },
+      {
+        "JOB_NAME": "CUAR EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 125
+      },
+      {
+        "JOB_NAME": "CUAR SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 25
+      },
+      {
+        "JOB_NAME": "CUAR SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 25
+      },
+      {
+        "JOB_NAME": "DISB EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 20
+      },
+      {
+        "JOB_NAME": "DISB SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 6
+      },
+      {
+        "JOB_NAME": "DISB SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 6
+      },
+      {
+        "JOB_NAME": "GEOG EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 12
+      },
+      {
+        "JOB_NAME": "GEOG SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 3
+      },
+      {
+        "JOB_NAME": "GEOG SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 3
+      },
+      {
+        "JOB_NAME": "PAAR EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 37
+      },
+      {
+        "JOB_NAME": "PAAR SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 10
+      },
+      {
+        "JOB_NAME": "PAAR SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 10
+      },
+      {
+        "JOB_NAME": "POST EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 30
+      },
+      {
+        "JOB_NAME": "POST SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 9
+      },
+      {
+        "JOB_NAME": "POST SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 9
+      },
+      {
+        "JOB_NAME": "PROD EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 108
+      },
+      {
+        "JOB_NAME": "PROD SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 22
+      },
+      {
+        "JOB_NAME": "PROD SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 22
+      },
+      {
+        "JOB_NAME": "PYMT EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 8
+      },
+      {
+        "JOB_NAME": "PYMT SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 3
+      },
+      {
+        "JOB_NAME": "PYMT SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 3
+      },
+      {
+        "JOB_NAME": "SEBK EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 31
+      },
+      {
+        "JOB_NAME": "SEBK SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 5
+      },
+      {
+        "JOB_NAME": "SEBK SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 5
+      },
+      {
+        "JOB_NAME": "TPAC EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 7
+      },
+      {
+        "JOB_NAME": "TPAC SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 2
+      },
+      {
+        "JOB_NAME": "TPAC SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 2
+      }
+    ],
+    "TEST_PROGRESS": [
+      {
+        "JOB_NAME": "ADTX EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 9
+      },
+      {
+        "JOB_NAME": "ADTX EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 2
+      },
+      {
+        "JOB_NAME": "ADTX SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 1
+      },
+      {
+        "JOB_NAME": "ARAC EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 24
+      },
+      {
+        "JOB_NAME": "ARAC EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 5
+      },
+      {
+        "JOB_NAME": "ARAC SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 7
+      },
+      {
+        "JOB_NAME": "CACT EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 12
+      },
+      {
+        "JOB_NAME": "CACT EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 1
+      },
+      {
+        "JOB_NAME": "CACT SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 4
+      },
+      {
+        "JOB_NAME": "CARD SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 21
+      },
+      {
+        "JOB_NAME": "CUAR EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 77
+      },
+      {
+        "JOB_NAME": "CUAR EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 17
+      },
+      {
+        "JOB_NAME": "CUAR SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 25
+      },
+      {
+        "JOB_NAME": "DISB EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 13
+      },
+      {
+        "JOB_NAME": "DISB EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 2
+      },
+      {
+        "JOB_NAME": "DISB SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 6
+      },
+      {
+        "JOB_NAME": "GEOG EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 8
+      },
+      {
+        "JOB_NAME": "GEOG SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 3
+      },
+      {
+        "JOB_NAME": "PAAR EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 24
+      },
+      {
+        "JOB_NAME": "PAAR EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 2
+      },
+      {
+        "JOB_NAME": "PAAR SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 10
+      },
+      {
+        "JOB_NAME": "POST EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 11
+      },
+      {
+        "JOB_NAME": "POST EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 3
+      },
+      {
+        "JOB_NAME": "POST SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 9
+      },
+      {
+        "JOB_NAME": "PROD EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 71
+      },
+      {
+        "JOB_NAME": "PROD EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 1
+      },
+      {
+        "JOB_NAME": "PROD SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 22
+      },
+      {
+        "JOB_NAME": "PYMT EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 7
+      },
+      {
+        "JOB_NAME": "PYMT SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 3
+      },
+      {
+        "JOB_NAME": "SEBK EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 18
+      },
+      {
+        "JOB_NAME": "SEBK SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 5
+      },
+      {
+        "JOB_NAME": "TPAC EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 4
+      },
+      {
+        "JOB_NAME": "TPAC EDV",
+        "PROGRESS": "FINISHED",
+        "STATUS": "WARNING",
+        "N": 1
+      },
+      {
+        "JOB_NAME": "TPAC SDL",
+        "PROGRESS": "FINISHED",
+        "STATUS": "SUCCESS",
+        "N": 2
+      }
+    ]
+  },
+  "dbtErrorLogs": [],
+  "summary": {
+    "workflows": {
+      "SUCCESS": 13
+    },
+    "jobs": {
+      "SUCCESS": 38
+    },
+    "dbtErrorLogGroups": 0,
+    "dbtModelWarnings": 118,
+    "dbtTestWarnings": 34
+  },
+  "notes": [
+    "Only LOAD RAW DAILY and MAINTENANCE - CLEANUP schedules were enabled.",
+    "The other 13 workflows were manually submitted once with full WORKFLOW scope.",
+    "Engine SUCCESS means commands completed; dbt warnings are reported separately in telemetry.",
+    "Observed warnings include no new RAW data, TST deduplication settings and parent relationship tests.",
+    "Execution timestamps from Snowflake TIMESTAMP_NTZ columns are UTC."
+  ],
+  "verifiedAt": "2026-11-12T11:24:40.340985+00:00"
+}

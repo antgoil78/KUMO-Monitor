@@ -1,0 +1,214 @@
+{
+  "service": "KUMO_TST.MONITOR_APP.KUMO_MONITOR_SERVICE",
+  "pull_request": "https://github.com/antgoil78/KUMO-Monitor/pull/15",
+  "source_commit": "59e984ae6ba1bb3fef2ab2ccff589d9357f6fe5b",
+  "actions_run": "https://github.com/antgoil78/KUMO-Monitor/actions/runs/44326165756",
+  "image_uri": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-228-1-59e984ae6ba1",
+  "image_digest": "sha256:d7d00784cdee441df395789fde1cc44e697bab6937c67068917f44c7893709d7",
+  "image_tag": "build-228-1-59e984ae6ba1",
+  "before_image": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-227-1-9b51357fc395",
+  "before_spec_digest": "125b4f9130fc410fd8c0061206758607ed686029a1c3bcc7d68a3be557d1335f",
+  "status": "VERIFIED",
+  "only_image_and_digest_changed": true,
+  "dev_changed": false,
+  "alter_query_id": "01c888f2-020b-f268-0004-a4f20880b6e6",
+  "verified_at_utc": "2026-11-20T09:55:13.151763+00:00",
+  "after_spec_digest": "d22feb37e129d0a99d0fe8b4b647d4e49634454294e5862e14a825b252a0702b",
+  "containers": [
+    {
+      "database_name": "KUMO_TST",
+      "schema_name": "MONITOR_APP",
+      "service_name": "KUMO_MONITOR_SERVICE",
+      "service_status": "RUNNING",
+      "instance_id": "0",
+      "instance_status": "READY",
+      "container_name": "monitor",
+      "status": "READY",
+      "message": "Running",
+      "image_name": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-228-1-59e984ae6ba1",
+      "image_digest": "sha256:d7d00784cdee441df395789fde1cc44e697bab6937c67068917f44c7893709d7",
+      "restart_count": 0,
+      "start_time": "2026-11-20T09:54:36Z",
+      "last_exit_code": null,
+      "last_restart_time": null
+    }
+  ],
+  "endpoints": [
+    {
+      "name": "kumo-monitor-tst-ui",
+      "port": 5000,
+      "port_range": null,
+      "protocol": "HTTP",
+      "is_public": "true",
+      "ingress_url": "aoztue-vymkbmw-ov24823.snowflakecomputing.app"
+    }
+  ],
+  "service_settings_preserved": true,
+  "running_digest_matches_published_image": true,
+  "http_smoke": {
+    "ok": true,
+    "image": "build-228-1-59e984ae6ba1",
+    "environment": "TST",
+    "live_notification_admin": true,
+    "current_catalog": true,
+    "all_workflows_covered": true,
+    "enabled_failure_rules": 21,
+    "notification_editor_shipped": true,
+    "workflow_notification_patch_route": true,
+    "requests_read_only": true
+  },
+  "http_smoke_job": "KUMO_TST.MONITOR_APP.JOB_NOTIFICATION_RELEASE_CHECK_FE90850BCEE4",
+  "service_settings": {
+    "owner": "KUMO_ADMIN",
+    "compute_pool": "KUMO_SHARED_MONITOR_POOL",
+    "min_instances": 1,
+    "max_instances": 1,
+    "min_ready_instances": 1,
+    "auto_resume": "true",
+    "auto_suspend_secs": 0,
+    "query_warehouse": "KUMO_ELT_GEN_1",
+    "external_access_integrations": null
+  },
+  "database_migration": {
+    "applied": true,
+    "environment": "TST",
+    "workflow_count": 21,
+    "coverage": "all_workflows",
+    "changed_procedures": [
+      "SP_GET_ENVIRONMENT",
+      "SP_ORCH_NOTIFY",
+      "SP_ORCH_EXECUTE_WORKFLOW",
+      "SP_ORCH_RECONCILE"
+    ],
+    "migrated_workflows": [
+      {
+        "workflow": "ADTX LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "ARAC LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "CACT LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "CARD LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "CUAR LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "DISB LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "GEOG LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "PAAR LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "POST LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "PROD LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "PYMT LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "SEBK LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "TPAC LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "LOAD RAW DAILY",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "MAINTENANCE - CLEANUP",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "PROD BDL LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "MISC LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "SEBK BDL LOAD",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "SDL_ATTR_DESC_KLARA_REF",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "AUTH (MISC) SDL",
+        "failure_enabled": true,
+        "success_enabled": false
+      },
+      {
+        "workflow": "AUX_ATTR_DESC_REF",
+        "failure_enabled": true,
+        "success_enabled": false
+      }
+    ],
+    "historical_notifications": false
+  },
+  "database_verification": {
+    "applied": false,
+    "environment": "TST",
+    "workflow_count": 21,
+    "active_execution_records": 3,
+    "coverage": "all_workflows",
+    "changed_procedures": [],
+    "migrated_workflows": [],
+    "historical_notifications": false
+  },
+  "readiness_probe": {
+    "port": 5000,
+    "path": "/api/health",
+    "status": "READY"
+  },
+  "validation": {
+    "focused_unit_tests": 14,
+    "isolated_sender_sql": "passed",
+    "native_engine_failure_hook": "passed",
+    "test_emails_sent": false
+  },
+  "http_smoke_job_removed": true
+}

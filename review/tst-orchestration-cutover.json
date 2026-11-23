@@ -1,0 +1,237 @@
+{
+  "workflows": [
+    {
+      "workflow": "ADTX LOAD",
+      "jobs": [
+        "ADTX READY TO LOAD",
+        "ADTX SDL",
+        "ADTX EDV"
+      ]
+    },
+    {
+      "workflow": "ARAC LOAD",
+      "jobs": [
+        "ARAC READY TO LOAD",
+        "ARAC SDL",
+        "ARAC EDV"
+      ]
+    },
+    {
+      "workflow": "CACT LOAD",
+      "jobs": [
+        "CACT READY TO LOAD",
+        "CACT SDL",
+        "CACT EDV"
+      ]
+    },
+    {
+      "workflow": "CARD LOAD",
+      "jobs": [
+        "CARD READY TO LOAD",
+        "CARD SDL"
+      ]
+    },
+    {
+      "workflow": "CUAR LOAD",
+      "jobs": [
+        "CUAR READY TO LOAD",
+        "CUAR SDL",
+        "CUAR EDV"
+      ]
+    },
+    {
+      "workflow": "DISB LOAD",
+      "jobs": [
+        "DISB READY TO LOAD",
+        "DISB SDL",
+        "DISB EDV"
+      ]
+    },
+    {
+      "workflow": "GEOG LOAD",
+      "jobs": [
+        "GEOG READY TO LOAD",
+        "GEOG SDL",
+        "GEOG EDV"
+      ]
+    },
+    {
+      "workflow": "PAAR LOAD",
+      "jobs": [
+        "PAAR READY TO LOAD",
+        "PAAR SDL",
+        "PAAR EDV"
+      ]
+    },
+    {
+      "workflow": "POST LOAD",
+      "jobs": [
+        "POST READY TO LOAD",
+        "POST SDL",
+        "POST EDV"
+      ]
+    },
+    {
+      "workflow": "PROD LOAD",
+      "jobs": [
+        "PROD READY TO LOAD",
+        "PROD SDL",
+        "PROD EDV"
+      ]
+    },
+    {
+      "workflow": "PYMT LOAD",
+      "jobs": [
+        "PYMT READY TO LOAD",
+        "PYMT SDL",
+        "PYMT EDV"
+      ]
+    },
+    {
+      "workflow": "SEBK LOAD",
+      "jobs": [
+        "SEBK READY TO LOAD",
+        "SEBK SDL",
+        "SEBK EDV"
+      ]
+    },
+    {
+      "workflow": "TPAC LOAD",
+      "jobs": [
+        "TPAC READY TO LOAD",
+        "TPAC SDL",
+        "TPAC EDV"
+      ]
+    },
+    {
+      "workflow": "LOAD RAW DAILY",
+      "jobs": [
+        "LOAD RAW DAILY"
+      ]
+    },
+    {
+      "workflow": "MAINTENANCE - CLEANUP",
+      "jobs": [
+        "MAINTENANCE - CLEANUP"
+      ]
+    }
+  ],
+  "excluded": [
+    "RUN DEPENDENCIES"
+  ],
+  "source_workflows": 29,
+  "migrated_source_workflows": 28,
+  "target_counts": {
+    "WORKFLOW": 15,
+    "JOB": 40,
+    "DEPENDENCIES": 55
+  },
+  "paused_business_schedules": [
+    "LOAD RAW DAILY",
+    "MAINTENANCE - CLEANUP"
+  ],
+  "copied_dev_execution_state": false,
+  "applied": true,
+  "environment": "TST",
+  "old_tasks_to_archive": 31,
+  "procedures_to_install": [
+    "SP_ORCH_REQUEST_RUN",
+    "SP_ORCH_EXECUTE_WORKFLOW",
+    "SP_ORCH_RECONCILE",
+    "SP_ORCH_START_RUN",
+    "SP_ORCH_RUN_SCHEDULED"
+  ],
+  "service_auto_resume_before": "true",
+  "retirement": {
+    "applied": true,
+    "environment": "TST",
+    "tasks": [
+      "TASK_WF_4A9E959A_SCHEDULER",
+      "TASK_WF_CC0680DD_SCHEDULER",
+      "TASK_WF_MASTER_DISPATCHER",
+      "TMP_WF_002FDBCA_818B_494C_ACA6_3D9F3BEC8F43",
+      "TMP_WF_023FB827_F0F0_43C5_AC7C_FF1EBCA9B3C5",
+      "TMP_WF_0DF1B096_1485_4117_B9D0_66BCE2DA7843",
+      "TMP_WF_155A338B_B650_458F_808E_23AEC63A0E7B",
+      "TMP_WF_179741BC_E83A_47AE_A297_55FBEC8D78D6",
+      "TMP_WF_2D7B6084_13C6_4866_A33B_3C112D44F3D6",
+      "TMP_WF_3374D3B8_D07D_4AEC_AB20_9D18689704C0",
+      "TMP_WF_3C12F4C6_23BF_42E3_8F98_B731522C5805",
+      "TMP_WF_3EE36520_0365_4090_9BFC_96DA7A5EE461",
+      "TMP_WF_4DD72CDA_D2A5_4D0C_8125_82454DB62445",
+      "TMP_WF_58BB1C50_417B_4E9D_BD6E_BE0AF0829391",
+      "TMP_WF_646AD040_3F41_4A99_B855_063E0A166C07",
+      "TMP_WF_724D8296_B4CC_489D_B066_4959BBDC09D2",
+      "TMP_WF_749962A0_CEE9_4863_8850_903F5D504A6D",
+      "TMP_WF_81F1FE9B_7CD5_4DF2_A818_B5DD60D04DCE",
+      "TMP_WF_913064FE_C30B_4785_945A_19E96C5CA386",
+      "TMP_WF_9D31701B_F7D9_4E9C_A847_A3BECF9F70D1",
+      "TMP_WF_AAB2D927_37EA_4859_B2C2_AFDD66996D29",
+      "TMP_WF_B6D2286E_1A47_4DC5_9B6E_B53FF2679A6C",
+      "TMP_WF_BA380850_6C90_47E4_A60B_D20192FDFA75",
+      "TMP_WF_C5C558D0_28ED_42B6_B170_6E5BA78A378C",
+      "TMP_WF_CBCFA0CD_2F20_47E0_942D_25366F1F4440",
+      "TMP_WF_E1796728_0C54_454A_87A7_3E478A24ECF4",
+      "TMP_WF_E456F1DD_4E94_4A42_B0E6_19E5536462EF",
+      "TMP_WF_EF0E8AE4_1864_4854_B1CC_0C2441109A42",
+      "TMP_WF_F6FA44D7_34F4_4658_898F_87FAEB0D1F45",
+      "TMP_WF_F8BE4795_705E_414E_992B_0CAB54B47561",
+      "TMP_WF_FB7B4C87_0B39_42AF_A198_6553E920A5F9"
+    ],
+    "procedures": [
+      "SP_WORKFLOW_REQUEST_RUN(VARCHAR,VARCHAR,VARCHAR,NUMBER,VARCHAR)",
+      "SP_WORKFLOW_DISPATCH(VARCHAR)",
+      "SP_WORKFLOW_DISPATCH(VARCHAR,VARCHAR)",
+      "SP_RUN_WORKFLOW(VARCHAR)",
+      "SP_RUN_WORKFLOW(VARCHAR,VARCHAR)",
+      "SP_SQL_COMPLETE(VARCHAR,BOOLEAN,VARCHAR)",
+      "SP_DBT_COMPLETE(VARCHAR,BOOLEAN,VARCHAR)",
+      "SP_RULE_BASED_WORKFLOW_REQUEST_RUN(VARCHAR,VARCHAR,VARCHAR)",
+      "SP_CLEANUP_OLD_TMP_TASKS(FLOAT)"
+    ],
+    "queue": "WORKFLOW_RUN_QUEUE",
+    "old_history_preserved": true,
+    "tst_changed": true,
+    "new_schedules_activated": false,
+    "old_schedule_flags_preserved": 2,
+    "new_runs_preserved": 0,
+    "maintenance_call_removed": false
+  },
+  "preserved_tables": [
+    "WORKFLOWS",
+    "WORKFLOW_TASKS",
+    "WORKFLOW_HISTORY",
+    "WORKFLOW_RUN_LOGS",
+    "RAW_LIM_PKG_GROUP_SOURCE"
+  ],
+  "protected_fingerprints": {
+    "WORKFLOWS": {
+      "N": 29,
+      "HASH": 2602661150204119784
+    },
+    "WORKFLOW_TASKS": {
+      "N": 29,
+      "HASH": -6262337896095344427
+    },
+    "WORKFLOW_HISTORY": {
+      "N": 440,
+      "HASH": 1558023889611884476
+    },
+    "WORKFLOW_RUN_LOGS": {
+      "N": 4073,
+      "HASH": 3177086379860058459
+    },
+    "RAW_LIM_PKG_GROUP_SOURCE": {
+      "N": 42,
+      "HASH": 2627718251118670184
+    }
+  },
+  "preserved_queue_fingerprint": {
+    "N": 440,
+    "HASH": 1491421953874394400
+  },
+  "environment_parameters_preserved": true,
+  "business_schedules_started": false,
+  "business_commands_executed": false,
+  "service_state": "SUSPENDED_PENDING_IMAGE_PROMOTION"
+}

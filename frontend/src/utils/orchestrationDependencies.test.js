@@ -1,8 +1,53 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createRunPreview, evaluateDependency, sampleConfiguration, validateConfiguration } from './orchestrationDependencies.js'
+import { addWorkflowParent, createRunPreview, evaluateDependency, removeWorkflowParent, sampleConfiguration, validateConfiguration } from './orchestrationDependencies.js'
 
 const fresh = () => structuredClone(sampleConfiguration)
+
+test('adding and removing parents keeps workflow identities, conditions and job assignments valid', () => {
+  const original = fresh()
+  const values = { parentId: 'wf3', trigger: 'DEP', success: true, warning: null, error: false,
+    sql: 'SELECT TRUE', allow: false, parentMustBeNewer: true }
+  let rows = addWorkflowParent(original, 'wf2', values)
+  let links = rows.filter(row => !row.jobId && row.workflowId === 'wf2')
+  assert.equal(links.length, 2)
+  assert.equal(links[1].id.length, 36)
+  assert.deepEqual(validateConfiguration(rows), [])
+  assert.equal(links[1].sql, 'SELECT TRUE')
+  assert.equal(links[1].allow, false)
+  assert.deepEqual(rows.filter(row => row.jobId), original.filter(row => row.jobId))
+
+  rows = removeWorkflowParent(rows, links[1].id)
+  assert.deepEqual(rows, original)
+  rows = addWorkflowParent(rows, 'wf2', values)
+  rows = removeWorkflowParent(rows, 'wf2')
+  assert.deepEqual(validateConfiguration(rows), [])
+  assert.equal(rows.find(row => row.id === 'wf2').parentId, 'wf3')
+  assert.equal(rows.find(row => row.id === 'wf2').sql, 'SELECT TRUE')
+  assert.deepEqual(rows.filter(row => row.jobId), original.filter(row => row.jobId))
+
+  rows = removeWorkflowParent(rows, 'wf2')
+  const external = rows.find(row => row.id === 'wf2')
+  for (const field of ['parentId', 'trigger', 'success', 'warning', 'error']) assert.equal(external[field], null)
+  assert.equal(external.parentMustBeNewer, false)
+  assert.equal(external.sql, '')
+  assert.equal(external.allow, true)
+  assert.deepEqual(validateConfiguration(rows), [])
+  rows = addWorkflowParent(rows, 'wf2', { ...values, trigger: 'RUNNER' })
+  assert.equal(rows.filter(row => !row.jobId && row.workflowId === 'wf2').length, 1)
+  assert.equal(rows.find(row => row.id === 'wf2').trigger, 'RUNNER')
+  assert.deepEqual(validateConfiguration(rows), [])
+})
+
+test('additional parents use DEP for every rule while duplicates and cycles are rejected', () => {
+  const original = fresh()
+  original.find(row => row.id === 'wf2').trigger = 'RUNNER'
+  const rows = addWorkflowParent(original, 'wf2', { parentId: 'wf3', trigger: 'RUNNER' })
+  assert.ok(rows.filter(row => !row.jobId && row.workflowId === 'wf2').every(row => row.trigger === 'DEP'))
+  assert.deepEqual(validateConfiguration(rows), [])
+  assert.ok(validateConfiguration(addWorkflowParent(rows, 'wf2', { parentId: 'wf3' })).some(error => error.message.includes('unique dependency')))
+  assert.ok(validateConfiguration(addWorkflowParent(rows, 'wf1', { parentId: 'wf2', trigger: 'DEP' })).some(error => error.message.includes('cycle')))
+})
 test('example is valid; jobs may be reused across workflows but not repeated within one', () => {
   const rows = fresh()
   assert.deepEqual(validateConfiguration(rows), [])

@@ -1,9 +1,8 @@
--- Source: KUMO_DEV.MONITOR_APP.TASK_ORCH_MAINTENANCE
--- Static engine housekeeping; generated workflow run/scheduler tasks are excluded.
+-- Compatibility task retained for explicit operator use only. Never RESUME.
+-- Automatic dispatch/recovery now follows ORCH_DISPATCH_EVENTS_STREAM.
 CREATE OR REPLACE TASK KUMO_DEV.MONITOR_APP.TASK_ORCH_MAINTENANCE
     WAREHOUSE = KUMO_ELT_GEN_1
-    SCHEDULE = '1 MINUTE'
     USER_TASK_TIMEOUT_MS = 55000
     TASK_AUTO_RETRY_ATTEMPTS = 0
-    COMMENT = 'KUMO parallel orchestration v2: recover interrupted runs and remove completed temporary workflow tasks'
+    COMMENT = 'KUMO orchestration: manual recovery only; no schedule'
 AS CALL KUMO_DEV.MONITOR_APP.SP_ORCH_RECONCILE(NULL);

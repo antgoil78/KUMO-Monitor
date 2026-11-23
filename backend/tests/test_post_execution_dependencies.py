@@ -16,10 +16,16 @@ const jobId='00000000-0000-0000-0000-000000000003';
 const task='KUMO_DEV.MONITOR_APP.TMP_ORCH_WF_'+wf.replaceAll('-','_')+'_'+run.replaceAll('-','_');
 const root={EXECUTION_ID:run,WORKFLOW_ID:wf,STATUS:input.recovery?'RUNNING':(input.initialStatus||'QUEUED'),TRIGGER_SOURCE:input.triggerSource||'MANUAL',RUN_MODE:input.runMode||'WORKFLOW',TASK_FQN:task};
 const job={EXECUTION_ID:jobId,STATUS:input.recovery?'RUNNING':'INITIATING'};
-const queries=[], calls=[];
+const queries=[], calls=[], notificationCalls=[];
 function query(sql,b) {
   queries.push({sql,binds:b});
-  if(sql.includes('SP_GET_ENVIRONMENT')) return [{ENV:{DATABASE:'KUMO_DEV',META_SCHEMA:'MONITOR_META',MONITOR_APP_SCHEMA:'MONITOR_APP'}}];
+  if(sql.includes('SP_GET_ENVIRONMENT')) return [{ENV:{DATABASE:'KUMO_DEV',META_SCHEMA:'MONITOR_META',MONITOR_APP_SCHEMA:'MONITOR_APP',_parameterTable:'KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS'}}];
+  if(sql.includes('SP_ORCH_NOTIFY')) {
+    notificationCalls.push({id:b[0],rootStatus:root.STATUS});
+    if(input.notificationFails) throw Error('Notification unavailable');
+    return [{REPORT:{ok:true,status:'SENT'}}];
+  }
+  if(sql.startsWith('SELECT e.EXECUTION_ID')) return ['FAILED','CANCELLED'].includes(root.STATUS)?[{EXECUTION_ID:run}]:[];
   if(sql.includes('SYSTEM$TASK_RUNTIME_INFO')) return [{NAME:task,GROUP_ID:'group',SCHEDULED_AT:'2026-11-17'}];
   if(sql.includes('UUID_STRING')) return [{ID:'claim'}];
   if(sql.startsWith('SHOW PARAMETERS')) return [{value:'60'}];
@@ -33,7 +39,7 @@ function query(sql,b) {
     resolved:{execSql:'SELECT 1'},sqlCondition:input.conditionFalse?'SELECT FALSE':null}}];
   if(sql.startsWith('SELECT COUNT(*)')) return [{N:0}];
   if(sql==='SELECT FALSE') return [{VALUE:false}];
-  if(sql.includes('SP_ORCH_DISPATCH_DEPENDENCIES')) {
+  if(sql.includes('SP_ORCH_DISPATCH_DEPENDENCIES') || sql.includes('SP_ORCH_EVALUATE_DEPENDENCIES')) {
     calls.push({id:b[0],rootStatus:root.STATUS,jobStatus:job.STATUS});
     if(input.evaluationFails) throw Error('Evaluator unavailable');
     return [{REPORT:{ok:true,evaluated:true,children:[{workflowName:'child',eligible:root.STATUS==='SUCCESS'}]}}];
@@ -46,6 +52,7 @@ function query(sql,b) {
   if(sql.startsWith('SELECT EXECUTION_ID') && sql.includes('RESULT:dependencyEvaluation IS NULL'))
     return [job,root].filter(row=>!row.RESULT?.dependencyEvaluation).map(row=>({EXECUTION_ID:row.EXECUTION_ID}));
   if(sql.startsWith('SELECT EXECUTION_ID')) return [];
+  if(sql.startsWith('INSERT INTO') && sql.includes('ORCH_DISPATCH_EVENTS')) return [];
   if(sql.startsWith('UPDATE')) {
     if(sql.includes('SET STATUS = IFF')) {
       root.STATUS=input.recovery?(input.cancelled?'CANCELLED':'FAILED'):'FAILED';job.STATUS=root.STATUS;return [];
@@ -74,7 +81,7 @@ const snowflake={createStatement({sqlText,binds=[]}) {
 let result,error;
 try { result=new Function('snowflake',input.recovery?'P_WORKFLOW_ID':'P_RUN_ID',input.source)(snowflake,input.recovery?wf:run); }
 catch(e){error=e.message;}
-process.stdout.write(JSON.stringify({result,error,root,job,calls,queries}));
+process.stdout.write(JSON.stringify({result,error,root,job,calls,queries,notificationCalls}));
 """
 
 
@@ -142,6 +149,24 @@ class CompletionTests(unittest.TestCase):
         self.assertEqual(output['root']['STATUS'], 'FAILED')
         self.assertEqual(len(output['result']['recoveredRunIds']), 1)
         self.assertFalse(output['root']['RESULT']['dependencyEvaluation']['ok'])
+        self.assertTrue(output['result']['errors'])
+
+    def test_workflow_completion_and_native_recovery_call_notifier_once_for_root(self):
+        for options,status in [({},'SUCCESS'),({'workloadFails':True},'FAILED'),({'fatal':True},'FAILED'),
+                               ({'recovery':True},'FAILED'),({'recovery':True,'cancelled':True},'CANCELLED')]:
+            with self.subTest(options=options):
+                output = self.execute(**options)
+                self.assertEqual(len(output['notificationCalls']),1,output)
+                self.assertEqual(output['notificationCalls'][0]['rootStatus'],status)
+
+    def test_email_errors_do_not_change_success_or_block_native_failure_recovery(self):
+        output = self.execute(notificationFails=True)
+        self.assertNotIn('error',output,output)
+        self.assertEqual(output['root']['STATUS'],'SUCCESS')
+        self.assertTrue(output['result']['warnings'])
+        output = self.execute(recovery=True,notificationFails=True)
+        self.assertNotIn('error',output,output)
+        self.assertEqual(output['root']['STATUS'],'FAILED')
         self.assertTrue(output['result']['errors'])
 
 
