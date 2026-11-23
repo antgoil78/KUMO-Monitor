@@ -26,19 +26,37 @@ def graph_definition(body):
         raise ValueError('Use 1–16 SQL-only workflow nodes')
     definitions = {}
     for node in nodes:
-        if not isinstance(node, dict) or set(node)-{'key','name','enabled','allow','plan','parents'}:
+        if not isinstance(node, dict) or set(node)-{'key','name','enabled','allow','plan','parents','description','group'}:
             raise ValueError('Nodes accept key, name, enabled, allow, plan and parents')
         node_key, node_name = node.get('key'), node.get('name', node.get('key'))
         if not isinstance(node_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,24}', node_key) or node_key in definitions:
             raise ValueError('Node keys must be unique simple identifiers of at most 24 characters')
-        if not isinstance(node_name, str) or not 1 <= len(node_name) <= 100:
+        if not isinstance(node_name, str) or not 1 <= len(node_name.strip()) <= 100:
             raise ValueError('Invalid workflow node name')
         if not isinstance(node.get('enabled', True), bool) or not isinstance(node.get('allow', True), bool):
             raise ValueError('Workflow enabled/allow flags must be boolean')
         plan = node.get('plan')
         if not isinstance(plan, dict) or set(plan)-{'jobs','mode'}:
             raise ValueError('Node plans contain jobs and optional mode; business commands and conditions are excluded')
-        _, frozen = normalize(dict(plan, requestId='dependency-validation'))
+        jobs = plan.get('jobs')
+        if not isinstance(jobs, list):
+            raise ValueError('A node plan requires SQL jobs')
+        metadata = []
+        for job in jobs:
+            if not isinstance(job, dict) or set(job)-{'key','sql','timeoutSeconds','dependsOn','name','description','layer','enabled'}:
+                raise ValueError('Invalid SQL job configuration')
+            if not isinstance(job.get('enabled', True), bool):
+                raise ValueError('Job enabled must be boolean')
+            details = {k:job[k] for k in ('name','description','layer','enabled') if k in job}
+            for field, limit in [('name',100),('description',2000),('layer',20)]:
+                if field in details and (not isinstance(details[field],str) or len(details[field])>limit or (field=='name' and not details[field].strip())):
+                    raise ValueError('Invalid job '+field)
+            if details.get('layer','GENERAL') not in ('RAW','SDL','EDV','BDL','GENERAL'):
+                raise ValueError('Invalid job layer')
+            metadata.append(details)
+        _, frozen = normalize(dict(plan, jobs=[{k:v for k,v in job.items() if k not in ('name','description','layer','enabled')} for job in jobs], requestId='dependency-validation'))
+        for job, details in zip(frozen['jobs'],metadata):
+            job.update(details)
         parents = node.get('parents', [])
         if not isinstance(parents, list):
             raise ValueError('parents must be a list of workflow rules')
@@ -56,7 +74,12 @@ def graph_definition(body):
             if not isinstance(value['allow'], bool) or not isinstance(value['parentMustBeNewer'], bool):
                 raise ValueError('Rule allow/freshness flags must be boolean')
             seen.add(parent); rules.append(value)
-        definitions[node_key] = dict(key=node_key, name=node_name, enabled=node.get('enabled', True), allow=node.get('allow', True), plan=frozen, parents=sorted(rules, key=lambda r:r['key']))
+        extra = {k:node[k] for k in ('description','group') if k in node}
+        if any(not isinstance(v,str) or len(v)>(2000 if k=='description' else 100) for k,v in extra.items()):
+            raise ValueError('Invalid workflow description or group')
+        definitions[node_key] = dict(key=node_key, name=node_name.strip(), enabled=node.get('enabled', True), allow=node.get('allow', True), plan=frozen, parents=sorted(rules, key=lambda r:r['key']), **extra)
+    if len({n['name'].casefold() for n in definitions.values()}) != len(definitions):
+        raise ValueError('Workflow names must be unique')
     ordered = []; visiting = set(); visited = set()
     def visit(node_key):
         if node_key not in definitions:
@@ -84,6 +107,24 @@ def enqueue(conn, cascade_id):
         ON CONFLICT(cascade_id) DO UPDATE SET state='PENDING',next_check_at=clock_timestamp(),attempts=0,error=NULL''', (cascade_id,))
 
 
+def execution_plan(plan):
+    """Omit disabled jobs and retain their prerequisite chains for enabled jobs."""
+    by_key = {j['key']:j for j in plan['jobs']}
+    def prerequisites(key):
+        job = by_key[key]
+        return [key] if job.get('enabled',True) else [p for dep in job['dependsOn'] for p in prerequisites(dep)]
+    return dict(mode=plan['mode'], jobs=[dict(key=j['key'],sql=j['sql'],timeoutSeconds=j['timeoutSeconds'],
+        dependsOn=list(dict.fromkeys(p for dep in j['dependsOn'] for p in prerequisites(dep))))
+        for j in plan['jobs'] if j.get('enabled',True)])
+
+
+def record_revision(conn, graph):
+    from psycopg.types.json import Jsonb
+    conn.execute('''INSERT INTO kumo_task_engine.graph_revisions(graph_id,revision,definition,definition_hash,changed_by)
+        VALUES(%s,%s,%s,%s,%s)''',
+        (graph['id'],graph['revision'],Jsonb(graph['definition']),graph['definition_hash'],graph['updated_by']))
+
+
 class Graphs:
     def __init__(self, store):
         self.store = store
@@ -96,6 +137,8 @@ class Graphs:
             if previous:
                 if previous['definition_hash'] == fingerprint:
                     return dict(ok=True, graph=previous, reused=True)
+                if previous['configuration_managed']:
+                    raise Conflict('PostgreSQL owns this configuration; edit it through the configuration screens instead of re-importing Snowflake')
                 if previous['revision'] != expected_revision:
                     raise Conflict('Graph changed; supply its current expected revision before importing a new snapshot')
                 row = conn.execute('''UPDATE kumo_task_engine.dependency_graphs SET name=%s,enabled=%s,definition=%s,
@@ -105,6 +148,9 @@ class Graphs:
                 row = conn.execute('''INSERT INTO kumo_task_engine.dependency_graphs(id,key,name,enabled,definition,definition_hash,source,created_by,updated_by)
                     VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *''',
                     (uuid.uuid4(), definition['key'], definition['name'], definition['enabled'], Jsonb(definition), fingerprint, Jsonb(source or {}), str(actor)[:256], str(actor)[:256])).fetchone()
+                if definition['key']=='wf1-sql-trial':
+                    row=conn.execute('UPDATE kumo_task_engine.dependency_graphs SET configuration_managed=true WHERE id=%s RETURNING *',(row['id'],)).fetchone()
+            record_revision(conn,row)
         return dict(ok=True, graph=row, reused=False)
 
     def start(self, graph_id, body, actor):
@@ -231,8 +277,8 @@ class DependencyWorker:
             state, blockers, parents = 'WAITING', [], {}
             if cascade['cancel_requested']:
                 state='CANCELLED';blockers=[dict(reason='Trial cancelled before admission')]
-            elif not definition['enabled'] or not definition['allow']:
-                state='SKIPPED';blockers=[dict(reason='Workflow is disabled or disallowed in this snapshot')]
+            elif not definition['enabled'] or not definition['allow'] or not execution_plan(definition['plan'])['jobs']:
+                state='SKIPPED';blockers=[dict(reason='Workflow is disabled, disallowed or has no enabled jobs in this snapshot')]
             else:
                 cutoff = conn.execute('SELECT MAX(started_at) AS cutoff FROM kumo_task_engine.runs WHERE workflow_key=%s', (node['workflow_key'],)).fetchone()['cutoff']
                 for rule in definition['parents']:
@@ -247,7 +293,7 @@ class DependencyWorker:
                     elif rule['parentMustBeNewer'] and cutoff and (parent['ended_at'] is None or parent['ended_at']<=cutoff):
                         state='BLOCKED';blockers.append(dict(parent=rule['key'],state='STALE_PARENT',reason='Parent completed before the child last started'))
                 if not blockers:
-                    plan = {k:v for k,v in definition['plan'].items() if k!='version'}
+                    plan = execution_plan(definition['plan'])
                     run = self.store.submit_in_transaction(conn, dict(plan,workflowKey=node['workflow_key'],requestId='dep:'+str(cascade_id)+':'+definition['key']),
                                                            cascade['requested_by'], dependency_admission=True)
                     node['run_id']=uuid.UUID(run['runId']);state='ADMITTED'

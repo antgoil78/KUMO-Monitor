@@ -140,13 +140,53 @@ python -m flask --env-file ../.env.postgres.local --app app task-engine import-w
 python -m flask --env-file ../.env.postgres.local --app app task-engine import-wf1 --apply
 ```
 
-A changed snapshot requires `--expected-revision N`. It affects later trial
-executions; already accepted executions retain their complete graph and job
-snapshot. The importer validates the four-workflow diamond and accepts only
+The initial import makes PostgreSQL the master for this trial. Subsequent
+imports cannot overwrite a changed master, even with `--expected-revision`;
+use the configuration screens described below. Already accepted executions
+retain their complete graph and job snapshot. The importer validates the
+four-workflow diamond and accepts only
 enabled SQL jobs that pass the existing SELECT-expression restrictions. It
 rejects unsupported job gates, SQL conditions, dbt jobs, mixed trigger policies
 or external parents instead of silently omitting them. Only configuration for
 these four workflows is read; no live account inventory or DDL export is used.
+
+### PostgreSQL master configuration for WF1–WF4
+
+The existing **Workflow**, **Job** and **Dependencies** pages offer a
+**Configuration source** selector when the DEV task prototype is enabled.
+Select **PostgreSQL · WF1–WF4 DEV trial** (the default) to edit the trial.
+The Snowflake selection continues to address the existing engine's catalog;
+these are distinct execution scopes and changes are never mirrored between them.
+The source choice persists for this browser tab. A PostgreSQL error leaves that
+source selected and never redirects a save to Snowflake.
+
+The graph's JSONB definition in `kumo_task_engine.dependency_graphs` is the
+master, rather than an additional catalog copy. The Flask backend adapts it to
+the current editors. It supports workflow name/group/description, enabled state,
+sequential/parallel job execution, SQL job name/layer/description/text/timeout/
+enabled state, reordering existing jobs, and adding/removing parent workflow
+rules with independent outcome, ALLOW and freshness settings. Object identities
+remain stable when names change. Creating/deleting definitions, adding/removing
+job assignments, graph schedules, external triggers, SQL conditions, business
+table SQL and non-SQL job types remain outside this first configuration stage.
+
+Every save checks the loaded graph revision, validates the whole graph, then
+commits the new definition and a full audit revision in
+`kumo_task_engine.graph_revisions` together. A concurrent edit returns HTTP 409;
+close the editor and refresh before reapplying the draft. The screens display
+the current revision and recent configuration history. Run admission uses the
+same PostgreSQL transaction lock and freezes the graph revision, so edits to
+waiting children cannot change an already accepted execution. No save executes
+SQL, creates tasks, or changes existing Snowflake configuration. Job previews
+and legacy execution-status requests are suppressed in the PostgreSQL editors.
+
+Disabled SQL jobs create no native attempts. An enabled job retains its enabled
+prerequisites through any disabled jobs. A workflow with no enabled jobs is
+SKIPPED, and dependent workflows remain blocked by that skipped outcome.
+Run the full trial from **Monitor → Workflow dependency trial → Run WF1**;
+individual workflow/job runs are deliberately unavailable in the configuration
+view. Migration `004_master_configuration.sql` promotes the installed WF1
+graph and records its baseline without changing past or active executions.
 
 Each trial creates a frozen execution group with one run per workflow. Parents
 must belong to that group; an earlier trial's success cannot satisfy a new
@@ -254,6 +294,19 @@ prototype-tagged queries. The [localhost view check](review/dev-postgres-wf1-loc
 verified the four outcomes, mixed WF4 freshness flags and job-detail navigation
 against PostgreSQL without creating another execution. The WF1 snapshot is
 installed for manual testing; it has no recurring schedule.
+
+The master configuration extension passed 416 backend tests, including 14 new
+tests with isolated PostgreSQL, 16 relevant browser tests, 33 frontend unit
+tests and the frontend build. The [localhost configuration check](review/dev-postgres-master-configuration-local-ui.json)
+saved/reopened/restored a workflow description and saved/restored a SQL job
+description against the actual backend, leaving SQL, enabled flags, timeouts
+and parent rules unchanged. These four saves are retained in revision history.
+The [native execution check](review/dev-postgres-master-configuration-native.json)
+then ran revision 5: four successful SQL workflows, overlapping siblings,
+WF4 after both parents, one acknowledged submission per workflow, and all
+temporary-task cleanup complete. See the [validation summary](review/dev-postgres-master-configuration-validation.json)
+for scope and remaining limitations. No existing Snowflake catalog, static DDL,
+TST or SPCS service was changed.
 
 ## DEV/TST configuration and migration
 

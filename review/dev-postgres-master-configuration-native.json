@@ -1,0 +1,71 @@
+{
+  "ok": true,
+  "cascadeId": "9838abad-b797-4618-a428-b02d3a7f0b84",
+  "requestId": "configuration-validation-3e765f056aea",
+  "graphRevision": 5,
+  "state": "SUCCESS",
+  "workflows": {
+    "WF1": {
+      "state": "SUCCESS",
+      "jobs": [
+        {
+          "state": "SUCCESS",
+          "cleanup": "DONE"
+        }
+      ],
+      "startedAt": "2026-11-23T13:42:15.820000+00:00",
+      "endedAt": "2026-11-23T13:42:36.794000+00:00",
+      "parentRuns": {},
+      "acknowledgedSubmissions": 1
+    },
+    "WF2": {
+      "state": "SUCCESS",
+      "jobs": [
+        {
+          "state": "SUCCESS",
+          "cleanup": "DONE"
+        }
+      ],
+      "startedAt": "2026-11-23T13:42:47.945000+00:00",
+      "endedAt": "2026-11-23T13:43:18.724000+00:00",
+      "parentRuns": {
+        "WF1": "448f445c-3690-4c0e-ab5c-7cb99c68942a"
+      },
+      "acknowledgedSubmissions": 1
+    },
+    "WF3": {
+      "state": "SUCCESS",
+      "jobs": [
+        {
+          "state": "SUCCESS",
+          "cleanup": "DONE"
+        }
+      ],
+      "startedAt": "2026-11-23T13:42:53.241000+00:00",
+      "endedAt": "2026-11-23T13:43:53.594000+00:00",
+      "parentRuns": {
+        "WF1": "448f445c-3690-4c0e-ab5c-7cb99c68942a"
+      },
+      "acknowledgedSubmissions": 1
+    },
+    "WF4": {
+      "state": "SUCCESS",
+      "jobs": [
+        {
+          "state": "SUCCESS",
+          "cleanup": "DONE"
+        }
+      ],
+      "startedAt": "2026-11-23T13:44:10.370000+00:00",
+      "endedAt": "2026-11-23T13:44:30.775000+00:00",
+      "parentRuns": {
+        "WF2": "bd8f8492-11bb-4dbd-891c-d826f02987b5",
+        "WF3": "30a7c8f6-cdc0-4782-81f5-126504e34c21"
+      },
+      "acknowledgedSubmissions": 1
+    }
+  },
+  "checkedAt": "2026-11-23T13:44:36.978678+00:00",
+  "siblingsOverlap": true,
+  "joinAfterBothParents": true
+}

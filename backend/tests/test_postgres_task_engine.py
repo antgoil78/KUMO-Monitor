@@ -337,6 +337,27 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn('secret',response.get_data(as_text=True))
         self.assertNotIn('private-host',response.get_data(as_text=True))
 
+    def test_configuration_routes_use_trusted_actor_without_snowflake_or_execution(self):
+        with patch('task_engine.configuration.Configuration') as service,patch.dict(self.application.app.extensions,task_prototype_actor_context=lambda:dict(userName='TRUSTED')):
+            for name in ['read','dependencies','orders','workflow','job']:
+                getattr(service.return_value,name).return_value=dict(ok=True)
+            prefix=self.integration.PREFIX+'/configuration'
+            with patch.dict(os.environ,KUMO_ORCHESTRATION_RUNS_ENABLED='false'):
+                self.assertEqual(self.client.get(prefix).status_code,200)
+                self.assertEqual(self.client.put(prefix,json={'revision':1,'rows':[]}).status_code,200)
+                self.assertEqual(self.client.put(prefix+'/job-order',json={'revision':1,'orders':[]}).status_code,200)
+                self.assertEqual(self.client.patch(prefix+'/workflows/WF2',json={'revision':1}).status_code,200)
+                self.assertEqual(self.client.patch(prefix+'/jobs/sql',json={'revision':1}).status_code,200)
+            service.return_value.dependencies.assert_called_once_with({'revision':1,'rows':[]},'TRUSTED')
+            service.return_value.workflow.assert_called_once_with('WF2',{'revision':1},'TRUSTED')
+            service.return_value.job.assert_called_once_with('sql',{'revision':1},'TRUSTED')
+            self.database.submit.assert_not_called()
+
+    def test_configuration_route_reports_revision_conflicts(self):
+        with patch('task_engine.configuration.Configuration') as service:
+            service.return_value.workflow.side_effect=Conflict('Configuration changed; refresh')
+            self.assertEqual(self.client.patch(self.integration.PREFIX+'/configuration/workflows/WF2',json={'revision':1}).status_code,409)
+
     def test_feature_flag_and_non_dev_environment_prevent_database_access(self):
         with patch.object(self.integration,'store',wraps=lambda:Store(Settings.from_environment())):
             for values in [dict(KUMO_TASK_PROTOTYPE_ENABLED='false'),dict(KUMO_TASK_PROTOTYPE_ENABLED='true',KUMO_ENV='TST')]:

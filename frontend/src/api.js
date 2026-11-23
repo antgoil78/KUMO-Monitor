@@ -45,6 +45,21 @@ async function requestJson(url, options = {}) {
 }
 let sessionRequest = null
 
+// The same editors use an explicit store; PostgreSQL failures never fall back
+// to Snowflake and cannot accidentally save into the original catalog.
+export function configurationApi(source) {
+  if (source !== 'POSTGRES') return api
+  const prefix = '/api/orchestration/task-engine/configuration'
+  return {
+    orchestrationConfiguration: () => requestJson(prefix),
+    orchestrationCatalog: () => requestJson(prefix),
+    saveOrchestrationConfiguration: body => requestJson(prefix, { method: 'PUT', body: JSON.stringify(body) }),
+    saveOrchestrationJobOrder: body => requestJson(`${prefix}/job-order`, { method: 'PUT', body: JSON.stringify(body) }),
+    updateOrchestrationWorkflow: (id, body) => requestJson(`${prefix}/workflows/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    updateOrchestrationJob: (id, body) => requestJson(`${prefix}/jobs/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) })
+  }
+}
+
 export const api = {
   batchControl: params => requestJson(`/api/lim/batch-control?${new URLSearchParams(params)}`, { timeoutMs: 120000 }),
   batchControlGroups: params => requestJson(`/api/lim/batch-control/groups?${new URLSearchParams(params)}`, { timeoutMs: 120000 }),

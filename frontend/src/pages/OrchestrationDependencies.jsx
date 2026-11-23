@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import PageHeader from '../components/PageHeader.jsx'
 import LoadingState from '../components/LoadingState.jsx'
-import { api } from '../api.js'
+import { configurationApi } from '../api.js'
+import ConfigurationSource, { useConfigurationSource } from '../components/ConfigurationSource.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
 import HierarchyToggle from '../components/HierarchyToggle.jsx'
 import { addWorkflowParent, createRunPreview, evaluateDependency, parentOptions, removeWorkflowParent, validateConfiguration } from '../utils/orchestrationDependencies.js'
@@ -41,7 +42,7 @@ function RuleSelect({ row, field, rows, onUpdate }) {
   return <select className={row[field] === true ? 'od-accept' : row[field] === false ? 'od-reject' : ''} aria-label={`${objectLabel(row, rows)} ${field} rule`} value={row[field] === null ? '' : String(row[field])} onChange={event => onUpdate(row.id, field, event.target.value === '' ? null : event.target.value === 'true')}><option value="">Ignore</option><option value="true">Accept</option><option value="false">Reject</option></select>
 }
 
-function ParentDialog({ workflow, rows, onClose, onAdd }) {
+function ParentDialog({ trial, workflow, rows, onClose, onAdd }) {
   const hasParent = rows.some(row => row.workflowId === workflow.workflowId && row.parentId)
   const options = parentOptions(workflow, rows).filter(parent => !rows.some(row => row.workflowId === workflow.workflowId && row.parentId === parent.id))
   const [draft, setDraft] = useState({ ...workflow, parentId: '', trigger: 'DEP', success: true, warning: false, error: false,
@@ -51,11 +52,11 @@ function ParentDialog({ workflow, rows, onClose, onAdd }) {
     <form onSubmit={event => { event.preventDefault(); if (options.some(parent => parent.id === draft.parentId)) onAdd({ ...draft, sql: draft.sql.trim() }) }}>
       <p className="od-help">{hasParent ? 'Every parent must pass its conditions. Adding another parent uses DEP for every parent rule.' : 'Choose the parent workflow and the conditions that allow this workflow to run.'}</p>
       <label htmlFor="od-parent-workflow">Parent workflow</label><select id="od-parent-workflow" required value={draft.parentId} onChange={event => update(draft.id, 'parentId', event.target.value)}><option value="">Choose a parent…</option>{options.map(parent => <option key={parent.id} value={parent.id}>{parent.name}</option>)}</select>
-      <label htmlFor="od-parent-trigger">Trigger</label><select id="od-parent-trigger" value={draft.trigger || ''} disabled={hasParent} onChange={event => update(draft.id, 'trigger', event.target.value || null)}><option value="DEP">DEP</option><option value="RUNNER">RUNNER · 30s</option><option value="">External (NULL)</option></select>
+      <label htmlFor="od-parent-trigger">Trigger</label><select id="od-parent-trigger" value={draft.trigger || ''} disabled={trial || hasParent} onChange={event => update(draft.id, 'trigger', event.target.value || null)}><option value="DEP">DEP</option><option value="RUNNER">RUNNER · 30s</option><option value="">External (NULL)</option></select>
       <div className="od-rule-fields">{outcomeFields.map(field => <label key={field}>{field[0].toUpperCase() + field.slice(1)}<RuleSelect row={draft} field={field} rows={rows} onUpdate={update} /></label>)}</div>
       <p className="od-help">Accept allows that parent outcome. Reject blocks it. Ignore applies no restriction.</p>
       <label className="od-check"><input type="checkbox" checked={draft.parentMustBeNewer} onChange={event => update(draft.id, 'parentMustBeNewer', event.target.checked)} />Parent must be newer than the child's last start</label>
-      <label>SQL condition<textarea rows={4} value={draft.sql} onChange={event => update(draft.id, 'sql', event.target.value)} placeholder="Optional · SELECT TRUE" spellCheck={false} /></label>
+      <label>SQL condition<textarea rows={4} disabled={trial} value={draft.sql} onChange={event => update(draft.id, 'sql', event.target.value)} placeholder="Optional · SELECT TRUE" spellCheck={false} /></label>
       <p className="od-help">Optional SQL is checked after the parent rules pass and must return one Boolean value.</p>
       <label htmlFor="od-parent-allow">Allow</label><select id="od-parent-allow" value={String(draft.allow)} onChange={event => update(draft.id, 'allow', event.target.value === 'true')}><option value="true">TRUE · Go</option><option value="false">FALSE · Skip</option></select>
       <div className="od-dialog-actions"><button className="button" type="button" onClick={onClose}>Cancel</button><button className="button primary" type="submit" disabled={!draft.parentId}>Add parent</button></div>
@@ -63,7 +64,7 @@ function ParentDialog({ workflow, rows, onClose, onAdd }) {
   </Dialog>
 }
 
-function ConfigurationGrid({ groups, allRows, errors, expanded, onToggle, onUpdate, onSql, onAdd, onRemove }) {
+function ConfigurationGrid({ trial, groups, allRows, errors, expanded, onToggle, onUpdate, onSql, onAdd, onRemove }) {
   return <div className="od-table-wrap"><table className="od-config-table"><caption className="visually-hidden">Editable workflow dependency configuration</caption><colgroup>{[300, 145, 95, 95, 95, 155, 190, 120, 100].map((width, index) => <col key={index} style={{ width }} />)}</colgroup><thead><tr>{['Workflow / Parent', 'Trigger', 'Success', 'Warning', 'Error', 'Parent must be newer', 'SQL', 'Allow', 'Actions'].map(name => <th scope="col" key={name}>{name}</th>)}</tr></thead>
     {groups.map(({ workflow, rules }) => {
       const parents = rules.filter(row => row.parentId)
@@ -72,15 +73,15 @@ function ConfigurationGrid({ groups, allRows, errors, expanded, onToggle, onUpda
       return <Fragment key={workflow.workflowId}>
         <tbody className="od-workflow-header"><tr><th scope="rowgroup" colSpan={9}><div className="om-name">
           <HierarchyToggle expanded={expanded.has(workflow.workflowId)} aria-controls={bodyId} aria-label={`${expanded.has(workflow.workflowId) ? 'Hide' : 'Show'} parents for ${workflow.name}`} onClick={() => onToggle(workflow.workflowId)} />
-          <div className="om-name-text"><strong>{workflow.name}</strong><small>{parents.length ? `${parents.length} parent${parents.length === 1 ? '' : 's'} · All parent conditions must pass` : 'No parents · External trigger'}</small></div>
+          <div className="om-name-text"><strong>{workflow.name}</strong><small>{parents.length ? `${parents.length} parent${parents.length === 1 ? '' : 's'} · All parent conditions must pass` : trial ? 'No parents · Full graph execution' : 'No parents · External trigger'}</small></div>
           <button className="button od-add-parent" type="button" aria-label={`Add parent for ${workflow.name}`} disabled={!canAdd} title={canAdd ? 'Add a parent and its conditions' : 'All other workflows are already parents'} onClick={() => onAdd(workflow)}>+ Add parent</button>
         </div></th></tr></tbody>
         <tbody id={bodyId} className="od-parent-rules" hidden={!expanded.has(workflow.workflowId)}>{rules.map(row => <tr key={row.id} className={errors.some(error => error.rowId === row.id) ? 'od-invalid' : undefined}>
           <th scope="row"><div className="od-parent-name">{row.parentId ? <select aria-label={`${row.name} parent`} value={row.parentId} onChange={event => onUpdate(row.id, 'parentId', event.target.value)}>{parentOptions(row, allRows).filter(parent => parent.id === row.parentId || !parents.some(rule => rule.parentId === parent.id)).map(parent => <option key={parent.id} value={parent.id}>{parent.name}</option>)}</select> : <span className="od-dim">No parent dependencies</span>}</div></th>
-          <td><select disabled={!row.parentId || parents.length > 1} aria-label={`${row.name} trigger`} value={row.trigger || ''} onChange={event => onUpdate(row.id, 'trigger', event.target.value || null)}><option value="">External (NULL)</option><option value="DEP">DEP</option><option value="RUNNER">RUNNER · 30s</option></select></td>
+          <td><select disabled={trial || !row.parentId || parents.length > 1} aria-label={`${row.name} trigger`} value={row.trigger || ''} onChange={event => onUpdate(row.id, 'trigger', event.target.value || null)}><option value="">{trial ? 'Full graph' : 'External (NULL)'}</option><option value="DEP">DEP</option><option value="RUNNER">RUNNER · 30s</option></select></td>
           {outcomeFields.map(field => <td key={field}><fieldset className="od-rule-control" disabled={!row.parentId}><RuleSelect row={row} rows={allRows} field={field} onUpdate={onUpdate} /></fieldset></td>)}
           <td><input type="checkbox" aria-label={`${row.name} parent must be newer${row.parentId ? ` · ${allRows.find(item => item.id === row.parentId)?.name}` : ''}`} checked={Boolean(row.parentMustBeNewer)} disabled={!row.parentId} onChange={event => onUpdate(row.id, 'parentMustBeNewer', event.target.checked)} /></td>
-          <td><button className={`od-sql-button ${row.sql ? 'has-sql' : ''}`} type="button" title={row.sql || 'Add a SQL condition'} aria-label={`Edit SQL for ${row.name}${row.parentId ? ` parent ${allRows.find(item => item.id === row.parentId)?.name}` : ''}`} onClick={() => onSql(row)}>{row.sql || '+ Condition'}</button></td>
+          <td><button className={`od-sql-button ${row.sql ? 'has-sql' : ''}`} type="button" disabled={trial} title={row.sql || 'Add a SQL condition'} aria-label={`Edit SQL for ${row.name}${row.parentId ? ` parent ${allRows.find(item => item.id === row.parentId)?.name}` : ''}`} onClick={() => onSql(row)}>{row.sql || '+ Condition'}</button></td>
           <td><select aria-label={`${row.name} allow`} value={String(row.allow)} onChange={event => onUpdate(row.id, 'allow', event.target.value === 'true')}><option value="true">TRUE · Go</option><option value="false">FALSE · Skip</option></select></td>
           <td>{row.parentId && <button className="od-remove" type="button" aria-label={`Remove ${allRows.find(item => item.id === row.parentId)?.name} parent from ${row.name}`} onClick={() => onRemove(row.id)}>Remove</button>}</td>
         </tr>)}</tbody>
@@ -113,6 +114,9 @@ function RunPreview({ rows, runs, setRuns, sqlResults, setSqlResults }) {
 }
 
 export default function OrchestrationDependencies({ onNavigate, workflowName = '', returnContext = null }) {
+  const selection = useConfigurationSource()
+  const { source, trial } = selection
+  const configurationApiClient = configurationApi(source)
   const [rows, setRows] = useState([])
   const [saved, setSaved] = useState([])
   const [catalog, setCatalog] = useState(null)
@@ -157,11 +161,14 @@ export default function OrchestrationDependencies({ onNavigate, workflowName = '
   }
   async function load() {
     setLoading(true); setError(''); setMessage('')
-    try { accept(await api.orchestrationConfiguration()) }
+    try { accept(await configurationApiClient.orchestrationConfiguration()) }
     catch (failure) { setError(failure.message) }
     finally { setLoading(false) }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    if (!source) return
+    setCatalog(null); setRows([]); setSaved([]); setDialog(null); load()
+  }, [source])
   function update(id, field, value) {
     setRows(current => current.map(row => row.id === id ? { ...row, [field]: value, ...(field === 'parentId' ? {
       ...(row.issue ? (row.parentRules?.[value] || { trigger: null, success: null, warning: null, error: null }) : {}),
@@ -173,13 +180,14 @@ export default function OrchestrationDependencies({ onNavigate, workflowName = '
     if (errors.length) return
     setSaving(true); setError(''); setMessage('')
     try {
-      const data = await api.saveOrchestrationConfiguration({ rows, revision })
-      accept(data); setMessage('Dependency configuration saved to Snowflake.')
+      const data = await configurationApiClient.saveOrchestrationConfiguration({ rows, revision })
+      accept(data); setMessage(`Dependency configuration saved to ${trial ? 'PostgreSQL' : 'Snowflake'}.`)
     } catch (failure) { setError(failure.message) }
     finally { setSaving(false) }
   }
   return <section className="page od-page">
     <PageHeader breadcrumb="Workflow / Dependencies" title="Dependency configuration" subtitle="Add parent workflows and maintain the conditions that allow execution." actions={<div className="od-actions">{returnContext && <button className="button" type="button" disabled={saving || dirty} onClick={() => onNavigate('orchestrationMonitor', returnContext)}>← Monitor</button>}<button className="button" type="button" disabled={loading || saving || dirty} onClick={load}>↻ Refresh</button><button className="button primary" type="button" disabled={loading || saving || !dirty || errors.length > 0} onClick={save}>{saving ? 'Saving…' : 'Save changes'}</button></div>} />
+    <ConfigurationSource selection={selection} disabled={loading || saving || dirty || !!dialog} revision={revision} revisions={catalog?.revisions} />
     {error && <div className="alert error" role="alert">{error}</div>}
     {loading && !catalog && <LoadingState>Loading workflow dependency configuration…</LoadingState>}
     {catalog && <>
@@ -192,13 +200,13 @@ export default function OrchestrationDependencies({ onNavigate, workflowName = '
         <div className="od-grid-heading"><input className="search-input" type="search" aria-label="Search dependency configuration" placeholder="Search workflows…" value={search} onChange={event => setSearch(event.target.value)} /><div className="od-actions"><button className="button" type="button" disabled={dirty} onClick={() => onNavigate('orchestrationWorkflow')}>Workflow catalog</button></div></div>
         <p className="od-help">Status rules: Accept = TRUE · Reject = FALSE · Ignore = NULL. Parent must be newer requires the parent to finish strictly after the child's last start; the first run has no freshness cutoff. Expand a workflow to edit its parents. Add or remove parents, then save your changes.</p>
         <div className="od-list-heading"><span>Workflow / Parent hierarchy · {visible.length} workflows</span><div className="od-actions"><button className="button" type="button" disabled={!visible.length} onClick={() => setExpanded(current => new Set([...current, ...visible.map(group => group.workflow.workflowId)]))}>Expand all</button><button className="button" type="button" disabled={!visible.length} onClick={() => setExpanded(new Set())}>Collapse all</button></div></div>
-        <ConfigurationGrid groups={visible} allRows={workflows} errors={errors} expanded={expanded} onToggle={toggle} onUpdate={update} onSql={row => setDialog({ type: 'sql', row })} onAdd={workflow => setDialog({ type: 'parent', workflow })} onRemove={id => { setRows(current => removeWorkflowParent(current, id)); setMessage('Parent removed from draft. Save changes to apply.') }} />
+        <ConfigurationGrid trial={trial} groups={visible} allRows={workflows} errors={errors} expanded={expanded} onToggle={toggle} onUpdate={update} onSql={row => setDialog({ type: 'sql', row })} onAdd={workflow => setDialog({ type: 'parent', workflow })} onRemove={id => { setRows(current => removeWorkflowParent(current, id)); setMessage('Parent removed from draft. Save changes to apply.') }} />
         {!visible.length && <div className="soft-empty">No workflows match your search.</div>}
         <div className="od-bottom"><p className="od-help">Dependencies on this page apply between workflows. Manage jobs and their order on the Workflow page.</p><button className="button" type="button" disabled={!dirty} onClick={() => { setRows(structuredClone(saved)); setError(''); setMessage('Draft changes discarded.') }}>Discard changes</button></div>
       </> : dirty || errors.length ? <div className="od-preview-placeholder"><h2>Save your configuration to preview it</h2><p>Resolve any errors and save. The preview uses saved rules and separate simulated run records.</p><button className="button" type="button" onClick={() => setView('configuration')}>Back to configuration</button></div> : <RunPreview rows={savedWorkflows} runs={runs} setRuns={setRuns} sqlResults={sqlResults} setSqlResults={setSqlResults} />}
       </fieldset>
     </>}
-    {dialog?.type === 'parent' && <ParentDialog workflow={dialog.workflow} rows={workflows} onClose={() => setDialog(null)} onAdd={values => { setRows(current => addWorkflowParent(current, dialog.workflow.workflowId, values)); setExpanded(current => new Set([...current, dialog.workflow.workflowId])); setMessage('Parent added to draft. Save changes to apply.'); setDialog(null) }} />}
+    {dialog?.type === 'parent' && <ParentDialog trial={trial} workflow={dialog.workflow} rows={workflows} onClose={() => setDialog(null)} onAdd={values => { setRows(current => addWorkflowParent(current, dialog.workflow.workflowId, values)); setExpanded(current => new Set([...current, dialog.workflow.workflowId])); setMessage('Parent added to draft. Save changes to apply.'); setDialog(null) }} />}
     {dialog?.type === 'sql' && <SqlDialog row={dialog.row} rows={rows} onClose={() => setDialog(null)} onSave={sql => { update(dialog.row.id, 'sql', sql); setDialog(null) }} />}
   </section>
 }

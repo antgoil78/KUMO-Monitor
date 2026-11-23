@@ -26,7 +26,7 @@ export function applySubmission(workflow, submissions = []) {
     }) }
 }
 
-export default function useOrchestrationMonitor() {
+export default function useOrchestrationMonitor(enabled = true) {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
@@ -35,6 +35,7 @@ export default function useOrchestrationMonitor() {
   const latest = useRef(null)
   const refresh = useCallback(() => { manual.current = true; setReload(value => value + 1) }, [])
   useEffect(() => {
+    if (!enabled) return undefined
     let active = true, fetching = false, lastUpdate = 0
     function receive(next) {
       if (!active) return
@@ -63,7 +64,7 @@ export default function useOrchestrationMonitor() {
     // starts a separate Snowflake refresh for that browser.
     const timer = window.setInterval(() => { if (Date.now() - lastUpdate > 20000) snapshot() }, 15000)
     return () => { active = false; window.clearInterval(timer); window.removeEventListener('kumo:realtime', realtime) }
-  }, [reload])
+  }, [reload, enabled])
   const acceptSubmission = useCallback(receipt => setData(previous => {
     if (!previous || previous.rows.some(row => row.WORKFLOW_ID === receipt.workflowId && row.run.requestId === receipt.requestId)) return previous
     const existing = previous.submissions?.find(row => row.requestId === receipt.requestId)

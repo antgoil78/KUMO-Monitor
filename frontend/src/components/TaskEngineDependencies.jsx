@@ -51,8 +51,8 @@ export default function TaskEngineDependencies({ onSelectRun }) {
   }
   return <section className="task-trial-schedules" aria-label="Workflow dependency trial">
     <h3>Workflow dependency trial</h3>
-    <p>Start WF1 here to test the PostgreSQL engine with its copied SQL jobs: <strong>WF1 → (WF2, WF3) → WF4</strong>.</p>
-    <p>WF4 waits for both parents. This snapshot is separate from the existing workflow controls below. Only one execution of a trial graph is admitted at a time.</p>
+    <p>Start WF1 here to run the PostgreSQL master configuration for WF1–WF4. Edit its workflows, SQL jobs and parents on the configuration pages using the PostgreSQL source.</p>
+    <p>Each execution freezes its graph revision and parent rules. Only one execution of a trial graph is admitted at a time.</p>
     <p><strong>Dependency dispatcher:</strong> <span>{data?.dispatcher?.state || 'Loading…'}</span></p>
     <div className="task-trial-controls">
       <select aria-label="Dependency trial graph" value={graph?.id || ''} disabled={busy} onChange={e => { setGraphId(e.target.value); setSelected(''); pending.current = null }}>

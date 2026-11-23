@@ -82,6 +82,24 @@ def graphs():
     return jsonify(encode(Graphs(store()).status()))
 
 
+@blueprint.route(PREFIX+'/configuration',methods=['GET','PUT'])
+@blueprint.route(PREFIX+'/configuration/<kind>',methods=['PUT'])
+@blueprint.route(PREFIX+'/configuration/<kind>/<object_id>',methods=['PATCH'])
+def configuration(kind=None,object_id=None):
+    from .configuration import Configuration
+    service=Configuration(store())
+    if request.method=='GET':
+        return jsonify(encode(service.read()))
+    actor=current_app.extensions['task_prototype_actor_context']().get('userName') or 'LOCAL_DEV'
+    body=request.get_json(silent=True)
+    if request.method=='PUT' and kind is None:result=service.dependencies(body,actor)
+    elif request.method=='PUT' and kind=='job-order':result=service.orders(body,actor)
+    elif request.method=='PATCH' and kind=='workflows':result=service.workflow(object_id,body,actor)
+    elif request.method=='PATCH' and kind=='jobs':result=service.job(object_id,body,actor)
+    else:raise LookupError('Unknown PostgreSQL configuration action')
+    return jsonify(encode(result))
+
+
 @blueprint.route(PREFIX+'/graphs/<graph_id>/runs',methods=['POST'])
 def start_graph(graph_id):
     from .dependencies import Graphs

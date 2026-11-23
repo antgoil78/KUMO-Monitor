@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { api } from '../api.js'
+import { api, configurationApi } from '../api.js'
+import ConfigurationSource, { useConfigurationSource } from '../components/ConfigurationSource.jsx'
 import LoadingState from '../components/LoadingState.jsx'
 import PageHeader from '../components/PageHeader.jsx'
 import EditorDialog from '../components/EditorDialog.jsx'
@@ -31,7 +32,10 @@ function AssignJob({ workflow, jobs, assigned, busy, onClose, onAdd, onCreate, c
 }
 
 export default function WorkflowAdministration({ onNavigate, workflowId = '', workflowName = '', initialAction = '', returnContext = null }) {
-  const { data: live, acceptSubmission } = useOrchestrationMonitor()
+  const selection = useConfigurationSource()
+  const { trial, source } = selection
+  const configurationApiClient = configurationApi(source)
+  const { data: live, acceptSubmission } = useOrchestrationMonitor(source === 'SNOWFLAKE')
   const [catalog, setCatalog] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -68,7 +72,7 @@ export default function WorkflowAdministration({ onNavigate, workflowId = '', wo
   async function load() {
     setLoading(true); setError('')
     try {
-      const [configuration, status] = await Promise.allSettled([api.orchestrationConfiguration(), api.orchestrationEngine()])
+      const [configuration, status] = await Promise.allSettled([configurationApiClient.orchestrationConfiguration(), trial ? Promise.resolve({ installed: false, runsEnabled: false, message: 'Run the full WF1 trial from Monitor / Workflow dependency trial.' }) : api.orchestrationEngine()])
       if (configuration.status === 'rejected') throw configuration.reason
       setCatalog(configuration.value)
       setEngine(status.status === 'fulfilled' ? status.value : { installed: false, runsEnabled: false, message: 'Parallel engine is unavailable.' })
@@ -76,7 +80,12 @@ export default function WorkflowAdministration({ onNavigate, workflowId = '', wo
     catch (failure) { setError(failure.message) }
     finally { setLoading(false) }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    if (!source) return
+    setCatalog(null); setDrafts({}); setDialog(null); setMessage('')
+    openedInitial.current = false
+    load()
+  }, [source])
   useEffect(() => {
     if (!catalog || !workflowId || openedInitial.current) return
     openedInitial.current = true
@@ -114,7 +123,7 @@ export default function WorkflowAdministration({ onNavigate, workflowId = '', wo
     if (saving) return
     setSaving(true); setError(''); setMessage('')
     try {
-      const data = await api.saveOrchestrationJobOrder({ revision: catalog.revision, orders: Object.entries(drafts).map(([workflowId, ids]) => ({ workflowId, jobIds: ids })) })
+      const data = await configurationApiClient.saveOrchestrationJobOrder({ revision: catalog.revision, orders: Object.entries(drafts).map(([workflowId, ids]) => ({ workflowId, jobIds: ids })) })
       setCatalog(data); setDrafts({}); setMessage('Job assignments and order saved.')
     } catch (failure) { setError(failure.message) }
     finally { setSaving(false) }
@@ -124,13 +133,13 @@ export default function WorkflowAdministration({ onNavigate, workflowId = '', wo
     setSaving(true); setDialogError(''); setMessage('')
     try {
       if (dialog.kind === 'workflow') {
-        if (dialog.record) await api.updateOrchestrationWorkflow(dialog.record.WORKFLOW_ID, form)
+        if (dialog.record) await configurationApiClient.updateOrchestrationWorkflow(dialog.record.WORKFLOW_ID, { ...form, ...(trial ? { revision: catalog.revision } : {}) })
         else {
-          const created = await api.createOrchestrationWorkflow(form)
+          const created = await configurationApiClient.createOrchestrationWorkflow(form)
           setExpanded(current => new Set([...current, created.workflowId]))
         }
-      } else if (dialog.record) await api.updateOrchestrationJob(dialog.record.JOB_ID, form)
-      else await api.createOrchestrationJob({ ...form, workflowId: dialog.workflow?.WORKFLOW_ID, revision: catalog.revision })
+      } else if (dialog.record) await configurationApiClient.updateOrchestrationJob(dialog.record.JOB_ID, { ...form, ...(trial ? { revision: catalog.revision } : {}) })
+      else await configurationApiClient.createOrchestrationJob({ ...form, workflowId: dialog.workflow?.WORKFLOW_ID, revision: catalog.revision })
       setDialog(null); setMessage('Saved successfully.'); await load()
     } catch (failure) { setDialogError(failure.message) }
     finally { setSaving(false) }
@@ -139,8 +148,8 @@ export default function WorkflowAdministration({ onNavigate, workflowId = '', wo
     if (saving) return
     setSaving(true); setDialogError('')
     try {
-      if (dialog.kind === 'workflow') await api.deleteOrchestrationWorkflow(dialog.record.WORKFLOW_ID)
-      else await api.deleteOrchestrationJob(dialog.record.JOB_ID)
+      if (dialog.kind === 'workflow') await configurationApiClient.deleteOrchestrationWorkflow(dialog.record.WORKFLOW_ID)
+      else await configurationApiClient.deleteOrchestrationJob(dialog.record.JOB_ID)
       setDialog(null); setMessage('Deleted successfully.'); await load()
     } catch (failure) { setDialogError(failure.message) }
     finally { setSaving(false) }
@@ -152,7 +161,8 @@ export default function WorkflowAdministration({ onNavigate, workflowId = '', wo
   }
 
   return <section className="page om-page wa-page">
-    <PageHeader breadcrumb="Workflow / Workflow" title="Workflow" subtitle="Manage workflows and their jobs in execution order." actions={<div className="page-header-actions">{returnContext && <button className="button" type="button" onClick={() => onNavigate('orchestrationMonitor', returnContext)}>← Monitor</button>}<button className="button" type="button" disabled={busy || dirty} onClick={load}>↻ Refresh</button><button className="button" type="button" disabled={busy || dirty || !catalog} onClick={() => open({ kind: 'job' })}>+ Job</button><button className="button primary" type="button" disabled={busy || dirty || !catalog} onClick={() => open({ kind: 'workflow' })}>+ Workflow</button></div>} />
+    <PageHeader breadcrumb="Workflow / Workflow" title="Workflow" subtitle="Manage workflows and their jobs in execution order." actions={<div className="page-header-actions">{returnContext && <button className="button" type="button" onClick={() => onNavigate('orchestrationMonitor', returnContext)}>← Monitor</button>}<button className="button" type="button" disabled={busy || dirty} onClick={load}>↻ Refresh</button><button className="button" type="button" disabled={trial || busy || dirty || !catalog} onClick={() => open({ kind: 'job' })}>+ Job</button><button className="button primary" type="button" disabled={trial || busy || dirty || !catalog} onClick={() => open({ kind: 'workflow' })}>+ Workflow</button></div>} />
+    <ConfigurationSource selection={selection} disabled={busy || dirty || !!dialog} revision={catalog?.revision} revisions={catalog?.revisions} />
     {error && <div className="alert error" role="alert">{error}</div>}
     {message && <div className="alert success" role="status">{message}</div>}
     {loading && !catalog && <LoadingState>Loading workflows and jobs…</LoadingState>}
@@ -176,7 +186,7 @@ export default function WorkflowAdministration({ onNavigate, workflowId = '', wo
           const header = catalog.rows.find(row => row.id === id)
           const parentWorkflow = workflowById.get(header?.parentId)
           return <Fragment key={id}>
-            <tbody className="om-parent"><tr><th scope="row"><div className="om-name"><HierarchyToggle expanded={isExpanded} aria-controls={`wa-jobs-${id}`} aria-label={`${isExpanded ? 'Hide' : 'Show'} jobs for ${workflow.WORKFLOW_NAME}`} onClick={() => toggle(id)} /><div><strong>{workflow.WORKFLOW_NAME}</strong><small>{workflow.WORKFLOW_GROUP || 'Ungrouped'}</small></div></div></th><td><span className="om-kind">Workflow</span><small>{ids.length} {ids.length === 1 ? 'job' : 'jobs'}</small></td><td><State enabled={workflow.IS_ENABLED} /></td><td>{workflow.SCHEDULE ? <><span>{workflow.SCHEDULE}</span><small>{workflow.SCHEDULE_TIMEZONE || 'UTC'} · {workflow.IS_SCHEDULE_ENABLED ? 'Enabled' : 'Disabled'}</small></> : <span className="om-muted">{workflow.ALLOW_EXTERNAL_TRIGGER ? 'External trigger' : 'Manual trigger'}</span>}</td><td><span className="om-dependency">{parentWorkflow?.WORKFLOW_NAME || (header?.parentId ? 'Unknown parent' : 'No parent')}</span></td><td><span className={drafts[id] ? 'wa-pending' : 'om-muted'}>{drafts[id] ? 'Unsaved' : '—'}</span></td><td><div className="wa-actions"><button className="button" type="button" disabled={busy || dirty} aria-label={`Edit workflow ${workflow.WORKFLOW_NAME}`} onClick={() => open({ kind: 'workflow', record: workflow })}>Edit</button><button className="button" type="button" disabled={busy || dirty || locked || !!runUnavailable || !workflow.IS_ENABLED || !ids.length} title={runUnavailable} aria-label={`Run workflow ${workflow.WORKFLOW_NAME}`} onClick={() => open({ kind: 'run', workflow })}>Run</button><button className="button" type="button" disabled={!engine?.installed} aria-label={`Execution history for ${workflow.WORKFLOW_NAME}`} onClick={() => onNavigate('orchestrationHistory', { workflowId: workflow.WORKFLOW_ID, workflowName: workflow.WORKFLOW_NAME })}>History</button><button className="button" type="button" disabled={locked} aria-label={`Add job to ${workflow.WORKFLOW_NAME}`} onClick={() => { setExpanded(current => new Set([...current, id])); open({ kind: 'assign', workflow }) }}>+ Job</button></div></td></tr></tbody>
+            <tbody className="om-parent"><tr><th scope="row"><div className="om-name"><HierarchyToggle expanded={isExpanded} aria-controls={`wa-jobs-${id}`} aria-label={`${isExpanded ? 'Hide' : 'Show'} jobs for ${workflow.WORKFLOW_NAME}`} onClick={() => toggle(id)} /><div><strong>{workflow.WORKFLOW_NAME}</strong><small>{workflow.WORKFLOW_GROUP || 'Ungrouped'}</small></div></div></th><td><span className="om-kind">Workflow</span><small>{ids.length} {ids.length === 1 ? 'job' : 'jobs'}</small></td><td><State enabled={workflow.IS_ENABLED} /></td><td>{workflow.SCHEDULE ? <><span>{workflow.SCHEDULE}</span><small>{workflow.SCHEDULE_TIMEZONE || 'UTC'} · {workflow.IS_SCHEDULE_ENABLED ? 'Enabled' : 'Disabled'}</small></> : <span className="om-muted">{workflow.ALLOW_EXTERNAL_TRIGGER ? 'External trigger' : 'Manual trigger'}</span>}</td><td><span className="om-dependency">{parentWorkflow?.WORKFLOW_NAME || (header?.parentId ? 'Unknown parent' : 'No parent')}</span></td><td><span className={drafts[id] ? 'wa-pending' : 'om-muted'}>{drafts[id] ? 'Unsaved' : '—'}</span></td><td><div className="wa-actions"><button className="button" type="button" disabled={busy || dirty} aria-label={`Edit workflow ${workflow.WORKFLOW_NAME}`} onClick={() => open({ kind: 'workflow', record: workflow })}>Edit</button><button className="button" type="button" disabled={busy || dirty || locked || !!runUnavailable || !workflow.IS_ENABLED || !ids.length} title={runUnavailable} aria-label={`Run workflow ${workflow.WORKFLOW_NAME}`} onClick={() => open({ kind: 'run', workflow })}>Run</button><button className="button" type="button" disabled={!engine?.installed} aria-label={`Execution history for ${workflow.WORKFLOW_NAME}`} onClick={() => onNavigate('orchestrationHistory', { workflowId: workflow.WORKFLOW_ID, workflowName: workflow.WORKFLOW_NAME })}>History</button><button className="button" type="button" disabled={trial || locked} aria-label={`Add job to ${workflow.WORKFLOW_NAME}`} onClick={() => { setExpanded(current => new Set([...current, id])); open({ kind: 'assign', workflow }) }}>+ Job</button></div></td></tr></tbody>
             <tbody id={`wa-jobs-${id}`} className="om-children" hidden={!isExpanded}>
               {ids.map((jobId, position) => {
                 const job = jobById.get(jobId)
@@ -190,7 +200,7 @@ export default function WorkflowAdministration({ onNavigate, workflowId = '', wo
                   <th scope="row"><div className="om-job-name"><button className="wa-drag" type="button" draggable={!locked} disabled={locked} aria-label={`Drag ${job.JOB_NAME} to reorder`} title="Drag to reorder, or use the move buttons" onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', jobId); setDragging({ workflowId: id, jobId }) }} onDragEnd={() => { setDragging(null); setDropTarget(null) }}>⠿</button><span className="om-sequence">{String(position + 1).padStart(2, '0')}</span><div><strong>{job.JOB_NAME}</strong>{job.DESCRIPTION && <small>{job.DESCRIPTION}</small>}</div></div></th>
                   <td><span className="om-kind">{job.JOB_TYPE}</span><small>{job.JOB_LAYER || 'GENERAL'}</small></td><td><State enabled={job.IS_ENABLED} /></td><td><span className="wa-command" title={job.SQL_COMMAND || job.DBT_COMMAND || job.COMMAND_LINE || ''}>{job.SQL_COMMAND || job.DBT_COMMAND || job.COMMAND_LINE || '—'}</span></td><td><span className="om-dependency">{parentName}</span><small>{workflow.JOB_EXECUTION_MODE === 'PARALLEL' ? 'Workflow · Parallel job' : isEntry ? 'Workflow · First job' : 'Job parent'}</small></td>
                   <td><div className="wa-order"><button className="button" type="button" disabled={locked || position === 0} aria-label={`Move ${job.JOB_NAME} up in ${workflow.WORKFLOW_NAME}`} onClick={() => move(id, jobId, position - 1)}>↑</button><button className="button" type="button" disabled={locked || position === ids.length - 1} aria-label={`Move ${job.JOB_NAME} down in ${workflow.WORKFLOW_NAME}`} onClick={() => move(id, jobId, position + 1)}>↓</button></div></td>
-                  <td><div className="wa-actions">{job.JOB_TYPE === 'DBT' && <button className="button" type="button" disabled={busy || dirty} aria-label={`DAG Preview for ${job.JOB_NAME}`} onClick={() => open({ kind: 'preview', record: job })}>DAG Preview</button>}<button className="button" type="button" disabled={busy || dirty} aria-label={`Edit job ${job.JOB_NAME}`} onClick={() => open({ kind: 'job', record: job })}>Edit</button><button className="button" type="button" disabled={busy || dirty || locked || !!runUnavailable || !workflow.IS_ENABLED || !job.IS_ENABLED} title={runUnavailable} aria-label={`Run ${job.JOB_NAME} in ${workflow.WORKFLOW_NAME}`} onClick={() => open({ kind: 'run', workflow, jobId })}>Run…</button><button className="button wa-remove" type="button" disabled={locked} aria-label={`Remove ${job.JOB_NAME} from ${workflow.WORKFLOW_NAME}`} title="Remove assignment; keep the reusable job" onClick={() => changeOrder(id, ids.filter(value => value !== jobId))}>×</button></div></td>
+                  <td><div className="wa-actions">{job.JOB_TYPE === 'DBT' && <button className="button" type="button" disabled={busy || dirty} aria-label={`DAG Preview for ${job.JOB_NAME}`} onClick={() => open({ kind: 'preview', record: job })}>DAG Preview</button>}<button className="button" type="button" disabled={busy || dirty} aria-label={`Edit job ${job.JOB_NAME}`} onClick={() => open({ kind: 'job', record: job })}>Edit</button><button className="button" type="button" disabled={busy || dirty || locked || !!runUnavailable || !workflow.IS_ENABLED || !job.IS_ENABLED} title={runUnavailable} aria-label={`Run ${job.JOB_NAME} in ${workflow.WORKFLOW_NAME}`} onClick={() => open({ kind: 'run', workflow, jobId })}>Run…</button><button className="button wa-remove" type="button" disabled={trial || locked} aria-label={`Remove ${job.JOB_NAME} from ${workflow.WORKFLOW_NAME}`} title="Remove assignment; keep the reusable job" onClick={() => changeOrder(id, ids.filter(value => value !== jobId))}>×</button></div></td>
                 </tr>
               })}
               {!ids.length && <tr><td colSpan={7} className="om-empty-jobs">No jobs assigned. <button className="button" type="button" disabled={locked} onClick={() => open({ kind: 'assign', workflow })}>+ Add first job</button></td></tr>}
@@ -202,8 +212,8 @@ export default function WorkflowAdministration({ onNavigate, workflowId = '', wo
     </>}
     {dialog?.kind === 'preview' && <DagPreviewDialog definitionId={dialog.record.JOB_ID} name={dialog.record.JOB_NAME} orchestration onClose={() => setDialog(null)} />}
     {dialog?.kind === 'assign' && <AssignJob workflow={dialog.workflow} jobs={jobs} assigned={jobIds(dialog.workflow.WORKFLOW_ID)} busy={busy} canCreate={!dirty} onClose={() => setDialog(null)} onAdd={jobId => { const id = dialog.workflow.WORKFLOW_ID; changeOrder(id, [...jobIds(id), jobId]); setDialog(null) }} onCreate={() => open({ kind: 'job', workflow: dialog.workflow })} />}
-    {dialog?.kind === 'workflow' && <WorkflowEditor workflow={dialog.record} groups={groups} jobs={jobs} assignments={assignments} saving={saving} error={dialogError} onClose={() => !saving && setDialog(null)} onSave={saveDefinition} onDelete={deleteDefinition} />}
-    {dialog?.kind === 'job' && <JobEditor job={dialog.record} workflowName={dialog.workflow?.WORKFLOW_NAME} assignments={assignments} saving={saving} error={dialogError} onClose={() => !saving && setDialog(null)} onSave={saveDefinition} onDelete={deleteDefinition} />}
+    {dialog?.kind === 'workflow' && <WorkflowEditor trial={trial} workflow={dialog.record} groups={groups} jobs={jobs} assignments={assignments} saving={saving} error={dialogError} onClose={() => !saving && setDialog(null)} onSave={saveDefinition} onDelete={deleteDefinition} />}
+    {dialog?.kind === 'job' && <JobEditor trial={trial} job={dialog.record} workflowName={dialog.workflow?.WORKFLOW_NAME} assignments={assignments} saving={saving} error={dialogError} onClose={() => !saving && setDialog(null)} onSave={saveDefinition} onDelete={deleteDefinition} />}
     {dialog?.kind === 'run' && <RunWorkflowDialog workflow={runWorkflow} jobId={dialog.jobId} jobs={jobIds(dialog.workflow.WORKFLOW_ID).map(id => jobById.get(id))} onClose={() => setDialog(null)} onAccepted={result => { acceptSubmission(result); setDialog(null) }} />}
   </section>
 }
