@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "environment": "DEV",
+  "fixture": "36647b6784",
+  "scheduleId": "2c0ed8b9-235a-4378-8522-572cb6e37fc8",
+  "runId": "fe95fb32-7406-43f3-b073-a0509412f39a",
+  "plannedAt": "2026-11-23T12:51:00+00:00",
+  "admittedAt": "2026-11-23T12:51:00.542990+00:00",
+  "native": {
+    "task": "KUMO_DEV.MONITOR_APP.TMP_PG_ORCH_4D6BF38B287A492E981F479379084B7C",
+    "queryId": "01c89a83-010c-036c-0004-a4f20893c8ee",
+    "group": "2bc3ad05-f90e-4c8f-8722-73d7ba55e72d",
+    "outcome": "SUCCESS",
+    "cleanup": "DONE",
+    "submissions": 1
+  },
+  "assertions": {
+    "realCronBoundary": true,
+    "durableIdempotentCreation": true,
+    "schedulerReplacedAfterAdmission": true,
+    "singleOccurrence": true,
+    "nativeTaskAbsent": true
+  },
+  "idle": {
+    "start": "2026-11-23T12:51:22.825378+00:00",
+    "end": "2026-11-23T12:52:53.858691+00:00",
+    "combinedSchedulerWorkerChecks": 84,
+    "enabledFutureSchedule": true,
+    "schedulerHealth": "HEALTHY",
+    "snowflakeAdapterCalls": 0,
+    "taggedSnowflakeQueries": 0
+  },
+  "fixturesPaused": true
+}

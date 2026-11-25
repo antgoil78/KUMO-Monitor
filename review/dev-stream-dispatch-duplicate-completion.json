@@ -1,0 +1,6 @@
+{
+  "environment": "DEV",
+  "check": "Duplicate FINISH after both native tasks dropped is acknowledged without replay",
+  "delivery_state": "DONE",
+  "attempts": 1
+}

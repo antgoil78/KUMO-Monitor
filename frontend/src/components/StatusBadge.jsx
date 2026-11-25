@@ -3,9 +3,10 @@ const groups = {
   running: ['RUNNING', 'IN_PROGRESS', 'EXECUTING', 'STARTING'],
   queued: ['INITIATING', 'QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED'],
   failed: ['FAILED', 'FAILURE', 'ERROR'],
-  warning: ['WARNING', 'WARNINGS', 'WARN', 'VARNING', 'VARNINGAR'],
+  warning: ['WARNING', 'WARNINGS', 'WARN', 'VARNING', 'VARNINGAR', 'UNKNOWN', 'BLOCKED', 'REVIEW'],
   info: ['INFO', 'DEBUG', 'TRACE', 'NOTICE'],
-  skipped: ['SKIPPED']
+  skipped: ['SKIPPED'],
+  waiting: ['WAITING']
 }
 
 const iconByKind = {
@@ -26,6 +27,7 @@ export function statusKind(status) {
   if (tokens.some(token => groups.success.includes(token))) return 'success'
   if (tokens.some(token => groups.running.includes(token))) return 'running'
   if (tokens.some(token => groups.queued.includes(token))) return 'queued'
+  if (tokens.some(token => groups.waiting.includes(token))) return 'queued'
   if (tokens.some(token => groups.info.includes(token))) return 'info'
   if (tokens.some(token => groups.skipped.includes(token))) return 'skipped'
   return 'muted'
@@ -35,13 +37,13 @@ export function isWorkflowBusy(status) {
   return ['running', 'queued'].includes(statusKind(status))
 }
 
-export default function StatusBadge({ status, showIcon = true }) {
+export default function StatusBadge({ status, showIcon = true, count }) {
   const s = String(status || '—').toUpperCase().replace('-', '—')
   const kind = statusKind(s)
   return (
     <span className={`status-badge ${kind}`}>
       {showIcon && <span className="status-icon">{iconByKind[kind]}</span>}
-      <span>{s}</span>
+      <span>{s}{Number.isInteger(count) && count > 0 && <span className="status-count">({count})</span>}</span>
     </span>
   )
 }

@@ -61,6 +61,13 @@ FROM {TABLE}
 GROUP BY ALL"""
 
 
+def configure_routes():
+    global TABLE, GROUP_QUERY
+    previous = TABLE
+    TABLE = config.LIM_BATCH_CTRL_TABLE
+    GROUP_QUERY = GROUP_QUERY.replace('FROM ' + previous, 'FROM ' + TABLE)
+
+
 def _search_clause(search, columns):
     if not search:
         return "", {}

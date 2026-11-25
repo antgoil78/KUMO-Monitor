@@ -61,6 +61,25 @@ class ClientLifecycleTests(unittest.TestCase):
         application._start_dashboard_cache.assert_not_called()
         thread.assert_not_called()
 
+    def test_postgres_observers_never_start_snowflake_background_readers(self):
+        client=self.broker.subscribe(dict(page='orchestrationMonitor',orchestrationSource='POSTGRES'))
+        application.monitor_cache.start.assert_not_called()
+        application.orchestration_cache.start.assert_not_called()
+        application._start_dashboard_cache.assert_not_called()
+        application.status_coordinator.set_client_count.assert_called_with(0)
+        self.broker.unsubscribe(client)
+
+    def test_last_snowflake_observer_disconnect_stops_readers_with_postgres_observers_remaining(self):
+        postgres=self.broker.subscribe(dict(orchestrationSource='POSTGRES'))
+        snowflake=self.broker.subscribe(dict(orchestrationSource='SNOWFLAKE'))
+        application.orchestration_cache.start.assert_called()
+        application.status_coordinator.set_client_count.assert_called_with(1)
+        application.orchestration_cache.stop.reset_mock()
+        self.broker.unsubscribe(snowflake)
+        application.orchestration_cache.stop.assert_called_once()
+        application.status_coordinator.set_client_count.assert_called_with(0)
+        self.broker.unsubscribe(postgres)
+
     def test_delayed_notification_uses_actual_connections(self):
         application._set_realtime_client_count(50)
         application.monitor_cache.start.assert_not_called()

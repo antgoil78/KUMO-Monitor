@@ -22,6 +22,16 @@ var env = object(first(rows('CALL KUMO_DEV.MONITOR_META.SP_GET_ENVIRONMENT()')[0
 });
 var app = env.DATABASE + '.' + env.MONITOR_APP_SCHEMA;
 var log = env.DATABASE + '.' + env.META_SCHEMA + '.WORKFLOW_EXECUTION_LOG';
+var dispatcher = false;
+try {
+    dispatcher = String(first(rows("SELECT SYSTEM$TASK_RUNTIME_INFO('CURRENT_TASK_NAME') AS NAME")[0]))
+        .replace(/"/g, '').toUpperCase() === app + '.TASK_ORCH_DISPATCH';
+} catch (ignored) {}
+if (!dispatcher) {
+    rows('INSERT INTO ' + env.DATABASE + '.' + env.META_SCHEMA +
+        ".ORCH_DISPATCH_EVENTS (KIND, RUN_ID) VALUES ('DEPENDENCY', ?)", [P_EXECUTION_ID]);
+    return {ok: true, evaluated: false, deferred: true, children: [], errors: []};
+}
 var report = object(first(rows('CALL ' + app + '.SP_ORCH_EVALUATE_DEPENDENCIES(?)', [P_EXECUTION_ID])[0]));
 if (!report || report.ok !== true) throw new Error('Dependency eligibility evaluation failed');
 report.dispatches = []; report.errors = [];

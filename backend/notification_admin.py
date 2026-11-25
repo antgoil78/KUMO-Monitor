@@ -25,6 +25,11 @@ _MOCK_GROUPS = []
 _MOCK_WORKFLOWS = []
 
 
+def configure_routes():
+    global EMAIL_GROUPS_TABLE
+    EMAIL_GROUPS_TABLE = config.T_EMAIL_GROUPS
+
+
 def _clean(value):
     return str(value or "").strip()
 

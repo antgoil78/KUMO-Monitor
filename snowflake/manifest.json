@@ -9,10 +9,10 @@
     "KUMO_DEV.MONITOR_META"
   ],
   "counts": {
-    "PROCEDURE": 26,
-    "STREAM": 1,
-    "TABLE": 24,
-    "TASK": 2,
+    "PROCEDURE": 29,
+    "STREAM": 2,
+    "TABLE": 26,
+    "TASK": 3,
     "VIEW": 1
   },
   "objects": [
@@ -313,6 +313,44 @@
       "type": "VIEW",
       "name": "KUMO_DEV.MONITOR_APP.V_ORCH_WORKFLOW_RELATIONS",
       "file": "ddl/KUMO_DEV/MONITOR_APP/views/V_ORCH_WORKFLOW_RELATIONS.sql"
+    },
+    {
+      "type": "TABLE",
+      "name": "KUMO_DEV.MONITOR_META.ORCH_DISPATCH_EVENTS",
+      "file": "ddl/KUMO_DEV/MONITOR_META/tables/ORCH_DISPATCH_EVENTS.sql"
+    },
+    {
+      "type": "STREAM",
+      "name": "KUMO_DEV.MONITOR_META.ORCH_DISPATCH_EVENTS_STREAM",
+      "file": "ddl/KUMO_DEV/MONITOR_META/streams/ORCH_DISPATCH_EVENTS_STREAM.sql"
+    },
+    {
+      "type": "PROCEDURE",
+      "name": "KUMO_DEV.MONITOR_APP.SP_ORCH_LAUNCH_RUN",
+      "file": "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_LAUNCH_RUN.sql",
+      "signature": "(VARCHAR)"
+    },
+    {
+      "type": "PROCEDURE",
+      "name": "KUMO_DEV.MONITOR_APP.SP_ORCH_FINISH_RUN",
+      "file": "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_FINISH_RUN.sql",
+      "signature": "(VARCHAR, VARCHAR)"
+    },
+    {
+      "type": "PROCEDURE",
+      "name": "KUMO_DEV.MONITOR_APP.SP_ORCH_DISPATCH",
+      "file": "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_DISPATCH.sql",
+      "signature": "()"
+    },
+    {
+      "type": "TASK",
+      "name": "KUMO_DEV.MONITOR_APP.TASK_ORCH_DISPATCH",
+      "file": "ddl/KUMO_DEV/MONITOR_APP/tasks/TASK_ORCH_DISPATCH.sql"
+    },
+    {
+      "type": "TABLE",
+      "name": "KUMO_DEV.MONITOR_META.ORCH_DISPATCH_DELIVERIES",
+      "file": "ddl/KUMO_DEV/MONITOR_META/tables/ORCH_DISPATCH_DELIVERIES.sql"
     }
   ],
   "restore_order": [
@@ -343,6 +381,9 @@
     "ddl/KUMO_DEV/MONITOR_META/tables/WORKFLOW_TASKS.sql",
     "ddl/KUMO_DEV/MONITOR_META/streams/X_WORKFLOW_EXECUTION_QUEUE_STREAM.sql",
     "ddl/KUMO_DEV/MONITOR_APP/views/V_ORCH_WORKFLOW_RELATIONS.sql",
+    "ddl/KUMO_DEV/MONITOR_META/tables/ORCH_DISPATCH_EVENTS.sql",
+    "ddl/KUMO_DEV/MONITOR_META/tables/ORCH_DISPATCH_DELIVERIES.sql",
+    "ddl/KUMO_DEV/MONITOR_META/streams/ORCH_DISPATCH_EVENTS_STREAM.sql",
     "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_LOAD_RAW_LIM_INCREMENTAL_PERSIST__a0a986b618dc.sql",
     "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_DISPATCH_DEPENDENCIES.sql",
     "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_EVALUATE_DEPENDENCIES.sql",
@@ -369,6 +410,10 @@
     "ddl/KUMO_DEV/MONITOR_APP/procedures/X_SP_WORKFLOW_REQUEST_RUN__9d4a0f2e146d.sql",
     "ddl/KUMO_DEV/MONITOR_META/procedures/LOAD_RAW_LIM_FROM_STAGE__06532d90d921.sql",
     "ddl/KUMO_DEV/MONITOR_META/procedures/SP_GET_ENVIRONMENT__2e38e77b22c3.sql",
+    "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_LAUNCH_RUN.sql",
+    "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_FINISH_RUN.sql",
+    "ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_DISPATCH.sql",
+    "ddl/KUMO_DEV/MONITOR_APP/tasks/TASK_ORCH_DISPATCH.sql",
     "ddl/KUMO_DEV/MONITOR_APP/tasks/TASK_ORCH_MAINTENANCE.sql",
     "ddl/KUMO_DEV/MONITOR_APP/tasks/X_TASK_WF_MASTER_DISPATCHER.sql"
   ]

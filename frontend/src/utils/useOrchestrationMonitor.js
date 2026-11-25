@@ -9,6 +9,9 @@ export function applySubmission(workflow, submissions = []) {
   // learned its run ID. A late receipt must never hide RUNNING or SUCCESS.
   if (!submission || workflow.run.requestId === submission.requestId ||
       (submission.runId && workflow.run.runId === submission.runId)) return workflow
+  if (workflow.source === 'POSTGRES') return { ...workflow, canRun: false, runUnavailable: 'Workflow is being prepared.',
+    planning: { ...workflow.planning, status: submission.status === 'QUEUED' ? 'QUEUED' : 'INITIATING',
+      requestId: submission.requestId, requestedAt: submission.submittedAt, waitingFor: [], message: 'Workflow is being prepared.' } }
   const jobIndex = workflow.jobs.findIndex(job => job.JOB_ID === submission.jobId)
   let first = true
   return { ...workflow, canRun: false, runUnavailable: 'Workflow is being prepared.',
@@ -26,15 +29,17 @@ export function applySubmission(workflow, submissions = []) {
     }) }
 }
 
-export default function useOrchestrationMonitor() {
+export default function useOrchestrationMonitor(enabled = true, source = 'SNOWFLAKE') {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [reload, setReload] = useState(0)
   const manual = useRef(false)
   const latest = useRef(null)
+  useEffect(() => { setData(null); latest.current = null; setError('') }, [source])
   const refresh = useCallback(() => { manual.current = true; setReload(value => value + 1) }, [])
   useEffect(() => {
+    if (!enabled) return undefined
     let active = true, fetching = false, lastUpdate = 0
     function receive(next) {
       if (!active) return
@@ -47,13 +52,13 @@ export default function useOrchestrationMonitor() {
       if (fetching) return
       fetching = true
       setRefreshing(true)
-      try { receive(await api.orchestrationMonitor(force)) }
+      try { receive(await (source === 'POSTGRES' ? api.postgresMonitor() : api.orchestrationMonitor(force))) }
       catch (failure) { if (active) setError(failure.message) }
       finally { fetching = false; if (active) setRefreshing(false) }
     }
     function realtime(event) {
       const message = event.detail
-      if (message?.type === 'orchestration_update') { lastUpdate = Date.now(); receive(message.data) }
+      if (source !== 'POSTGRES' && message?.type === 'orchestration_update') { lastUpdate = Date.now(); receive(message.data) }
       if (message?.type === 'connected') snapshot()
     }
     window.addEventListener('kumo:realtime', realtime)
@@ -61,9 +66,9 @@ export default function useOrchestrationMonitor() {
     manual.current = false
     // A disconnected browser may read the shared Python snapshot. This never
     // starts a separate Snowflake refresh for that browser.
-    const timer = window.setInterval(() => { if (Date.now() - lastUpdate > 20000) snapshot() }, 15000)
+    const timer = window.setInterval(() => { if (source === 'POSTGRES' || Date.now() - lastUpdate > 20000) snapshot() }, source === 'POSTGRES' ? 2000 : 15000)
     return () => { active = false; window.clearInterval(timer); window.removeEventListener('kumo:realtime', realtime) }
-  }, [reload])
+  }, [reload, enabled, source])
   const acceptSubmission = useCallback(receipt => setData(previous => {
     if (!previous || previous.rows.some(row => row.WORKFLOW_ID === receipt.workflowId && row.run.requestId === receipt.requestId)) return previous
     const existing = previous.submissions?.find(row => row.requestId === receipt.requestId)

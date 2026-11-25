@@ -1,0 +1,21 @@
+{
+  "environment": "DEV",
+  "marker": "STREAM_TEST_3e579b84b4a1",
+  "checks": [
+    "committed run launches through the stream with no browser or SP_ORCH_START_RUN call",
+    "native finalization and both temporary tasks clean up",
+    "terminal compatibility wakeup cannot replay work",
+    "launch and completion deliveries drain without a periodic task",
+    "two accepted requests for the same workflow execute serially and advance without polling",
+    "SQL job failure records terminal workflow/job states",
+    "job timeout finalizes and releases the workflow",
+    "native cancellation is recovered by finalizer event without maintenance",
+    "a related running descendant blocks its ancestor and completion releases it",
+    "fork/join admits both siblings before launch and never joins an older parent success",
+    "105 duplicate delivery events cross the native batch limit without lost work or replay",
+    "invalid delivery stops after three attempts and remains visible for explicit repair",
+    "all success, failure and cancellation graphs clean up"
+  ],
+  "tst_changed": false,
+  "business_workflows_executed": false
+}

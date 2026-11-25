@@ -44,11 +44,49 @@ async function requestJson(url, options = {}) {
   return data
 }
 let sessionRequest = null
+let healthRequest = null
+
+// The same editors use an explicit store; PostgreSQL failures never fall back
+// to Snowflake and cannot accidentally save into the original catalog.
+export function configurationApi(source) {
+  if (source !== 'POSTGRES') return api
+  const prefix = '/api/orchestration/task-engine/configuration'
+  return {
+    orchestrationConfiguration: () => requestJson(prefix),
+    orchestrationCatalog: () => requestJson(prefix),
+    saveOrchestrationConfiguration: body => requestJson(prefix, { method: 'PUT', body: JSON.stringify(body) }),
+    saveOrchestrationJobOrder: body => requestJson(`${prefix}/job-order`, { method: 'PUT', body: JSON.stringify(body) }),
+    updateOrchestrationWorkflow: (id, body) => requestJson(`${prefix}/workflows/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    updateOrchestrationJob: (id, body) => requestJson(`${prefix}/jobs/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) })
+  }
+}
 
 export const api = {
   batchControl: params => requestJson(`/api/lim/batch-control?${new URLSearchParams(params)}`, { timeoutMs: 120000 }),
   batchControlGroups: params => requestJson(`/api/lim/batch-control/groups?${new URLSearchParams(params)}`, { timeoutMs: 120000 }),
-  health: () => requestJson('/api/health'),
+  health: () => {
+    if (!healthRequest) {
+      healthRequest = requestJson('/api/health', { timeoutMs: 10000 })
+        .finally(() => { healthRequest = null })
+    }
+    return healthRequest
+  },
+  taskPrototypeStatus: () => requestJson('/api/orchestration/task-engine'),
+  taskPrototypeSchedules: () => requestJson('/api/orchestration/task-engine/schedules'),
+  taskPrototypeGraphs: () => requestJson('/api/orchestration/task-engine/graphs'),
+  postgresMonitor: () => requestJson('/api/orchestration/task-engine/monitor'),
+  postgresLog: (workflowId, runId, jobId = '') => requestJson(`/api/orchestration/task-engine/workflows/${encodeURIComponent(workflowId)}/runs/${encodeURIComponent(runId)}/log?${new URLSearchParams({ jobId })}`),
+  startTaskPrototypeGraph: (id, body) => requestJson(`/api/orchestration/task-engine/graphs/${id}/runs`, { method: 'POST', body: JSON.stringify(body) }),
+  taskPrototypeCascade: id => requestJson(`/api/orchestration/task-engine/cascades/${id}`),
+  cancelTaskPrototypeCascade: id => requestJson(`/api/orchestration/task-engine/cascades/${id}/cancel`, { method: 'POST' }),
+  retryTaskPrototypeDispatch: id => requestJson(`/api/orchestration/task-engine/cascades/${id}/retry-dispatch`, { method: 'POST' }),
+  recoverTaskPrototypeRun: id => requestJson(`/api/orchestration/task-engine/runs/${id}/recover`, { method: 'POST' }),
+  retryTaskPrototypeWorkflow: (cascadeId, nodeId) => requestJson(`/api/orchestration/task-engine/cascades/${cascadeId}/nodes/${nodeId}/retry`, { method: 'POST' }),
+  createTaskPrototypeSchedule: body => requestJson('/api/orchestration/task-engine/schedules', { method: 'POST', body: JSON.stringify(body) }),
+  updateTaskPrototypeSchedule: (id, body) => requestJson(`/api/orchestration/task-engine/schedules/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  taskPrototypeRun: id => requestJson(`/api/orchestration/task-engine/runs/${id}`),
+  submitTaskPrototype: plan => requestJson('/api/orchestration/task-engine/runs', { method: 'POST', body: JSON.stringify(plan) }),
+  cancelTaskPrototype: id => requestJson(`/api/orchestration/task-engine/runs/${id}/cancel`, { method: 'POST' }),
   activity: () => requestJson('/api/activity', { timeoutMs: 5000 }),
   adminActivityLog: (limit = 500) => requestJson(`/api/admin/activity-log?limit=${limit}`, { timeoutMs: 5000 }),
   dashboard: () => requestJson('/api/dashboard', { timeoutMs: 8000 }),
@@ -86,7 +124,7 @@ export const api = {
   previewOrchestrationJobDag: jobId => requestJson(`/api/orchestration/jobs/${encodeURIComponent(jobId)}/dag-preview`, { method: 'POST', timeoutMs: 210000 }),
   orchestrationDag: (workflowId, runId = '', jobId = '') => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/dag?${new URLSearchParams({ ...(runId ? { runId } : {}), ...(jobId ? { jobId } : {}) })}`),
   orchestrationLog: (workflowId, runId, jobId = '') => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/log?${new URLSearchParams({ runId, ...(jobId ? { jobId } : {}) })}`),
-  orchestrationHistory: (filters, refresh = false) => requestJson(`/api/orchestration/history?${new URLSearchParams({ ...filters, ...(refresh ? { refresh: '1' } : {}) })}`, { timeoutMs: 120000 }),
+  orchestrationHistory: (filters, refresh = false, source = 'SNOWFLAKE') => requestJson(`/api/orchestration/${source === 'POSTGRES' ? 'task-engine/' : ''}history?${new URLSearchParams({ ...filters, ...(refresh ? { refresh: '1' } : {}) })}`, { timeoutMs: 120000 }),
   orchestrationRuns: workflowId => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/runs`),
   runOrchestrationWorkflow: (workflowId, payload) => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/runs`, { method: 'POST', body: JSON.stringify(payload), timeoutMs: 120000 }),
   reconcileOrchestrationWorkflow: workflowId => requestJson(`/api/orchestration/workflows/${encodeURIComponent(workflowId)}/reconcile`, { method: 'POST' }),
@@ -180,7 +218,7 @@ export function createKumoEventSource(onEvent, onError, options = {}) {
   }
 
   const clientId = kumoClientId()
-  const params = new URLSearchParams({ clientId, page: options.page || 'Unknown page' })
+  const params = new URLSearchParams({ clientId, page: options.page || 'Unknown page', orchestrationSource: options.orchestrationSource || 'SNOWFLAKE' })
   const source = new window.EventSource(`/api/events?${params.toString()}`)
   const eventTypes = ['connected', 'heartbeat', 'orchestration_update', 'realtime_state', 'monitor_update', 'monitor_refresh_started', 'monitor_refresh_completed', 'workflow_run_requested', 'workflow_run_queued', 'workflow_run_status', 'workflow_run_failed']
   function handle(event) {

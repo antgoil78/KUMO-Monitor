@@ -1,0 +1,8 @@
+{
+  "environment": "DEV",
+  "since": "2026-11-23 11:16:47.526306+00:00",
+  "successful_dispatches": 10,
+  "failed_dispatches": 0,
+  "max_duration_ms": 126442,
+  "dispatches_yielding_near_time_budget": 1
+}

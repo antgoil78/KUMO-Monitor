@@ -104,6 +104,28 @@ class ParallelEngineTests(unittest.TestCase):
         self.assertEqual(result['runId'], RUN)
         self.assertEqual(result['status'], 'QUEUED')
 
+    def test_stream_confirmation_never_launches_or_reconciles_from_python(self):
+        engine.orchestration_cache.reserve(WORKFLOW, self.payload, 'TEST')
+        with patch.object(config, 'STREAM_DISPATCH_ENABLED', True), \
+             patch.object(sf, 'service_query_result', return_value=self.query('request')), \
+             patch.object(sf, 'query_one_service') as query:
+            engine.complete_submission(WORKFLOW, self.payload['requestId'], 'native-query-id')
+        query.assert_not_called()
+        self.assertEqual(engine.orchestration_cache.get()['submissions'][0]['status'], 'QUEUED')
+
+    def test_stream_health_reads_task_stream_and_unconsumed_delivery_status_only(self):
+        with patch.object(config, 'STREAM_DISPATCH_ENABLED', True), \
+             patch.object(sf, 'query_service', side_effect=[
+                 [dict(name='TASK_ORCH_DISPATCH', state='started')],
+                 [dict(name='ORCH_DISPATCH_EVENTS_STREAM', stale=False)]]), \
+             patch.object(sf, 'query_one_service', return_value=dict(PENDING=1, WAITING=2, ERRORS=3)) as query, \
+             patch.object(sf, 'execute_service') as execute:
+            result = engine.dispatch_status()
+        self.assertTrue(result['ready'])
+        self.assertEqual((result['pending'], result['waiting'], result['errors']), (1, 2, 3))
+        self.assertIn('LEFT JOIN', query.call_args.args[0])
+        execute.assert_not_called()
+
     def test_terminal_idempotent_request_does_not_restart_workflow(self):
         result = self.query('request'); result['RESULT'].update(status='SUCCESS', reused=True)
         engine.orchestration_cache.reserve(WORKFLOW, self.payload, 'TEST')

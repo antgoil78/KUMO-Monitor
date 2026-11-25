@@ -16,6 +16,7 @@
   "exclude_task_patterns": [
     "^TMP_WF_",
     "^TMP_ORCH_WF_",
+    "^TMP_PG_ORCH_",
     "^TASK_ORCH_WF_",
     "^TASK_WF_[0-9A-F]{8}(?:_SCHEDULER)?$",
     "^X_TMP_WF_",

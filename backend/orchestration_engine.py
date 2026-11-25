@@ -68,6 +68,32 @@ def installed():
     return bool(row.get('N'))
 
 
+def dispatch_status():
+    """User-demand diagnostics only; never a recovery or polling mechanism."""
+    if not config.STREAM_DISPATCH_ENABLED:
+        return dict(mode='DIRECT')
+    tasks = sf.query_service(f"SHOW TASKS LIKE 'TASK_ORCH_DISPATCH' IN SCHEMA {config.APP_NAMESPACE}",
+                             use_warehouse=False)
+    task = next(({str(k).lower(): v for k, v in row.items()} for row in tasks
+                 if str(row.get('name') or row.get('NAME')) == 'TASK_ORCH_DISPATCH'), {})
+    streams = sf.query_service(f"SHOW STREAMS LIKE 'ORCH_DISPATCH_EVENTS_STREAM' IN SCHEMA {config.METADATA_NAMESPACE}",
+                               use_warehouse=False)
+    stream = next(({str(k).lower(): v for k, v in row.items()} for row in streams
+                   if str(row.get('name') or row.get('NAME')) == 'ORCH_DISPATCH_EVENTS_STREAM'), {})
+    counts = sf.query_one_service("SELECT COUNT_IF(COALESCE(d.STATE,'NEW') IN ('NEW','READY')) AS PENDING, "
+                                 "COUNT_IF(d.STATE='WAITING') AS WAITING, COUNT_IF(d.STATE='ERROR') AS ERRORS, "
+                                 "MIN(IFF(COALESCE(d.STATE,'NEW') IN ('NEW','READY','ERROR'),e.CREATED_AT,NULL)) AS OLDEST_PENDING_AT "
+                                 f"FROM {config.METADATA_NAMESPACE}.ORCH_DISPATCH_EVENTS e "
+                                 f"LEFT JOIN {config.METADATA_NAMESPACE}.ORCH_DISPATCH_DELIVERIES d ON d.EVENT_ID=e.EVENT_ID "
+                                 "WHERE e.KIND<>'WAKE'")
+    state = str(task.get('state') or 'MISSING').upper()
+    stale = str(stream.get('stale', 'true')).lower() == 'true'
+    return dict(mode='STREAM', taskState=state, streamStale=stale,
+                ready=state == 'STARTED' and not stale and bool(stream),
+                pending=int(counts.get('PENDING') or 0), waiting=int(counts.get('WAITING') or 0),
+                errors=int(counts.get('ERRORS') or 0), oldestPendingAt=counts.get('OLDEST_PENDING_AT'))
+
+
 def require_runs():
     if config.USE_MOCK or not sf.is_configured() or not config.ORCHESTRATION_RUNS_ENABLED:
         raise PermissionError('Workflow execution controls are not enabled in this environment.')
@@ -113,8 +139,8 @@ def request_run(workflow_id, payload, requested_by):
 
 
 def complete_submission(workflow_id, request_id, query_id):
-    # Snowflake already owns the preparation query. The static maintenance task
-    # can start its committed run even if this process restarts before completion.
+    # Confirmation updates the UI only in stream-enabled environments. The
+    # execution and its launch signal already commit together in Snowflake.
     attempt = 0
     while True:
         realtime_broker.wait_for_clients()
@@ -139,7 +165,7 @@ def complete_submission(workflow_id, request_id, query_id):
         orchestration_cache.update_submission(workflow_id, request_id, status='FAILED', error=str(exc))
         return
     orchestration_cache.update_submission(workflow_id, request_id, status=result['status'], runId=result['runId'], error=None)
-    if result['status'] in ('QUEUED', 'CLAIMED'):
+    if not config.STREAM_DISPATCH_ENABLED and result['status'] in ('QUEUED', 'CLAIMED'):
         realtime_broker.wait_for_clients()
         try:
             call_result(f'CALL {config.APP_NAMESPACE}.SP_ORCH_START_RUN(%(run)s)', {'run': result['runId']})
@@ -155,8 +181,10 @@ def engine_status():
         with sf.connection_scope(force_service=True) if not config.USE_MOCK and sf.is_configured() else nullcontext():
             ready = installed()
             count = sf.query_one_service(f'SELECT COUNT(*) AS N FROM {config.T_ORCHESTRATION_WORKFLOW}').get('N', 0) if ready else 0
+            dispatch = dispatch_status() if ready else None
         return jsonify(ok=True, installed=ready, runsEnabled=ready and config.ORCHESTRATION_RUNS_ENABLED,
                        preparedWorkflows=count, schedulingEnabled=ready and config.ORCHESTRATION_RUNS_ENABLED, taskLifecycle='TEMPORARY',
+                       dispatch=dispatch,
                        message='Manual execution is enabled.' if ready and config.ORCHESTRATION_RUNS_ENABLED else
                        'Parallel engine prepared; manual execution is disabled.' if ready else 'Parallel engine has not been prepared.')
     except Exception as exc:

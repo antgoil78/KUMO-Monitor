@@ -49,6 +49,16 @@ test('ticks adapt to pixels and support subsecond detail without an unbounded gr
 
 const pointRun = (executionId, start, end, extra = {}) => ({ workflowId: 'workflow', runId: 'root', executionId, status: 'SUCCESS', start: new Date(start).toISOString(), end: new Date(end).toISOString(), ...extra })
 
+test('workflow joins connect and highlight both exact parent executions', () => {
+  const parents = ['WF2', 'WF3'].map((id, index) => pointRun(id, 100, 200 + index * 100, { workflowId: id, runId: id, jobs: [] }))
+  const child = pointRun('WF4', 400, 500, { workflowId: 'WF4', runId: 'WF4', parentExecutionId: 'WF2', parentExecutionIds: ['WF2', 'WF3'], jobs: [] })
+  const runs = [...parents, child]
+  const rows = runs.map(run => ({ key: run.workflowId, workflow: {}, runs: [run] }))
+  const layout = timelineLayout(rows, runs, 0, 1000, 1000, 800)
+  assert.deepEqual(layout.connections.map(link => link.id).sort(), ['WF2:WF4', 'WF3:WF4'])
+  assert.deepEqual([...connectedExecutions(runs, child)].sort(), ['WF2:WF2', 'WF3:WF3', 'WF4:WF4'])
+})
+
 test('relationships use exact parent IDs and exclude omitted jobs across repeated executions', () => {
   const first = pointRun('root', 100, 600, { jobs: [
     pointRun('a', 100, 200, { position: 1, parentExecutionId: 'root', selected: true }),

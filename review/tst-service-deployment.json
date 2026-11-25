@@ -1,0 +1,93 @@
+{
+  "service": "KUMO_TST.MONITOR_APP.KUMO_MONITOR_SERVICE",
+  "image_uri": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-223-1-78ba4fcb2425",
+  "image_tag": "build-223-1-78ba4fcb2425",
+  "image_digest": "sha256:0e55ac180107ed56389ed71f664677a928c60d054dc8603fa60118eb3823fc8d",
+  "source_commit": "78ba4fcb2425148981185db5ecabcfba96b4e40a",
+  "actions_run": "https://github.com/antgoil78/KUMO-Monitor/actions/runs/43196819232",
+  "manual_runs_enabled": true,
+  "alter_query_id": "01c85c11-030b-db32-0004-a4f2082d2f12",
+  "status": "VERIFIED",
+  "before_spec_digest": "e58008fef6cd0438dc8797dba02f3a4a0a4cc9960c7e68e646deff33223197ab",
+  "catalog_counts": {
+    "workflows": 15,
+    "jobs": 40,
+    "dependencies": 55
+  },
+  "catalog_validation_passed": true,
+  "card_enabled": true,
+  "old_history_and_checkpoints_preserved": true,
+  "business_schedules_enabled": false,
+  "business_jobs_executed": false,
+  "smoke_checks": {
+    "all_three_run_scopes": true,
+    "complete_job_states": true,
+    "temporary_task_cleanup": true,
+    "model_test_progress": true,
+    "fixtures_removed": true
+  },
+  "verified_at_utc": "2026-11-12T10:25:53.394780+00:00",
+  "after_spec_digest": "9aab1379e27ac7ed3788204916103ff3008470a2b61203ac0b9db4417f89ce76",
+  "native_service_settings_preserved": true,
+  "running_digest_matches_published_image": true,
+  "containers": [
+    {
+      "database_name": "KUMO_TST",
+      "schema_name": "MONITOR_APP",
+      "service_name": "KUMO_MONITOR_SERVICE",
+      "service_status": "RUNNING",
+      "instance_id": "0",
+      "instance_status": "READY",
+      "container_name": "monitor",
+      "status": "READY",
+      "message": "Running",
+      "image_name": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-223-1-78ba4fcb2425",
+      "image_digest": "sha256:0e55ac180107ed56389ed71f664677a928c60d054dc8603fa60118eb3823fc8d",
+      "restart_count": 0,
+      "start_time": "2026-11-12T10:25:39Z",
+      "last_exit_code": null,
+      "last_restart_time": null
+    }
+  ],
+  "endpoints": [
+    {
+      "name": "kumo-monitor-tst-ui",
+      "port": 5000,
+      "port_range": null,
+      "protocol": "HTTP",
+      "is_public": "true",
+      "ingress_url": "aoztue-vymkbmw-ov24823.snowflakecomputing.app"
+    }
+  ],
+  "before_image": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-220-1-883a5a4e91af",
+  "service_spec_changes": [
+    "image",
+    "sha256",
+    "KUMO_ORCHESTRATION_RUNS_ENABLED=true",
+    "KUMO_AUTO_RESUME_TASKS=false"
+  ],
+  "tst_environment_routing_preserved": true,
+  "readiness_probe": {
+    "port": 5000,
+    "path": "/api/health",
+    "status": "READY"
+  },
+  "migration_result": "review/tst-orchestration-cutover.json",
+  "business_schedules_paused": [
+    "LOAD RAW DAILY",
+    "MAINTENANCE - CLEANUP"
+  ],
+  "known_gaps": [
+    "Automatic downstream workflow dispatch",
+    "Completion notification parity"
+  ],
+  "validation": {
+    "cutover_unit_tests_passed": 5,
+    "existing_migration_unit_tests_passed": 14,
+    "live_three_run_scopes_passed": true,
+    "live_job_states_and_task_cleanup_passed": true,
+    "live_progress_queries_passed": true,
+    "test_fixtures_removed": true
+  },
+  "dev_service_changed": false
+}

@@ -39,7 +39,7 @@ function query(sql,b) {
     resolved:{execSql:'SELECT 1'},sqlCondition:input.conditionFalse?'SELECT FALSE':null}}];
   if(sql.startsWith('SELECT COUNT(*)')) return [{N:0}];
   if(sql==='SELECT FALSE') return [{VALUE:false}];
-  if(sql.includes('SP_ORCH_DISPATCH_DEPENDENCIES')) {
+  if(sql.includes('SP_ORCH_DISPATCH_DEPENDENCIES') || sql.includes('SP_ORCH_EVALUATE_DEPENDENCIES')) {
     calls.push({id:b[0],rootStatus:root.STATUS,jobStatus:job.STATUS});
     if(input.evaluationFails) throw Error('Evaluator unavailable');
     return [{REPORT:{ok:true,evaluated:true,children:[{workflowName:'child',eligible:root.STATUS==='SUCCESS'}]}}];
@@ -52,6 +52,7 @@ function query(sql,b) {
   if(sql.startsWith('SELECT EXECUTION_ID') && sql.includes('RESULT:dependencyEvaluation IS NULL'))
     return [job,root].filter(row=>!row.RESULT?.dependencyEvaluation).map(row=>({EXECUTION_ID:row.EXECUTION_ID}));
   if(sql.startsWith('SELECT EXECUTION_ID')) return [];
+  if(sql.startsWith('INSERT INTO') && sql.includes('ORCH_DISPATCH_EVENTS')) return [];
   if(sql.startsWith('UPDATE')) {
     if(sql.includes('SET STATUS = IFF')) {
       root.STATUS=input.recovery?(input.cancelled?'CANCELLED':'FAILED'):'FAILED';job.STATUS=root.STATUS;return [];

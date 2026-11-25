@@ -1,0 +1,85 @@
+{
+  "service": "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE",
+  "pull_request": "https://github.com/antgoil78/KUMO-Monitor/pull/15",
+  "source_commit": "59e984ae6ba1bb3fef2ab2ccff589d9357f6fe5b",
+  "actions_run": "https://github.com/antgoil78/KUMO-Monitor/actions/runs/44326165756",
+  "image_uri": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-228-1-59e984ae6ba1",
+  "image_digest": "sha256:d7d00784cdee441df395789fde1cc44e697bab6937c67068917f44c7893709d7",
+  "image_tag": "build-228-1-59e984ae6ba1",
+  "before_image": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-227-1-9b51357fc395",
+  "before_spec_digest": "c51c3fd7f5ca1d98a66e36998a54eaff2a1375c2576ffd23e344d64fea721d33",
+  "status": "VERIFIED",
+  "only_image_and_digest_changed": true,
+  "tst_changed": false,
+  "alter_query_id": "01c87ecf-020b-f008-0004-a4f2086a2916",
+  "verified_at_utc": "2026-11-18T14:40:07.263576+00:00",
+  "after_spec_digest": "74cb82c2ca28391f3fca9ea0241dcf5f5931202745879344557a2776008468c2",
+  "containers": [
+    {
+      "database_name": "KUMO_DEV",
+      "schema_name": "MONITOR_APP",
+      "service_name": "KUMO_MONITOR_SERVICE",
+      "service_status": "RUNNING",
+      "instance_id": "0",
+      "instance_status": "READY",
+      "container_name": "monitor",
+      "status": "READY",
+      "message": "Running",
+      "image_name": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-228-1-59e984ae6ba1",
+      "image_digest": "sha256:d7d00784cdee441df395789fde1cc44e697bab6937c67068917f44c7893709d7",
+      "restart_count": 0,
+      "start_time": "2026-11-18T14:39:42Z",
+      "last_exit_code": null,
+      "last_restart_time": null
+    }
+  ],
+  "endpoints": [
+    {
+      "name": "kumo-monitor-dev-ui",
+      "port": 5000,
+      "port_range": null,
+      "protocol": "HTTP",
+      "is_public": "true",
+      "ingress_url": "mnztue-vymkbmw-ov24823.snowflakecomputing.app"
+    }
+  ],
+  "service_settings_preserved": true,
+  "running_digest_matches_published_image": true,
+  "http_smoke": {
+    "ok": true,
+    "image": "build-228-1-59e984ae6ba1",
+    "environment": "DEV",
+    "live_notification_admin": true,
+    "current_catalog": true,
+    "enabled_failure_rules": 13,
+    "notification_editor_shipped": true,
+    "workflow_notification_patch_route": true,
+    "requests_read_only": true
+  },
+  "http_smoke_job": "KUMO_DEV.MONITOR_APP.JOB_NOTIFICATION_RELEASE_CHECK_6B2A6A2946E5",
+  "service_settings": {
+    "owner": "KUMO_ADMIN",
+    "compute_pool": "KUMO_SHARED_MONITOR_POOL",
+    "min_instances": 1,
+    "max_instances": 1,
+    "min_ready_instances": 1,
+    "auto_resume": "true",
+    "auto_suspend_secs": 0,
+    "query_warehouse": "KUMO_ELT_GEN_1",
+    "external_access_integrations": null
+  },
+  "readiness_probe": {
+    "port": 5000,
+    "path": "/api/health",
+    "status": "READY"
+  },
+  "validation": {
+    "pr_ci": "passed",
+    "backend_tests": 278,
+    "frontend_tests": 33,
+    "browser_tests": 15,
+    "frontend_build": "passed",
+    "compose": "passed"
+  },
+  "http_smoke_job_removed": true
+}

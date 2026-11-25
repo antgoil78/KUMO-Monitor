@@ -136,6 +136,41 @@ class MigrationTests(unittest.TestCase):
                      [self.rule('ready'),self.rule('ready')]):
             with self.assertRaises(ValueError): self.plan(rows)
 
+    def test_tst_enables_every_workflow_including_unmapped_and_previously_disabled(self):
+        workflows=[dict(WORKFLOW_ID=WF,WORKFLOW_NAME='LOAD',MIGRATED_FROM_WORKFLOW_ID='ready'),
+                   dict(WORKFLOW_ID='new',WORKFLOW_NAME='NEW')]
+        plan=build_plan(workflows,[],[],[self.rule('ready',group='')],
+                        environment='TST',failure_group='TST Ops',email_integration='TST_MAIL')
+        self.assertEqual(len(plan),2)
+        for item in plan:
+            self.assertTrue(item['values']['ON_FAIL_EMAIL'])
+            self.assertFalse(item['values']['ON_SUCCESS_EMAIL'])
+            self.assertEqual(item['values']['FAIL_GROUP'],'TST Ops')
+            self.assertEqual(item['values']['EMAIL_INTEGRATION'],'TST_MAIL')
+            self.assertEqual(item['values']['ENVIRONMENT'],'TST')
+
+    def test_tst_preserves_current_destinations_and_success_rules_then_is_idempotent(self):
+        row={**self.rule(WF,group='Custom'), 'ON_FAIL_EMAIL':False,
+             'ON_SUCCESS_EMAIL':True,'SUCCESS_GROUP':'Success','ENVIRONMENT':'DEV','EMAIL_INTEGRATION':'CUSTOM_MAIL'}
+        plan=self.plan([row,self.rule('ready'),self.rule('dbt',group='Other')],
+                       environment='TST',failure_group='TST Ops',email_integration='TST_MAIL')
+        values=plan[0]['values']
+        self.assertEqual(values['FAIL_GROUP'],'Custom')
+        self.assertEqual(values['EMAIL_INTEGRATION'],'CUSTOM_MAIL')
+        self.assertEqual(values['SUCCESS_GROUP'],'Success')
+        self.assertTrue(values['ON_SUCCESS_EMAIL'])
+        self.assertTrue(values['ON_FAIL_EMAIL'])
+        self.assertEqual(values['ENVIRONMENT'],'TST')
+        self.assertEqual(self.plan([values],environment='TST',failure_group='TST Ops',email_integration='TST_MAIL'),[])
+
+    def test_tst_requires_explicit_targets_and_dev_cannot_expand_coverage(self):
+        for args in (dict(environment='OTHER'),dict(environment='TST'),
+                     dict(environment='TST',failure_group='Ops'),
+                     dict(environment='TST',failure_group='Ops',email_integration='MAIL;DROP'),
+                     dict(environment='DEV',failure_group='Ops',email_integration='MAIL')):
+            with self.subTest(args=args),self.assertRaises(ValueError):
+                self.plan([],**args)
+
 
 class NotificationApiTests(unittest.TestCase):
     def setUp(self):

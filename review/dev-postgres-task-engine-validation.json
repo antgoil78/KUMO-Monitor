@@ -1,0 +1,43 @@
+{
+  "ok": true,
+  "date": "2026-11-23",
+  "branch": "feat/postgres-task-engine",
+  "rollback": {
+    "commit": "aacf516",
+    "branch": "checkpoint/stream-queue-20261123",
+    "tag": "rollback/stream-queue-20261123",
+    "localOnly": true
+  },
+  "validation": {
+    "backendTests": 348,
+    "prototypeTests": 30,
+    "ddlExportTestsAfterExclusionUpdate": 4,
+    "browserFixtureTests": 3,
+    "frontendBuild": "passed",
+    "liveReport": "dev-postgres-task-engine-20261123-133049.json",
+    "localUi": {
+      "url": "http://localhost:3000/?page=orchestrationMonitor",
+      "runId": "426961ca-0097-4f04-8b1e-64f74da5cd77",
+      "jobs": 2,
+      "outcomes": [
+        "SUCCESS",
+        "SUCCESS"
+      ],
+      "cleanup": [
+        "DONE",
+        "DONE"
+      ],
+      "pageErrors": []
+    },
+    "postgresAfterComposeRestart": "healthy; durable trial history retained",
+    "outstandingPrototypeAttempts": 0,
+    "pendingCleanup": 0
+  },
+  "scope": {
+    "existingBusinessWorkflows": "still use existing stream engine",
+    "jobs": "disposable SELECT expressions only",
+    "spcsDeployment": false,
+    "tstChanges": false,
+    "pushed": false
+  }
+}

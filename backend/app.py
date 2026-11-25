@@ -18,22 +18,6 @@ load_dotenv()
 import config
 import snowflake_client as sf
 
-# Hydrate routing before importing blueprints/repositories that build SQL.
-if not config.USE_MOCK and sf.is_configured():
-    if not os.getenv("KUMO_ENVIRONMENT_TABLE", "").strip():
-        raise ValueError("Set KUMO_ENVIRONMENT_TABLE to the full environment parameter table path")
-    config.apply_environment(sf.query(
-        f"SELECT PARAMETER_KEY, CASE WHEN IS_SECRET THEN NULL ELSE PARAMETER_VALUE END AS PARAMETER_VALUE, "
-        f"VALUE_TYPE, ACTIVE_FL, IS_SECRET FROM {config.PARAMETER_STORE} "
-        "WHERE INSTANCE_NAME = 'DEFAULT' AND PARAMETER_GROUP = 'ENVIRONMENT'",
-        force_service=True, include_context=False,
-    ))
-    config.apply_orchestration_settings(sf.query(
-        f"SELECT PARAMETER_KEY, PARAMETER_VALUE, VALUE_TYPE, ACTIVE_FL FROM {config.PARAMETER_STORE} "
-        "WHERE INSTANCE_NAME = 'DEFAULT' AND PARAMETER_GROUP = 'ORCHESTRATION'",
-        force_service=True, include_context=False,
-    ))
-
 from notification_admin import notification_admin_bp
 from file_ingestion import file_ingestion_bp
 from batch_control import batch_control_bp
@@ -47,6 +31,58 @@ from orchestration_cache import orchestration_cache
 from mock_data import MOCK_HISTORY, MOCK_MONITOR
 from realtime_events import realtime_broker
 from activity_log import activity_journal
+from task_engine.integration import PREFIX as TASK_PROTOTYPE_PREFIX, register as register_task_prototype
+
+# Warehouse access follows actual user demand, never process startup or probes.
+_environment_lock = Lock()
+_environment_ready = bool(config.USE_MOCK or not sf.is_configured())
+_environment_error = None
+_environment_retry_at = 0.0
+
+
+def _ensure_environment():
+    global _environment_ready, _environment_error, _environment_retry_at
+    if _environment_ready:
+        return
+    with _environment_lock:
+        if _environment_ready:
+            return
+        if time.monotonic() < _environment_retry_at:
+            raise RuntimeError(_environment_error or 'Environment configuration is unavailable')
+        try:
+            if not os.getenv("KUMO_ENVIRONMENT_TABLE", "").strip():
+                raise ValueError("Set KUMO_ENVIRONMENT_TABLE to the full environment parameter table path")
+            config.apply_environment(sf.query(
+                f"SELECT PARAMETER_KEY, CASE WHEN IS_SECRET THEN NULL ELSE PARAMETER_VALUE END AS PARAMETER_VALUE, "
+                f"VALUE_TYPE, ACTIVE_FL, IS_SECRET FROM {config.PARAMETER_STORE} "
+                "WHERE INSTANCE_NAME = 'DEFAULT' AND PARAMETER_GROUP = 'ENVIRONMENT'",
+                force_service=True, include_context=False,
+            ))
+            config.apply_orchestration_settings(sf.query(
+                f"SELECT PARAMETER_KEY, PARAMETER_VALUE, VALUE_TYPE, ACTIVE_FL FROM {config.PARAMETER_STORE} "
+                "WHERE INSTANCE_NAME = 'DEFAULT' AND PARAMETER_GROUP = 'ORCHESTRATION'",
+                force_service=True, include_context=False,
+            ))
+            # These modules cache identifiers/SQL at import. Rebind them once,
+            # under the bootstrap lock, before any reader or data route starts.
+            import batch_control, file_ingestion, notification_admin
+            batch_control.configure_routes()
+            file_ingestion.configure_routes()
+            notification_admin.configure_routes()
+            _environment_ready, _environment_error = True, None
+        except Exception as exc:
+            _environment_error = str(exc)
+            _environment_retry_at = time.monotonic() + 30
+            raise
+
+
+_CACHE_ONLY_PATHS = frozenset((
+    '/api/health', '/api/activity', '/api/session', '/api/dashboard',
+    '/api/snowflake/ping', '/api/users/active', '/api/admin/activity-log',
+    '/api/admin/activity-log/download', '/api/orchestration/monitor',
+    '/api/settings/refresh',
+))
+
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 
@@ -1306,7 +1342,8 @@ def _ensure_background_services():
     # Re-read the broker count under one lifecycle lock: concurrent connects and
     # disconnects can deliver their notifications in a different order.
     with _background_services_lock:
-        count = realtime_broker.client_count()
+        # PostgreSQL observers must not activate Snowflake catalog/status readers.
+        count = sum(client.get('orchestrationSource')!='POSTGRES' for client in realtime_broker.client_details())
         status_coordinator.set_client_count(count)
         if count:
             monitor_cache.start()
@@ -1335,6 +1372,19 @@ def bind_request_context():
     if request.path.startswith("/api/") and request.path != "/api/health":
         _renew_activity_lease()
     g.activity_log_id = None
+    if (config.POSTGRES_ENGINE_PRIMARY and request.method not in ('GET','HEAD','OPTIONS')
+            and request.path.startswith('/api/orchestration/')
+            and not request.path.startswith(TASK_PROTOTYPE_PREFIX)):
+        return _json_error('PostgreSQL owns DEV orchestration. Reload the Workflow page.',410)
+    if (request.path.startswith('/api/') and request.path not in _CACHE_ONLY_PATHS
+            and not request.path.startswith(TASK_PROTOTYPE_PREFIX)
+            and not (request.path=='/api/events' and (config.POSTGRES_ENGINE_PRIMARY or request.args.get('orchestrationSource')=='POSTGRES')
+                     and os.getenv('KUMO_TASK_PROTOTYPE_ENABLED','').lower()=='true' and config.ENVIRONMENT=='DEV')
+            and request.method != 'OPTIONS'):
+        try:
+            _ensure_environment()
+        except Exception as exc:
+            return _json_error('Environment configuration is unavailable: ' + str(exc), 503)
     if config.LEGACY_ENGINE_RETIRED and (
         (request.method not in ('GET', 'HEAD', 'OPTIONS') and (
             request.path.startswith('/api/workflows/') or request.path.startswith('/api/dependencies/')
@@ -1361,7 +1411,8 @@ def bind_request_context():
 
 @app.after_request
 def log_response(response):
-    if (request.path.startswith('/api/orchestration/') and request.method in ('POST', 'PUT', 'PATCH', 'DELETE')
+    if (request.path.startswith('/api/orchestration/') and not request.path.startswith(TASK_PROTOTYPE_PREFIX)
+            and request.method in ('POST', 'PUT', 'PATCH', 'DELETE')
             and response.status_code < 400 and not request.path.endswith('/dag-preview')):
         orchestration_cache.refresh_async(metadata=not request.path.endswith('/runs'))
     if request.path.startswith("/api/"):
@@ -1459,6 +1510,11 @@ def _health_snapshot():
         "environment": config.ENVIRONMENT or None,
         "deploymentEnvironment": config.DEPLOYMENT_ENVIRONMENT or None,
         "legacyEngineRetired": config.LEGACY_ENGINE_RETIRED,
+        "postgresEnginePrimary": config.POSTGRES_ENGINE_PRIMARY,
+        "environmentReady": _environment_ready,
+        "environmentError": _environment_error,
+        "streamDispatchEnabled": config.STREAM_DISPATCH_ENABLED,
+        "taskPrototypeEnabled": os.getenv('KUMO_TASK_PROTOTYPE_ENABLED','').lower() == 'true' and config.ENVIRONMENT == 'DEV',
         "objectContext": {
             "environment": config.ENVIRONMENT or None,
             "environmentTable": config.T_APPLICATION_PARAMETERS,
@@ -2119,6 +2175,7 @@ def events():
     client_metadata = {
         "clientId": str(request.args.get("clientId") or "")[:100],
         "page": str(request.args.get("page") or "Unknown page")[:100],
+        "orchestrationSource": 'POSTGRES' if (config.POSTGRES_ENGINE_PRIMARY or request.args.get('orchestrationSource')=='POSTGRES') and os.getenv('KUMO_TASK_PROTOTYPE_ENABLED','').lower()=='true' and config.ENVIRONMENT=='DEV' else 'SNOWFLAKE',
         "ipAddress": _client_ip(),
         "userName": actor.get("userName") or "UNKNOWN",
         "displayName": actor.get("displayName") or actor.get("userName") or "Unknown user",
@@ -2832,3 +2889,6 @@ def not_found(error):
     if request.path.startswith("/api/"):
         return jsonify({"ok": False, "error": "API route not found", "path": request.path}), 404
     return send_from_directory(app.static_folder, "index.html")
+
+
+register_task_prototype(app, _request_activity_actor)

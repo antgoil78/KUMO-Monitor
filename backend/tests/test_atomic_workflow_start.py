@@ -132,9 +132,12 @@ const queries=[];
 function query(sql,b){
  queries.push({sql,binds:b});
  if(sql.includes('SP_GET_ENVIRONMENT'))return [{ENV:{DATABASE:'KUMO_DEV',META_SCHEMA:'MONITOR_META',MONITOR_APP_SCHEMA:'MONITOR_APP'}}];
+ if(sql.includes('CURRENT_TASK_NAME'))return [{NAME:'KUMO_DEV.MONITOR_APP.TASK_ORCH_DISPATCH'}];
  if(sql.startsWith('SELECT * FROM'))return [root];
  if(sql.startsWith('SELECT EXECUTION_ID'))return input.sameWorkflowRunning?[{EXECUTION_ID:'other'}]:[];
  if(sql.startsWith('SELECT STATUS'))return [{STATUS:root.STATUS}];
+ if(sql.startsWith('SHOW TASKS')&&sql.includes('_FINALIZER'))return [{name:task.split('.')[2]+'_FINALIZER',definition:"INSERT INTO KUMO_DEV.MONITOR_META.ORCH_DISPATCH_EVENTS (KIND, RUN_ID, TASK_RUN_GROUP_ID) SELECT 'FINISH', '"+run+"', SYSTEM$TASK_RUNTIME_INFO('CURRENT_TASK_GRAPH_RUN_GROUP_ID')",schedule:null,task_relations:{FinalizedRootTask:task}}];
+ if(sql.startsWith('ALTER TASK'))return [];
  if(sql.startsWith('SHOW TASKS'))return [{name:task.split('.')[2],definition:"CALL KUMO_DEV.MONITOR_APP.SP_ORCH_EXECUTE_WORKFLOW('"+run+"')",schedule:null,comment:'KUMO parallel orchestration v2: temporary workflow run '+run}];
  if(sql.startsWith('UPDATE')||sql.startsWith('CREATE TASK')||sql.startsWith('EXECUTE TASK'))return [];
  throw Error('Unexpected SQL: '+sql);
@@ -149,7 +152,7 @@ process.stdout.write(JSON.stringify({result,queries,root}));
 
 class LauncherTests(unittest.TestCase):
     def launch(self, **options):
-        source=procedure_parts((ROOT/'snowflake/ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_START_RUN.sql').read_text())[1]
+        source=procedure_parts((ROOT/'snowflake/ddl/KUMO_DEV/MONITOR_APP/procedures/SP_ORCH_LAUNCH_RUN.sql').read_text())[1]
         output=subprocess.run(['node','-e',LAUNCHER],input=json.dumps(dict(source=source,**options)),text=True,capture_output=True,check=True)
         return json.loads(output.stdout)
 

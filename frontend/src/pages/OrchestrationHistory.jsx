@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
+import ConfigurationSource, { useConfigurationSource } from '../components/ConfigurationSource.jsx'
 import ActionIcon from '../components/ActionIcon.jsx'
 import HierarchyToggle from '../components/HierarchyToggle.jsx'
 import LoadingState from '../components/LoadingState.jsx'
@@ -10,7 +11,7 @@ import { elapsedDuration, formatDateTimeSeconds } from '../utils/time.js'
 import './OrchestrationMonitor.css'
 import './OrchestrationHistory.css'
 
-const statuses = ['RUNNING', 'QUEUED', 'CLAIMED', 'SUCCESS', 'WARNING', 'FAILED', 'SKIPPED', 'CANCELLED']
+const statuses = ['WAITING', 'BLOCKED', 'UNKNOWN', 'RUNNING', 'QUEUED', 'CLAIMED', 'SUCCESS', 'WARNING', 'FAILED', 'SKIPPED', 'CANCELLED']
 
 function liveRun(run, live, loadedAt) {
   if (Date.parse(live?.generatedAt || '') < Date.parse(loadedAt || '')) return run
@@ -27,6 +28,8 @@ function RowStatus({ status }) {
 }
 
 export default function OrchestrationHistory({ workflowId = '', workflowName = '', jobId = '', jobName = '', historyState = null, onNavigate, returnContext = null }) {
+  const selection = useConfigurationSource()
+  const { source } = selection
   const [filters, setFilters] = useState(() => historyState?.filters || { workflowId, jobId, search: '', status: '', days: 30, limit: 25 })
   const [search, setSearch] = useState(filters.search)
   const [cursors, setCursors] = useState(historyState?.cursors || [''])
@@ -39,19 +42,20 @@ export default function OrchestrationHistory({ workflowId = '', workflowName = '
   const [now, setNow] = useState(Date.now())
   const [copied, setCopied] = useState('')
   const force = useRef(false)
-  const { data: live } = useOrchestrationMonitor()
+  const { data: live } = useOrchestrationMonitor(!!source, source)
   const query = useMemo(() => ({ ...filters, cursor: cursors[page] || '' }), [filters, cursors, page])
 
   useEffect(() => {
+    if (!source) return undefined
     let active = true
     setLoading(true); setError(''); setResult(null)
-    api.orchestrationHistory(query, force.current)
+    api.orchestrationHistory(query, force.current, source)
       .then(value => { if (active) setResult(value) })
       .catch(failure => { if (active) setError(failure.message) })
       .finally(() => { if (active) setLoading(false) })
     force.current = false
     return () => { active = false }
-  }, [query, reload])
+  }, [query, reload, source])
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
@@ -85,7 +89,7 @@ export default function OrchestrationHistory({ workflowId = '', workflowName = '
       workflowName: job ? `${run.workflowName} / ${job.name}` : run.workflowName,
       workflowType: job?.type || (run.jobs.some(row => row.type === 'DBT') ? 'DBT' : 'SQL'),
       runId: run.runId, returnPage: 'orchestrationHistory', returnContext: historyContext,
-      orchestration: { runId: run.runId, jobId: job?.jobId || '', historical: true } })
+      orchestration: { runId: run.runId, jobId: job?.jobId || '', historical: true, source } })
   }
   async function copy(id) {
     try { await navigator.clipboard.writeText(id); setCopied(id) }
@@ -95,7 +99,7 @@ export default function OrchestrationHistory({ workflowId = '', workflowName = '
     const id = job?.executionId || run.runId
     const name = job?.name || run.workflowName
     return <div className="oh-actions">
-      {(!job || job.type === 'DBT') && <button type="button" className="om-shortcut" disabled={Boolean(job && !job.start)} title={job && !job.start ? 'No started job execution' : 'DAG Run'} aria-label={`DAG Run for ${name}`} onClick={() => open(run, job, 'dag')}><ActionIcon name="dag" /></button>}
+      {source !== 'POSTGRES' && (!job || job.type === 'DBT') && <button type="button" className="om-shortcut" disabled={Boolean(job && !job.start)} title={job && !job.start ? 'No started job execution' : 'DAG Run'} aria-label={`DAG Run for ${name}`} onClick={() => open(run, job, 'dag')}><ActionIcon name="dag" /></button>}
       <button type="button" className="om-shortcut" title="Execution log" aria-label={`Log for ${name}`} onClick={() => open(run, job, 'log')}><ActionIcon name="log" /></button>
       <button type="button" className="om-shortcut" title={copied === id ? 'Copied' : 'Copy execution ID'} aria-label={`Copy execution ID for ${name}`} onClick={() => copy(id)}><ActionIcon name="copy" /></button>
     </div>
@@ -104,6 +108,7 @@ export default function OrchestrationHistory({ workflowId = '', workflowName = '
 
   return <section className="page om-page oh-page">
     <PageHeader breadcrumb="Workflow / History" title="Execution History" subtitle="Workflow runs and their jobs, in execution order." actions={<div className="oh-header-actions"><button className="button" type="button" onClick={() => onNavigate('orchestrationMonitor', returnContext || {})}>← Monitor</button><button className="button" type="button" disabled={loading} onClick={() => { force.current = true; setReload(value => value + 1) }}>{loading ? 'Loading…' : '↻ Refresh'}</button></div>} />
+    <ConfigurationSource selection={selection} disabled={loading} />
     {error && <div className="alert error" role="alert">{error}</div>}
     <form className="oh-filters" onSubmit={event => { event.preventDefault(); change({ search: search.trim() }) }}>
       <div className="oh-search"><input className="search-input" type="search" aria-label="Search execution history" placeholder="Workflow, job, requester or run ID…" value={search} onChange={event => setSearch(event.target.value)} /><button className="button" type="submit">Search</button></div>

@@ -1,0 +1,9 @@
+{
+  "environment": "DEV",
+  "checks": [
+    "JOB_ONLY and FROM_JOB preserve frozen job scope",
+    "Catalog edits after admission do not change queued execution commands or selection"
+  ],
+  "verified_retained_fixture": "STREAM_MODES_9d902872f8",
+  "tst_changed": false
+}

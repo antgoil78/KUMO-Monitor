@@ -1,0 +1,69 @@
+{
+  "ok": true,
+  "scope": "Local DEV PostgreSQL source in the maintained Monitor",
+  "catalog": {
+    "workflows": 26,
+    "jobs": 51,
+    "compatibleSqlWorkflows": 10,
+    "workflowsWithUnsupportedExecutionFeatures": 16,
+    "unassignedJobs": 0
+  },
+  "backend": {
+    "fullSuitePassed": 433,
+    "finalFocusedSuitePassed": 88,
+    "finalCatalogSuitePassed": 14,
+    "finalIdentityAndHistoryChecksPassed": 2,
+    "uniqueTestsPassed": 434
+  },
+  "browser": {
+    "fullSuitePassed": 41,
+    "finalMonitorConfigurationSuitePassed": 15,
+    "finalTimelineSuitePassed": 7,
+    "uniqueTestsPassed": 42
+  },
+  "frontend": {
+    "unitTestsPassed": 34,
+    "buildPassed": true
+  },
+  "coverage": [
+    "Complete catalog promotion retains PostgreSQL WF1 edits and original source IDs",
+    "Unsupported dbt/business SQL stays visible without executable tasks",
+    "Independent execution groups and overlap rejection across graph edits",
+    "Stable execution identities, immutable history and bounded keyset pagination",
+    "Queued versus native running timestamps",
+    "Cancellation and ambiguous admission request identity",
+    "Revision conflicts and SQL validation",
+    "Both parent execution links in timeline joins",
+    "PostgreSQL presence does not start Snowflake background readers",
+    "Worker finishes admitted work without browser clients",
+    "Missing feature discovery does not fall back to Snowflake"
+  ],
+  "localUiReport": "review/dev-postgres-monitor-local-ui.json",
+  "catalogReport": "review/dev-postgres-monitor-catalog.json",
+  "idle": {
+    "connectedBrowsers": 2,
+    "seconds": 90,
+    "postgresMonitorReads": 98,
+    "apiSnowflakeDatabaseEvents": 0,
+    "workerSnowflakeConnections": 0,
+    "legacySnowflakeReadersEnabled": false
+  },
+  "sourceDefinitionReads": "Three explicit DEV application configuration reads; captured data reused for promotion",
+  "workflowExecutionsStartedByThisChange": 0,
+  "postgresGraphSchedulesEnabled": 0,
+  "limitations": [
+    "New worker executes validated SELECT-expression SQL only",
+    "Run on a root starts its whole connected group; current WF1 group includes WF1\u2013WF10",
+    "DBT, business SQL, SQL conditions, job gates/hooks and graph schedules require later execution support",
+    "Definition creation/deletion and job assignment additions/removals remain unavailable",
+    "Snowflake source retains its existing engine and history; its observers can still activate its readers"
+  ],
+  "deployment": {
+    "localOnly": true,
+    "pushed": false,
+    "spcsUpdated": false,
+    "tstChanged": false,
+    "snowflakeStaticDdlChanged": false,
+    "snowflakeConfigurationChanged": false
+  }
+}

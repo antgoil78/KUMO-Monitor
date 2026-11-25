@@ -98,6 +98,7 @@ tasks.forEach(function(task) {
         if (!run || ['QUEUED','CLAIMED','RUNNING'].indexOf(run.STATUS) >= 0) return;
         var expected = app + '.TMP_ORCH_WF_' + run.WORKFLOW_ID.replace(/-/g, '_').toUpperCase() + '_' + run.EXECUTION_ID.replace(/-/g, '_').toUpperCase();
         if (address !== expected) throw new Error('Unexpected cleanup task address');
+        rows('DROP TASK IF EXISTS ' + address + '_FINALIZER');
         rows('DROP TASK IF EXISTS ' + address); removed.push(address);
     } catch (error) { errors.push(String(error.message || error)); }
 });
@@ -109,5 +110,21 @@ queued.forEach(function(run) {
     try { rows('CALL ' + app + '.SP_ORCH_START_RUN(?)', [run.EXECUTION_ID]); }
     catch (error) { errors.push(String(error.message || error)); }
 });
+// A finalizer can be lost after terminal status was committed. Recover missing
+// dependency signals for this engine's admitted runs, including individual jobs,
+// without relying on a native task that cleanup may already have removed.
+rows('INSERT INTO ' + ns + ".ORCH_DISPATCH_EVENTS (KIND, RUN_ID) SELECT 'DEPENDENCY', e.EXECUTION_ID FROM " + log +
+    " e WHERE (?::VARCHAR IS NULL OR e.WORKFLOW_ID = ?) AND e.ENDED_AT IS NOT NULL " +
+    'AND EXISTS (SELECT 1 FROM ' + ns + ".ORCH_DISPATCH_EVENTS a WHERE a.KIND = 'LAUNCH' AND a.RUN_ID = e.WORKFLOW_RUN_ID) " +
+    'AND NOT EXISTS (SELECT 1 FROM ' + ns + ".ORCH_DISPATCH_EVENTS d WHERE d.KIND = 'DEPENDENCY' AND d.RUN_ID = e.EXECUTION_ID) " +
+    'AND (e.JOB_ID IS NOT NULL OR NOT EXISTS (SELECT 1 FROM ' + ns +
+    ".ORCH_DISPATCH_EVENTS f WHERE f.KIND = 'FINISH' AND f.RUN_ID = e.EXECUTION_ID))", [workflowId, workflowId]);
+// Explicit recovery is user-driven, never called by a scheduled maintenance task.
+// Re-arm unfinished deliveries only in the requested scope.
+rows('UPDATE ' + ns + ".ORCH_DISPATCH_DELIVERIES SET STATE = 'READY', ATTEMPTS = 0, LAST_ERROR = NULL, UPDATED_AT = SYSDATE() " +
+    "WHERE (STATE = 'ERROR' OR (STATE = 'READY' AND ATTEMPTS >= 3) OR (KIND = 'LAUNCH' AND STATE = 'WAITING')) AND RUN_ID IN (SELECT EXECUTION_ID FROM " + log +
+    " WHERE " + filter + ')', [workflowId, workflowId]);
+rows('INSERT INTO ' + ns + ".ORCH_DISPATCH_EVENTS (KIND) SELECT 'WAKE' WHERE EXISTS (SELECT 1 FROM " + ns +
+    ".ORCH_DISPATCH_DELIVERIES WHERE STATE = 'READY' AND ATTEMPTS < 3)");
 return {ok: true, recoveredRunIds: recovered, removedTasks: removed, errors: errors};
 $$;

@@ -1,0 +1,58 @@
+{
+  "ok": true,
+  "scope": "DEV WF1\u2013WF4 PostgreSQL master configuration",
+  "backend": {
+    "fullSuite": 416,
+    "fullSuitePassed": true,
+    "finalFocusedConfigurationTests": 14,
+    "finalFocusedPassed": true,
+    "log": "/tmp/kumo-postgres-configuration-backend.log"
+  },
+  "browser": {
+    "uniqueTestsPassed": 16,
+    "newConfigurationTestsPassed": 7,
+    "existingRegressionTestsPassed": 9,
+    "finalConfigurationLog": "/tmp/kumo-postgres-configuration-browser-final.log"
+  },
+  "frontend": {
+    "unitTestsPassed": 33,
+    "buildPassed": true
+  },
+  "coverage": [
+    "Atomic configuration and revision audit",
+    "Concurrent editors and stale revisions",
+    "Cycle, duplicate and external parent rejection",
+    "SQL and timeout validation",
+    "Disabled workflow and SQL job admission",
+    "Disabled middle job prerequisite preservation",
+    "Accepted execution snapshot isolation",
+    "Backend instance replacement and migration repeatability",
+    "Parent failure, cancellation and dependency recovery",
+    "Configuration reads/writes and idle dependency checks make no Snowflake connection",
+    "PostgreSQL errors never redirect configuration saves to Snowflake"
+  ],
+  "localUiReport": "review/dev-postgres-master-configuration-local-ui.json",
+  "limitations": [
+    "WF1\u2013WF4 only; existing Snowflake engine remains a separate execution scope",
+    "SQL expression allowlist and timeouts 1\u2013300 seconds",
+    "No creating/deleting definitions or adding/removing job assignments in this stage",
+    "Graph scheduling, external triggers, SQL conditions and non-SQL jobs deferred"
+  ],
+  "deployment": {
+    "localOnly": true,
+    "snowflakeCatalogOrStaticDdlChanged": false,
+    "tstChanged": false,
+    "spcsUpdated": false,
+    "pushed": false
+  },
+  "nativeExecution": {
+    "report": "review/dev-postgres-master-configuration-native.json",
+    "state": "SUCCESS",
+    "graphRevision": 5,
+    "successfulWorkflows": 4,
+    "siblingsOverlap": true,
+    "joinAfterBothParents": true,
+    "acknowledgedSubmissions": 4,
+    "allCleanupDone": true
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "environment": "DEV",
+  "check": "All 105 duplicate events plus original launch durably DONE",
+  "SOURCE_EVENTS": 106,
+  "DONE_EVENTS": 106
+}

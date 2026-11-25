@@ -26,14 +26,16 @@ function mergeLive(history, workflows, generatedAt) {
     const key = `${workflow.WORKFLOW_ID}:${current.runId}`
     const previous = runs.get(key)
     if (previous && Date.parse(generatedAt || '') > Date.parse(workflow.liveGeneratedAt || '')) continue
-    const jobs = workflow.jobs.filter(job => job.run.runId === current.runId && job.run.executionId).map(job => ({ ...job.run, jobId: job.JOB_ID, name: job.JOB_NAME, type: job.JOB_TYPE, layer: job.JOB_LAYER }))
+    // The table shows actual execution jobs; the timeline also includes requests
+    // that have not started, using their own frozen request snapshot.
+    const jobs = (workflow.source === 'POSTGRES' && current.jobs) || workflow.jobs.filter(job => job.run.runId === current.runId && job.run.executionId).map(job => ({ ...job.run, jobId: job.JOB_ID, name: job.JOB_NAME, type: job.JOB_TYPE, layer: job.JOB_LAYER }))
     runs.set(key, { ...previous, ...current, workflowId: workflow.WORKFLOW_ID, workflowName: previous?.workflowName || workflow.WORKFLOW_NAME,
       jobs: previous ? previous.jobs.map(job => ({ ...job, ...jobs.find(live => live.executionId === job.executionId) })).concat(jobs.filter(job => !previous.jobs.some(old => old.executionId === job.executionId))) : jobs })
   }
   return [...runs.values()]
 }
 
-export default function OrchestrationTimeline({ workflows, expanded, onToggle, now, liveGeneratedAt, refreshVersion, onNavigate, initialState = null, monitorFilters, onWorkflowControls }) {
+export default function OrchestrationTimeline({ source = 'SNOWFLAKE', workflows, expanded, onToggle, now, liveGeneratedAt, refreshVersion, onNavigate, initialState = null, monitorFilters, onWorkflowControls }) {
   const [span, setSpan] = useState(initialState?.span ?? 604800000)
   const [live, setLive] = useState(initialState?.live ?? true)
   const [anchor, setAnchor] = useState(initialState?.anchor ?? now)
@@ -100,20 +102,20 @@ export default function OrchestrationTimeline({ workflows, expanded, onToggle, n
     if (viewportKey.current !== key) { history.current = null; setResult(null); viewportKey.current = key }
     const previous = history.current
     const timer = window.setTimeout(() => {
-      refreshTimelineHistory(api.orchestrationHistory, query, previous, force, () => active && generation.current === id)
+      refreshTimelineHistory((params, force) => api.orchestrationHistory(params, force, source), query, previous, force, () => active && generation.current === id)
         .then(value => { if (active && value) setResult(value) })
         .catch(failure => { if (active) setError(failure.message) })
         .finally(() => { if (active && generation.current === id) { nextLiveRead.current = Date.now() + 15000; setLoading(false) } })
     }, 180)
     return () => { active = false; generation.current++; window.clearTimeout(timer) }
-  }, [query, refreshVersion, retry])
+  }, [query, refreshVersion, retry, source])
 
   async function loadMore() {
     if (loading || loadingMore || !result?.nextCursor) return
     const id = generation.current
     setLoadingMore(true); setError('')
     try {
-      const page = await api.orchestrationHistory({ ...query, cursor: result.nextCursor })
+      const page = await api.orchestrationHistory({ ...query, cursor: result.nextCursor }, false, source)
       if (generation.current === id) setResult(current => {
         const runs = new Map(current.runs.map(run => [`${run.workflowId}:${run.runId}`, run]))
         page.runs.forEach(run => runs.set(`${run.workflowId}:${run.runId}`, run))
@@ -199,6 +201,7 @@ export default function OrchestrationTimeline({ workflows, expanded, onToggle, n
   function navigate(run, kind) {
     const returnContext = { monitorState: { ...monitorFilters, view: 'timeline', timeline: { span, live, anchor: end, zoomSpan, compact, showRelations, selection, history: result,
       center: start + (viewport.current.scrollLeft + visibleWidth / 2) / trackWidth * span } } }
+    if (kind === 'dag' && source === 'POSTGRES') kind = 'log'
     if (kind === 'edit' || kind === 'dependencies') {
       onNavigate(kind === 'edit' ? 'orchestrationWorkflow' : 'orchestrationDependencies', { workflowId: run.workflowId,
         workflowName: workflows.find(workflow => workflow.WORKFLOW_ID === run.workflowId)?.WORKFLOW_NAME || run.workflowName,
@@ -208,7 +211,7 @@ export default function OrchestrationTimeline({ workflows, expanded, onToggle, n
     const context = { workflowId: run.workflowId, workflowName: run.name ? `${run.workflowName} / ${run.name}` : run.workflowName, runId: run.runId, returnPage: 'orchestrationMonitor', returnContext }
     onNavigate(kind === 'history' ? 'orchestrationHistory' : kind === 'dag' ? 'dag' : 'executionLog', kind === 'history'
       ? { ...context, workflowName: run.workflowName, jobId: run.jobId || '', jobName: run.name || '' }
-      : { ...context, orchestration: { runId: run.runId, jobId: kind === 'dag' && run.type !== 'DBT' ? '' : run.jobId || '', historical: !activeTimelineStatuses.has(run.status) } })
+      : { ...context, orchestration: { runId: run.runId, jobId: kind === 'dag' && run.type !== 'DBT' ? '' : run.jobId || '', historical: !activeTimelineStatuses.has(run.status), source } })
   }
   async function copyId(value, label) {
     try { await navigator.clipboard.writeText(value); setCopyNotice(`${label} copied.`) }
@@ -291,9 +294,9 @@ export default function OrchestrationTimeline({ workflows, expanded, onToggle, n
       <div className="ot-selection-title"><StatusBadge status={selected.status} /><span>{selected.jobId ? `${selected.type || 'Job'} execution` : 'Workflow execution'} · {preciseDuration(selected, now)}</span></div>
       <div className="ot-run-actions">
         <button type="button" className="button" onClick={() => navigate(selected, 'log')}><ActionIcon name="log" />View log</button>
-        <button type="button" className="button" disabled={selected.type === 'DBT' && !selected.start} title={selected.type === 'DBT' && !selected.start ? 'This dbt job has not started yet.' : 'Open the DAG for this execution'} onClick={() => navigate(selected, 'dag')}><ActionIcon name="dag" />{selected.jobId && selected.type !== 'DBT' ? 'Show workflow DAG run' : 'Show DAG run'}</button>
+        <button type="button" className="button" disabled={source === 'POSTGRES' || (selected.type === 'DBT' && !selected.start)} title={source === 'POSTGRES' ? 'Use timeline relationships and the execution log for this PostgreSQL run.' : selected.type === 'DBT' && !selected.start ? 'This dbt job has not started yet.' : 'Open the DAG for this execution'} onClick={() => navigate(selected, 'dag')}><ActionIcon name="dag" />{selected.jobId && selected.type !== 'DBT' ? 'Show workflow DAG run' : 'Show DAG run'}</button>
         <button type="button" className="button" onClick={() => navigate(selected, 'history')}><ActionIcon name="history" />Execution history</button>
-        {selected.type === 'DBT' && <button type="button" className="button" disabled={!selectedJob} title="Preview the current saved job definition" onClick={() => { setPreview({ id: selected.jobId, name: selectedJob.JOB_NAME }); setActionsOpen(false) }}><ActionIcon name="dag" />Preview DAG</button>}
+        {source !== 'POSTGRES' && selected.type === 'DBT' && <button type="button" className="button" disabled={!selectedJob} title="Preview the current saved job definition" onClick={() => { setPreview({ id: selected.jobId, name: selectedJob.JOB_NAME }); setActionsOpen(false) }}><ActionIcon name="dag" />Preview DAG</button>}
         <button type="button" className="button" onClick={() => { setActionsOpen(false); focusRun(selected) }}>Zoom to execution</button>
         <button type="button" className="button" onClick={() => { setShowRelations(true); setActionsOpen(false) }}>Trace relations</button>
       </div>

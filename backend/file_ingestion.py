@@ -58,6 +58,16 @@ _reload_jobs = {}
 _RELOAD_JOB_TTL_SECONDS = 24 * 60 * 60
 
 
+def configure_routes():
+    global ADMIN_PKG_GROUP_SOURCE, RAW_LIM_META_TABLE, SET_READY_LATEST_TABLE, SET_READY_HISTORY_TABLE
+    global LIM_DATABASE, LIM_ROLE, LIM_STAGE
+    ADMIN_PKG_GROUP_SOURCE = config.T_RAW_LIM_PKG_GROUP_SOURCE
+    RAW_LIM_META_TABLE = config.RAW_LIM_META_TABLE
+    SET_READY_LATEST_TABLE = config.SET_READY_LATEST_TABLE
+    SET_READY_HISTORY_TABLE = config.SET_READY_HISTORY_TABLE
+    LIM_DATABASE, LIM_ROLE, LIM_STAGE = config.LIM_DATABASE, config.LIM_ROLE, config.LIM_STAGE
+
+
 def _json_error(error, status=500):
     return jsonify({"ok": False, "error": str(error or "Unexpected error")}), status
 

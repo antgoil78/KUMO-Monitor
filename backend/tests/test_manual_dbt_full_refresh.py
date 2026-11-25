@@ -32,6 +32,7 @@ function query(sql, binds) {
     const definition=JSON.parse(binds[0]); resolved.push(definition);
     return [{SP_RESOLVE_WORKFLOW_COMMAND:{ok:true,execSql:'SELECT 1',fullRefresh:definition.fullRefresh}}];
   }
+  if (sql.startsWith('INSERT INTO') && sql.includes('ORCH_DISPATCH_EVENTS')) return [];
   if (sql.startsWith('INSERT INTO')) {snapshots.push(JSON.parse(binds[binds.length===10 ? 9 : 13])); if(binds.length!==10)jobParents.push(binds[4]); return [];}
   if (['BEGIN','COMMIT','ROLLBACK'].includes(sql) || sql.startsWith('UPDATE')) return [];
   throw Error('Unexpected query: '+sql);

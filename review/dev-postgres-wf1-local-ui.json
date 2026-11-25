@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "copiedWorkflows": 4,
+  "allOutcomes": "SUCCESS",
+  "wf4ParentRules": "WF2 (fresh), WF3",
+  "selectedRun": "440ffd91-af91-442b-9dd3-7618c7ede02c",
+  "jobOutcome": "SUCCESS",
+  "taskCleanup": "DONE",
+  "pageErrors": [],
+  "mutations": false
+}

@@ -1,0 +1,56 @@
+{
+  "ok": true,
+  "workflows": 26,
+  "jobs": 51,
+  "connectedClients": 2,
+  "idleWindow": {
+    "beganAt": "2026-11-23T14:22:45.788Z",
+    "endedAt": "2026-11-23T14:24:17.557Z",
+    "seconds": 90,
+    "snowflakeDatabaseEvents": 0
+  },
+  "backendCaches": {
+    "dashboard": {
+      "enabled": false,
+      "lastDurationMs": null,
+      "lastError": null,
+      "lastRefreshAt": null,
+      "payloadBytes": 230,
+      "refreshCount": 0,
+      "refreshSeconds": 30,
+      "refreshing": false,
+      "threadAlive": false
+    },
+    "monitor": {
+      "enabled": false,
+      "lastDurationMs": null,
+      "lastError": null,
+      "lastPhaseMs": {},
+      "lastRefreshAgeSeconds": null,
+      "lastRefreshAt": null,
+      "payloadBytes": 2746,
+      "refreshCount": 0,
+      "refreshSeconds": 5,
+      "refreshing": false,
+      "source": "starting",
+      "threadAlive": false,
+      "workflowCount": 5
+    },
+    "orchestration": {
+      "enabled": false,
+      "idleRefreshSeconds": 5,
+      "lastDurationMs": null,
+      "lastError": null,
+      "lastRefreshAt": "2026-11-23T14:21:29.097163+00:00",
+      "pendingSubmissions": 0,
+      "refreshSeconds": 5,
+      "threadAlive": false
+    }
+  },
+  "postgresMonitorRequests": 98,
+  "snowflakeOrchestrationEndpointRequests": 0,
+  "historyAndLogOpened": true,
+  "pageErrors": [],
+  "screenshot": "/tmp/kumo-postgres-monitor.png",
+  "workerSnowflakeConnectionsSinceRestart": 0
+}

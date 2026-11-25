@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "date": "2026-11-23",
+  "branch": "feat/postgres-task-engine",
+  "rollback": {
+    "queueTag": "rollback/stream-queue-20261123",
+    "queueCommit": "aacf516",
+    "beforeSchedulesCommit": "ede0a44"
+  },
+  "checks": {
+    "backendTests": 376,
+    "prototypeTests": 58,
+    "browserTests": 7,
+    "frontendBuild": "passed",
+    "liveScheduleReport": "dev-postgres-schedules-20261123-135257.json",
+    "liveUiReport": "dev-postgres-schedules-local-ui.json",
+    "incrementalPostgresMigration": "002_schedules.sql",
+    "schedulerHealth": "HEALTHY",
+    "enabledTrialSchedules": 0,
+    "outstandingAttempts": 0,
+    "pendingCleanup": 0
+  },
+  "scope": {
+    "jobs": "Disposable SELECT examples only",
+    "businessSchedulesMigrated": false,
+    "spcsDeployment": false,
+    "tstChanges": false,
+    "pushed": false
+  }
+}

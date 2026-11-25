@@ -45,7 +45,7 @@ function evaluateDependencies(executionId) {
     }
     var report;
     try {
-        report = object(first(rows('CALL ' + app + '.SP_ORCH_DISPATCH_DEPENDENCIES(?)', [executionId])[0]));
+        report = object(first(rows('CALL ' + app + '.SP_ORCH_EVALUATE_DEPENDENCIES(?)', [executionId])[0]));
         if (!report || report.ok !== true) throw new Error(report && report.error || 'Invalid eligibility response');
         (report.errors || []).forEach(function(error) { dependencyWarnings.push('Dependency dispatch: ' + JSON.stringify(error)); });
     } catch (error) {
@@ -67,16 +67,11 @@ function updateJob(executionId, status, error, queryId, result) {
     execute('UPDATE ' + log + ' SET HEARTBEAT_AT = SYSDATE(), UPDATED_AT = SYSDATE() WHERE EXECUTION_ID = ? AND CLAIM_TOKEN = ?', [runId, claim]);
 }
 function finishTask() {
-    // A dropped running task completes its current invocation. Failure to clean
-    // up or launch the next request is repaired by the new housekeeping task.
-    var warnings = [];
-    try { if (temporary) execute('DROP TASK IF EXISTS ' + expectedTemporary); } catch (error) { warnings.push(String(error.message || error)); }
-    try {
-        var next = rows('SELECT EXECUTION_ID FROM ' + log + " WHERE WORKFLOW_ID = ? AND JOB_ID IS NULL AND STATUS IN ('QUEUED','CLAIMED') ORDER BY REQUESTED_AT, EXECUTION_ID LIMIT 1", [root.WORKFLOW_ID]);
-        if (next.length) rows('CALL ' + app + '.SP_ORCH_START_RUN(?)', [next[0].EXECUTION_ID]);
-    } catch (error) { warnings.push(String(error.message || error)); }
-    return warnings;
+    // Native finalization signals the dispatcher even if this invocation is killed.
+    // Keep the root task until its finalizer has published the completion event.
+    return [];
 }
+
 try {
     execute('BEGIN'); inTransaction = true;
     // Same lock/order as admission and configuration writers. Release it as

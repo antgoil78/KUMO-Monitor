@@ -1,0 +1,9 @@
+{
+  "environment": "DEV",
+  "checks": [
+    "parallel jobs overlap and a short job timeout does not cancel its longer sibling",
+    "native scheduler only admits, execution uses a separate task, and overlap does not queue another occurrence"
+  ],
+  "business_workflows_executed": false,
+  "tst_changed": false
+}

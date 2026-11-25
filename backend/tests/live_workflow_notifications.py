@@ -1,4 +1,4 @@
-"""Opt-in DEV notification SQL validation; a disposable sender never sends mail.
+"""Opt-in DEV/TST notification SQL validation; an isolated sender never sends mail.
 
 Run after apply_workflow_notifications.py --apply. A private transient execution
 table and procedure copies isolate all fixture mail from engine housekeeping.
@@ -18,8 +18,11 @@ from snowflake.connector import DictCursor
 META, APP = 'KUMO_DEV.MONITOR_META', 'KUMO_DEV.MONITOR_APP'
 
 
-def validate_engine(cursor):
+def validate_engine(cursor, environment='DEV'):
     """A disposable division-by-zero job checks the real completion hook."""
+    if environment not in ('DEV', 'TST'):
+        raise ValueError('Select DEV or TST explicitly')
+    META, APP = 'KUMO_' + environment + '.MONITOR_META', 'KUMO_' + environment + '.MONITOR_APP'
     workflow, job, request = (str(uuid.uuid4()) for _ in range(3))
     def query(sql, params=()):
         cursor.execute(sql, params)
@@ -69,7 +72,10 @@ def validate_engine(cursor):
         print('Removed disposable engine validation workflow/job/run',flush=True)
 
 
-def run():
+def run(environment='DEV', failure_group='KUMO_DEV', email_integration='MY_EMAIL_INT'):
+    if environment not in ('DEV', 'TST'):
+        raise ValueError('Select DEV or TST explicitly')
+    META, APP = 'KUMO_' + environment + '.MONITOR_META', 'KUMO_' + environment + '.MONITOR_APP'
     suffix = uuid.uuid4().hex.upper()
     workflow, run_id, job_id = (str(uuid.uuid4()) for _ in range(3))
     table = META + '.TMP_NOTIFY_VALIDATION_' + suffix
@@ -84,7 +90,7 @@ def run():
             result = next(iter(query('CALL ' + notifier + '(%s)', (run_id,))[0].values()))
             return json.loads(result) if isinstance(result, str) else result
         try:
-            cursor.execute("ALTER SESSION SET QUERY_TAG='KUMO_DEV_NOTIFICATION_VALIDATION'")
+            cursor.execute("ALTER SESSION SET QUERY_TAG='KUMO_" + environment + "_NOTIFICATION_VALIDATION'")
             query('CREATE TRANSIENT TABLE ' + table + ' LIKE ' + META + '.WORKFLOW_EXECUTION_LOG')
             ddl = query("SELECT GET_DDL('PROCEDURE',%s,TRUE) DDL", (APP + '.SP_ORCH_NOTIFY(VARCHAR)',))[0]['DDL']
             body = logical_body(ddl)
@@ -97,13 +103,13 @@ def run():
                 P_RUN_ID VARCHAR,P_SUBJECT_AREA VARCHAR,P_SOURCE_ID VARCHAR,P_PKG_GROUP_NAME VARCHAR,P_PHASE VARCHAR,
                 P_EVENT_TYPE VARCHAR,P_EVENT_DTTM TIMESTAMP_NTZ,P_ROWS_AFFECTED FLOAT,P_DETAILS_JSON VARIANT)
                 RETURNS VARCHAR LANGUAGE JAVASCRIPT EXECUTE AS OWNER AS $$
-                if (!P_TO || P_ENV !== 'DEV' || P_DETAILS_JSON.failed_jobs[0].ERROR_MESSAGE !== 'Validation failure') throw new Error('Invalid email payload');
+                if (!P_TO || P_ENV !== ''' + json.dumps(environment) + ''' || P_DETAILS_JSON.failed_jobs[0].ERROR_MESSAGE !== 'Validation failure') throw new Error('Invalid email payload');
                 snowflake.execute({sqlText: "UPDATE ''' + table + ''' SET RESULT=OBJECT_INSERT(COALESCE(RESULT,OBJECT_CONSTRUCT()),'senderCalls',COALESCE(RESULT:senderCalls::NUMBER,0)+1,TRUE) WHERE EXECUTION_ID=?",binds:[P_RUN_ID]});
                 return 'EMAIL_SENT'; $$''')
             # This identity exists only in the private log, never the engine log.
             query(f'''INSERT INTO {META}.WORKFLOW_NOTIFICATIONS
                 (WORKFLOW_ID,ON_FAIL_EMAIL,ON_SUCCESS_EMAIL,FAIL_GROUP,EMAIL_INTEGRATION,ENVIRONMENT)
-                VALUES(%s,TRUE,FALSE,'KUMO_DEV','MY_EMAIL_INT','DEV')''', (workflow,))
+                VALUES(%s,TRUE,FALSE,%s,%s,%s)''', (workflow,failure_group,email_integration,environment))
             snapshot = json.dumps(dict(workflow=dict(WORKFLOW_NAME='NOTIFICATION VALIDATION',WORKFLOW_GROUP='ENGINE_VALIDATION')))
             for execution_id,job,status in [(run_id,None,'FAILED'),(job_id,job_id,'FAILED')]:
                 query('INSERT INTO ' + table + '''(EXECUTION_ID,WORKFLOW_RUN_ID,WORKFLOW_ID,JOB_ID,REQUEST_ID,RUN_MODE,STATUS,
@@ -128,12 +134,15 @@ def run():
             query('DROP TABLE IF EXISTS ' + table)
             query(f'DELETE FROM {META}.WORKFLOW_NOTIFICATIONS WHERE WORKFLOW_ID=%s', (workflow,))
             print('Removed notification validation fixtures; no email was sent', flush=True)
-        validate_engine(cursor)
+        validate_engine(cursor, environment)
 
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run',action='store_true',required=True)
-    parser.parse_args()
-    run()
+    parser.add_argument('--environment',choices=('DEV','TST'),default='DEV')
+    parser.add_argument('--failure-group',default='KUMO_DEV')
+    parser.add_argument('--email-integration',default='MY_EMAIL_INT')
+    args=parser.parse_args()
+    run(args.environment,args.failure_group,args.email_integration)

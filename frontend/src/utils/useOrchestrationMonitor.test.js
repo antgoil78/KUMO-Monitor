@@ -29,3 +29,15 @@ test('parallel submission prepares every selected job together', () => {
   assert.equal(result.run.jobExecutionMode, 'PARALLEL')
   assert.deepEqual(result.jobs.map(job => job.run.status), ['SKIPPED', 'INITIATING', 'INITIATING'])
 })
+
+test('PostgreSQL submission updates State without replacing execution results', () => {
+  const workflow = { source: 'POSTGRES', WORKFLOW_ID: 'wf', run: { status: 'SUCCESS', runId: 'old' },
+    execution: { status: 'SUCCESS', runId: 'old', start: '2026-11-17T12:00:00Z' },
+    planning: { status: 'SCHEDULED', scheduled: true, waitingFor: [] },
+    jobs: [{ run: { status: 'SUCCESS' } }], progress: { percent: 100 } }
+  const result = applySubmission(workflow, [{ workflowId: 'wf', requestId: 'new', status: 'INITIATING' }])
+  assert.equal(result.planning.status, 'INITIATING')
+  assert.equal(result.planning.scheduled, true)
+  for (const key of ['run', 'execution', 'jobs', 'progress']) assert.equal(result[key], workflow[key])
+  assert.equal(result.canRun, false)
+})

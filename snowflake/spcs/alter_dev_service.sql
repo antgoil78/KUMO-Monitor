@@ -1,15 +1,14 @@
--- Executed for the DEV SPCS update on 12 November 2026 at the user's request.
--- GitHub Actions run: https://github.com/antgoil78/KUMO-Monitor/actions/runs/43186250190
--- Uses the verified published image and enables manual workflow requests in DEV.
--- Preserves all other live service settings.
+-- Executed for the DEV SPCS update on 18 November 2026 at the user's request.
+-- GitHub Actions run: https://github.com/antgoil78/KUMO-Monitor/actions/runs/44326165756
+-- Preserves all service settings; updates the monitor image and digest only.
 USE ROLE KUMO_ADMIN;
 
 ALTER SERVICE KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE FROM SPECIFICATION $$
 spec:
   containers:
   - name: monitor
-    image: vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-221-1-2b3985a0e307
-    sha256: '@sha256:a8dae89ee82d1ea85886370363f51262faaea6dbbb6abdde63eccae3bfc587cc'
+    image: vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-228-1-59e984ae6ba1
+    sha256: '@sha256:d7d00784cdee441df395789fde1cc44e697bab6937c67068917f44c7893709d7'
     env:
       KUMO_ENVIRONMENT_TABLE: KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS
       KUMO_ENV: DEV

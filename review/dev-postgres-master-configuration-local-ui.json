@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "initialRevision": 1,
+  "finalRevision": 5,
+  "workflowSaveReopenRestore": true,
+  "sqlJobSaveRestore": true,
+  "executionSettingsPreserved": true,
+  "parentFreshnessPreserved": true,
+  "configurationWrites": [
+    "/api/orchestration/task-engine/configuration/workflows/WF2",
+    "/api/orchestration/task-engine/configuration/workflows/WF2",
+    "/api/orchestration/task-engine/configuration/jobs/fbc88b96-a564-5644-8451-1c1dc58e51f0",
+    "/api/orchestration/task-engine/configuration/jobs/fbc88b96-a564-5644-8451-1c1dc58e51f0"
+  ],
+  "pageErrors": [],
+  "screenshot": "/tmp/kumo-postgres-master-configuration.png",
+  "globalShellRequestsStubbed": true
+}

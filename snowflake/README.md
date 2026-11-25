@@ -315,7 +315,8 @@ Credentials and table contents are not saved with the definitions.
 | `MONITOR_APP.SP_ORCH_EXECUTE_WORKFLOW` | Execute only that run's selected jobs in order |
 | `MONITOR_APP.SP_ORCH_RUN_SCHEDULED` | Snapshot and execute a full workflow inside its persistent scheduler |
 | `MONITOR_APP.SP_ORCH_RECONCILE` | Recover interrupted runs, clean temporary tasks, and advance queues |
-| `MONITOR_APP.TASK_ORCH_MAINTENANCE` | Run recovery/cleanup every minute, independently of browsers |
+| `MONITOR_APP.TASK_ORCH_DISPATCH` | DEV stream-triggered dispatch and finalization; no schedule |
+| `MONITOR_APP.TASK_ORCH_MAINTENANCE` | DEV manual recovery compatibility task; suspended, no schedule |
 
 An idle unscheduled workflow has no native task. Every manual request, including
 manual runs of a scheduled workflow, receives one
@@ -325,17 +326,17 @@ or execute unrelated jobs. Jobs never own tasks. The task is created on demand
 with automatic retries disabled and dropped after the workflow result is saved.
 [Snowflake permits a running task to finish when it is dropped](https://docs.snowflake.com/en/sql-reference/sql/drop-task).
 
-Scheduled workflows are the exception: their persistent
-`TASK_ORCH_WF_<workflow UUID>_SCHEDULER` calls the scheduled wrapper. Each occurrence
-snapshots all currently enabled jobs. A manual partial run creates a separate
-temporary task and does not alter the scheduled task. The deployment prepares
+In DEV stream dispatch, scheduled executions also receive temporary workflow
+and finalizer tasks. The persistent `TASK_ORCH_WF_<workflow UUID>_SCHEDULER` only
+snapshots/enqueues the due occurrence. TST retains its prior scheduled execution
+path until promotion. Manual partial runs never alter the scheduler. The deployment prepares
 configured schedulers suspended. The Monitor and Workflow editors now synchronize
 schedule changes directly with their native workflow scheduler.
 Activate or pause individual schedules explicitly through the new Monitor.
-The initial deployment still prepares schedulers suspended. The static housekeeping task is resumed
-by deployment and handles only requests already accepted into the new log.
-Generated workflow run/scheduler tasks are excluded from saved DDL; the static
-housekeeping definition is retained.
+The initial deployment prepares schedulers suspended. DEV stream dispatch runs
+only when its event stream changes; the compatibility maintenance task has no
+schedule and must never be resumed. Generated workflow/finalizer/scheduler tasks
+are excluded from saved DDL; static dispatcher definitions are retained.
 
 `WORKFLOW.TASK_NAME` stores only the optional persistent scheduler address.
 Temporary task addresses belong to their execution rows. The caller-rights
@@ -348,7 +349,7 @@ configured job, including explicitly skipped jobs, linked by `WORKFLOW_RUN_ID` a
 `QUEUED` is durable waiting work, `CLAIMED` reserves a workflow while its task
 is provisioned, and `RUNNING` begins when the native task claims the execution.
 Requests for the same workflow are serialized. A completed run launches the
-oldest waiting request; housekeeping resumes interrupted provisioning and queue
+oldest waiting request. DEV stream events resume provisioning and queue
 advancement. Repeated request IDs return the original run. Task creation is
 idempotent and checks the existing task body before issuing `EXECUTE TASK`.
 
@@ -703,7 +704,7 @@ The earlier provisioning and configuration-copy scripts are not an upgrade
 path for TST's populated, older catalog.
 
 The promotion must cover the current `WORKFLOW` and `JOB` definitions, the
-`DEPENDENCIES` parent chains, `WORKFLOW_EXECUTION_LOG`, all five `SP_ORCH_*`
+`DEPENDENCIES` parent chains, `WORKFLOW_EXECUTION_LOG`, the `SP_ORCH_*`
 engine procedures listed in `apply_parallel_engine.py`, and static
 `TASK_ORCH_MAINTENANCE`. Review the shared command resolver and environment
 helper against that release too. Preserve TST's environment parameters,
@@ -721,20 +722,69 @@ Archive the legacy objects with the same `X_` names used in DEV:
   in `MONITOR_APP`. Tasks and streams need the same guarded clone/drop
   treatment as DEV; native renames cover the queue and procedures.
 
-The DEV retirement script deliberately cannot target TST. Implement and review
-the TST cutover migration before applying these changes. Stop old admissions,
-drain old executions, and suspend the old tasks before archiving. Set TST's
+`python backend/migrations/deploy_tst_orchestration.py` performs a read-only
+preflight; `--apply` performs the reviewed TST cutover. It checks TST job commands
+against the approved DEV catalog and resolves them using TST parameters. It
+temporarily disables service auto-resume and suspends the old service/tasks,
+creates only the two missing engine tables, migrates the business catalog in
+one transaction, and installs the five approved engine procedures. Shared
+environment/resolver helpers must already match the DEV release. History,
+source definitions, environment parameters and package checkpoints are checked
+for preservation. A partial cutover requires review before rerunning.
+
+Legacy retirement reuses `retire_legacy_engine_dev.py` with the explicit
+`environment='TST'` argument. Its CLI defaults to DEV; `--environment TST`
+is required to change TST. Stop old admissions, drain old executions, and
+suspend the old tasks before archiving. Set TST's
 `ORCHESTRATION / LEGACY_ENGINE_RETIRED=true` only after the replacement engine
 and catalog are verified. Prepare generated schedulers suspended; activate
 only the schedules approved for TST after execution validation. Exclude these
 generated tasks from saved DDL.
 
 The reconciliation review records outstanding prerequisites: CARD's dbt files
-are missing from DEV. Completion emails are restored in DEV using the targeted
-notification migration below; their rollout to ACC remains separate. The DEV
-dependency dispatcher supports downstream execution. Resolve outstanding prerequisites
+are missing from DEV. Completion emails use the targeted notification migration
+below in DEV and TST/ACC. The DEV dependency dispatcher now supports downstream
+execution; promote its procedure changes explicitly when upgrading TST. Resolve these
 before treating the new engine as a replacement for TST's scheduled pipeline.
-The current DEV reconciliation and release do not change TST objects.
+The TST migration leaves business schedules disabled and prepares the two
+previously active schedulers suspended. Engine housekeeping runs independently
+of the app. The service remains suspended until its approved image and digest
+are selected using `snowflake/spcs/alter_tst_service.sql`. Restore its original
+native `AUTO_RESUME` setting, retain TST routing, disable legacy task auto-resume,
+and enable manual Run controls only when requested. No business workloads are
+started by deployment. Validate the new engine with disposable SELECT runs:
+`python backend/tests/live_execution_states.py --environment TST`.
+
+## Incremental TST workflow engine promotion
+
+For TST installations already using the new engine, use the targeted upgrade
+instead of rerunning the catalog cutover:
+
+```bash
+python backend/migrations/promote_workflow_rules_to_tst.py
+python backend/migrations/promote_workflow_rules_to_tst.py --apply
+```
+
+Preflight checks TST routing, idle executions/native tasks, object ownership,
+known previous definitions and the merged release definitions. Apply pauses
+the TST service and its started engine tasks, adds `JOB_EXECUTION_MODE` and
+`PARENT_MUST_BE_NEWER`, and installs only changed procedures and the relation
+view. Existing workflow DEP rules gain freshness on first installation.
+Workflows default to sequential jobs. Existing catalog columns, environment
+parameters, grants and schedule definitions are preserved; no DEV test data or
+execution history is copied.
+
+The report at `review/tst-workflow-rules-objects.json` records the original app
+and task states. The service and tasks remain paused until the approved image
+is selected and the service passes readiness. Restore the original auto-resume
+setting and only the tasks that were started before deployment. A failed
+upgrade remains paused for review; retain its report when recovering.
+The opt-in smoke check uses disposable SELECT jobs without schedules or
+downstream triggers:
+
+```bash
+python backend/tests/live_workflow_job_execution.py --run --environment TST
+```
 
 ## DEV retirement of the old execution engine
 
@@ -746,7 +796,8 @@ execution tasks, nine procedure overloads, the old run queue, and its stream.
 Tables/procedures use native renames. Tasks and the stream use clone/drop because
 Snowflake does not support their renaming; the clones retain definitions, grants,
 and the stream offset, and tasks remain suspended. Old native task history
-remains associated with the former task identities. TST is never addressed by this migration.
+remains associated with the former task identities. The default target is DEV;
+TST requires the explicit `--environment TST` option used by its cutover migration.
 Old catalog tables, history, and logs remain available for historical reads.
 
 The migration stores `ORCHESTRATION / LEGACY_ENGINE_RETIRED=true` in DEV's
@@ -814,9 +865,9 @@ GET   /api/orchestration/workflows/<workflow_id>/log?runId=...&jobId=...
 SELECT job/workflow, checks the native scheduler lifecycle and Next Run through
 the API, and removes its rows and scheduler. It never executes the job.
 
-## DEV workflow notifications
+## Workflow notifications in DEV and TST
 
-Preview, then apply the DEV-only migration:
+For DEV, preview and apply using the default environment:
 
 ```bash
 python backend/migrations/apply_workflow_notifications.py
@@ -830,11 +881,25 @@ new workflow IDs. Matching recipient groups across readiness/SDL/EDV steps
 become one workflow rule; conflicting groups or integrations stop the migration.
 An old enabled flag with no recipient group remains effectively disabled.
 DEV restores existing rules only. Do not enable previously unconfigured DEV
-workflows. For the later ACC rollout, enable failure emails for **every workflow**
-as requested; do not apply DEV's restore-only coverage there. This migration
-deliberately has no ACC/TST apply option.
+workflows. TST/ACC enables failure emails for **every current workflow** as
+requested, retaining current success rules and recipient choices. Its migration
+requires explicit TST defaults for workflows without a selected destination:
 
-The migration checks idle DEV executions, routing, ownership and known procedure
+```bash
+python backend/migrations/apply_workflow_notifications.py --environment TST --failure-group KUMO_DEV --email-integration MY_EMAIL_INT
+python backend/migrations/apply_workflow_notifications.py --environment TST --failure-group KUMO_DEV --email-integration MY_EMAIL_INT --apply
+python backend/tests/live_workflow_notifications.py --run --environment TST
+```
+
+`KUMO_DEV` above is the name of the existing distribution group stored in TST's
+`EMAIL_GROUPS`; recipients are read from TST, never copied from DEV. New and
+updated rules use environment label `TST`. The migration checks that the chosen
+integration is enabled and explicitly restricted recipient lists allow the group.
+Existing notification rows are updated only if they still match the preview;
+concurrent edits stop and roll back the settings transaction. Verify and retain
+TST service routing, settings and scheduler states when promoting the DEV image.
+
+The migration checks idle target executions, routing, ownership and known procedure
 bodies. It changes only `SP_GET_ENVIRONMENT`, `SP_ORCH_NOTIFY`,
 `SP_ORCH_EXECUTE_WORKFLOW`, and `SP_ORCH_RECONCILE`, preserving grants. The
 environment helper exposes its bootstrap parameter-table address so activation
@@ -848,8 +913,8 @@ use the optional success rule. A workflow run generates one email with its
 frozen workflow name, run ID and failed job errors/query IDs, including partial
 manual runs. The existing `SP_SEND_WORKFLOW_EMAIL` formats and sends it through
 the configured Snowflake integration. Normal completion and engine failures
-invoke the notifier; housekeeping also catches missing notification attempts
-after interrupted completion or native task failure.
+invoke the notifier. DEV native finalizer events catch missing notification
+attempts after interrupted completion or native task failure.
 
 Each run stores its notification outcome in
 `WORKFLOW_EXECUTION_LOG.RESULT.notification`. An atomic durable claim prevents
@@ -871,3 +936,91 @@ Notifications → Workflow Config reads the current catalog when the old engine
 is retired, and supports editing success/failure groups and the integration.
 The app source changes follow the normal Git/image release process; applying
 this database migration does not deploy the updated configuration screen.
+
+
+## DEV stream-triggered dispatch
+
+`apply_stream_dispatch.py` replaces idle minute polling in **DEV only**. TST is
+unchanged pending DEV validation. The previous TST cutover/promotion scripts
+reject this enabled DEV trial so they cannot copy procedures without the new
+stream prerequisites. One maintained Flask/React application reads
+`ORCHESTRATION / STREAM_DISPATCH_ENABLED` from its environment parameter store;
+this capability controls confirmation behaviour without duplicate entrypoints.
+
+```bash
+python backend/migrations/apply_stream_dispatch.py
+python backend/migrations/apply_stream_dispatch.py --apply --report review/dev-stream-dispatch-deployment.json
+python backend/tests/live_stream_dispatch.py --run --report review/dev-stream-dispatch-integration.json
+```
+
+The migration rejects unknown procedure drift, non-DEV routing, stale/misdirected
+streams and active executions. It closes admission briefly, installs only the
+changed objects with procedure grants preserved, removes the maintenance task's
+schedule, and enables `TASK_ORCH_DISPATCH`. It changes no service, image or TST
+objects and starts no business workflows. Failures after installation starts
+leave admission paused for review. Do not resume the old minute task.
+
+`WORKFLOW_EXECUTION_LOG` remains authoritative for immutable execution snapshots,
+job selection and atomic executor claims. Admission inserts a `LAUNCH` event in
+`ORCH_DISPATCH_EVENTS` in the same transaction. Its append-only stream wakes the
+static dispatcher. Stream consumption copies immutable signals into the separate
+`ORCH_DISPATCH_DELIVERIES` table before task DDL; unprocessed deliveries survive
+stream advancement. State/error/attempt updates touch only the delivery table,
+so bookkeeping cannot retrigger the signal stream. Up to 100 events are handled
+per invocation, yielding after two minutes between deliveries to leave headroom
+below the native five-minute timeout. Genuine remaining work inserts a continuation. Delivery errors
+stop after three attempts and remain ERROR. WAITING and ERROR rows never generate
+their own timer/retry loop. Native dispatcher retries can resume READY rows.
+
+`SP_ORCH_START_RUN` is now a signal-only compatibility entry point. Only
+`SP_ORCH_LAUNCH_RUN`, running under the serialized dispatcher, provisions a
+workflow task plus an unscheduled finalizer. The finalizer inserts a FINISH event
+with the native graph run group, even after cancellation/failure. Completion
+recovery checks that exact invocation, preserves recorded terminal results,
+releases blocked requests, processes dependency admissions and existing email
+claims, then removes the finalizer and root task. A blocked native invocation
+waits for a real completion event; it does not continually resubmit itself.
+
+Dependency admission runs inside the dispatcher so every sibling is admitted
+before any sibling launch. Existing status/freshness/partial-run rules and the
+atomic two-level activity gate remain in force. Native schedulers enqueue only;
+a scheduled request already pending/running prevents an overlapping scheduled
+request. Original scheduler occurrence IDs and actual execution task groups are
+separate. Workloads retain their frozen warehouse, commands and execution mode.
+
+Explicit `POST /api/orchestration/workflows/<id>/reconcile` remains the repair
+path after exhausted attempts or an outage preventing finalizer delivery.
+Repair also restores missing dependency signals for completed workflows/jobs
+admitted by this engine, without replaying their workloads. GETs,
+health probes and app import never launch/recover workflows. Dispatcher state,
+stream staleness and pending/waiting/error counts are exposed by the engine
+status endpoint on user demand. Do not add background diagnostic queries.
+
+Retain unresolved deliveries. Completed delivery rows and old signals are pruned during genuine
+dispatch after seven days; there is no retention/cleanup clock. Never replace a
+stream to clear backlog: review its durable pending rows and offset first.
+Empty streams (including false positives) are consumed without launch work.
+
+### Impact and operating limits
+
+| Area | Impact |
+| --- | --- |
+| Idle compute | DEV has no maintenance clock. Empty stream checks do not execute dispatcher SQL. Enabled business schedules and genuine user requests can still require compute. The warehouse is shared with TST, whose existing tasks remain unchanged. |
+| Admission and latency | Accepted snapshots and launch signals commit together. Native dispatch adds asynchronous trigger/queue latency; browser or Python-worker availability no longer controls execution. |
+| Health and first access | Probes report process health without querying the warehouse; `environmentReady` separately reports bootstrap state. The first data request loads configuration. A failed bootstrap returns 503, with a 30-second retry cooldown, while probes remain available. |
+| Execution behavior | Job scope, frozen commands/warehouse, sequential/parallel mode, dependency rules and atomic claims remain authoritative. Native schedulers enqueue into separate execution graphs and suppress overlapping scheduled requests. |
+| Native objects | Two durable tables, one append-only stream and one static triggered task support the current engine. Each active run has a temporary root and finalizer; both are removed after completion. Archived legacy dispatch stays archived. |
+| Failures | Delivery attempts stop at three. Dispatcher task failures have bounded native retries and can suspend the task. Unresolved receipts remain available for explicit repair; there is no background repair clock. |
+| Outages and retention | Finalization checks the exact native run group. Explicit repair restores missing completion dependency signals for retained stream-admitted runs. Completed signals/receipts are pruned after seven days during real work. Long outages, stale streams or missing native history require operator review; never recreate the stream to erase its offset. |
+| Cutover | Snowflake DDL commits separately. Admission closes briefly for the guarded DEV migration; unknown source drift and active runs block it. A partial installation remains paused for review. Procedure grants are preserved. |
+| Rollback | Pause admission and dispatch, preserve signals/receipts and account for active native graphs before reverting definitions. The capability flag alone is not a rollback: the installed compatibility start procedure is signal-only. Do not restore minute polling. |
+| App release | Lazy bootstrap and warehouse-free probe behavior are application source changes. They reach running containers only through the normal Git image release and an explicitly requested service update. This DEV database migration does not update SPCS. |
+
+DEV acceptance uses disposable SQL fixtures rather than business workflows.
+The live suites exercise queue advancement, partial job scope, frozen commands,
+parallel execution, native schedules, dependency fork/join, failures, timeouts,
+cancellation, batch continuation, quarantine and explicit repair without replay.
+`live_stream_dispatch_idle.py` submits no queries during its observation window;
+its report distinguishes zero DEV dispatcher queries from the shared warehouse's
+state. A short quiet-window test does not replace an overnight/weekend soak.
+Real email delivery and an SPCS rollout are outside these fixture checks.

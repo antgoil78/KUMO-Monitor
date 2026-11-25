@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import Sidebar from './components/Sidebar.jsx'
 import EnvironmentBadge from './components/EnvironmentBadge.jsx'
 import { api, createKumoEventSource } from './api.js'
+import { useBackendHealth } from './useBackendHealth.js'
 import Dashboard from './pages/Dashboard.jsx'
 import Monitor from './pages/Monitor.jsx'
 import History from './pages/History.jsx'
@@ -62,43 +63,68 @@ export default function App() {
   const [pageContext, setPageContext] = useState({})
   const [topbarSession, setTopbarSession] = useState(null)
   const [identityReady, setIdentityReady] = useState(false)
-  const [buildInfo, setBuildInfo] = useState(null)
+  const { health: buildInfo } = useBackendHealth()
+  const [orchestrationSource, setOrchestrationSource] = useState(() => window.sessionStorage.getItem('kumoConfigurationSource'))
+  useEffect(() => {
+    const change = event => setOrchestrationSource(event.detail)
+    window.addEventListener('kumo:configuration-source', change)
+    return () => window.removeEventListener('kumo:configuration-source', change)
+  }, [])
   const [realtimeConnected, setRealtimeConnected] = useState(false)
   const [snowflakeStatus, setSnowflakeStatus] = useState(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('kumoSidebarCollapsed') === 'true')
   const Page = pages[page] || Dashboard
   const serviceEnvironment = buildInfo?.deploymentEnvironment ?? buildInfo?.environment
+  const postgresPage = ['orchestrationMonitor', 'orchestrationWorkflow', 'orchestrationDependencies', 'orchestrationJob', 'orchestrationHistory'].includes(page)
+    || (page === 'executionLog' && pageContext.orchestration?.source === 'POSTGRES')
+  const postgresView = !!buildInfo?.taskPrototypeEnabled && postgresPage && (buildInfo.postgresEnginePrimary || orchestrationSource !== 'SNOWFLAKE')
 
   useEffect(() => {
     if (buildInfo?.legacyEngineRetired && (['monitor', 'dependencies'].includes(page)
       || (!requestedPage && page === 'dashboard'))) setPage('orchestrationMonitor')
   }, [buildInfo?.legacyEngineRetired, page, requestedPage])
 
-  // Keep one presence connection open for the lifetime of the application,
-  // including pages that do not otherwise consume realtime status events.
+  // Background tabs must release their stream: HTTP/1 browsers share a small
+  // connection pool per origin, and idle streams can starve health/API requests.
   useEffect(() => {
     let cancelled = false
     let source = null
+    let sessionReady = false
     setRealtimeConnected(false)
+    function syncPresence() {
+      if (cancelled) return
+      if (document.visibilityState === 'hidden' || !sessionReady || !buildInfo) {
+        source?.close()
+        source = null
+        setRealtimeConnected(false)
+        return
+      }
+      if (source) return
+      const sourceChoice = buildInfo.taskPrototypeEnabled && postgresPage && (buildInfo.postgresEnginePrimary || orchestrationSource !== 'SNOWFLAKE') ? 'POSTGRES' : 'SNOWFLAKE'
+      source = createKumoEventSource((event) => {
+        if (event?.type === 'connected' || event?.type === 'heartbeat') setRealtimeConnected(true)
+        window.dispatchEvent(new CustomEvent('kumo:realtime', { detail: event }))
+      }, () => setRealtimeConnected(false), { page, orchestrationSource: sourceChoice })
+    }
+    document.addEventListener('visibilitychange', syncPresence)
     // Register this browser's current Snowflake identity before opening the
     // presence stream, so run requests cannot inherit an older client actor.
     api.session().catch(() => null).then(sessionData => {
       if (cancelled) return
       if (sessionData) setTopbarSession(sessionData)
       setIdentityReady(true)
-      source = createKumoEventSource((event) => {
-        if (event?.type === 'connected' || event?.type === 'heartbeat') setRealtimeConnected(true)
-        window.dispatchEvent(new CustomEvent('kumo:realtime', { detail: event }))
-      }, () => setRealtimeConnected(false), { page })
+      sessionReady = true
+      syncPresence()
     })
-    api.health().catch(() => null).then(healthData => {
-      if (!cancelled && healthData) setBuildInfo(healthData)
-    })
-    return () => { cancelled = true; source?.close() }
-  }, [page])
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', syncPresence)
+      source?.close()
+    }
+  }, [page, orchestrationSource, pageContext.orchestration?.source, buildInfo])
 
   useEffect(() => {
-    if (!identityReady) return undefined
+    if (!identityReady || !buildInfo || postgresView) return undefined
     let cancelled = false
     const loadSnowflakeStatus = () => api.snowflakePing()
       .then(data => { if (!cancelled) setSnowflakeStatus(data) })
@@ -106,7 +132,7 @@ export default function App() {
     loadSnowflakeStatus()
     const id = window.setInterval(loadSnowflakeStatus, 10000)
     return () => { cancelled = true; window.clearInterval(id) }
-  }, [identityReady])
+  }, [identityReady, postgresView, buildInfo])
 
   useEffect(() => {
     if (!identityReady) return undefined
@@ -178,7 +204,7 @@ export default function App() {
             <EnvironmentBadge environment={serviceEnvironment} />
             <div className="corona-top-actions">
               <span className={`corona-connection ${realtimeConnected ? 'connected' : 'disconnected'}`} title="Live server-to-browser event stream"><i /> Realtime {realtimeConnected ? 'connected' : 'reconnecting'}</span>
-              <span className={`corona-connection ${snowflakeStatus?.ok ? 'connected' : 'disconnected'}`} title={snowflakeStatus?.error || `Snowflake ${snowflakeStatus?.mode || 'connection'}`}><i /> Snowflake {snowflakeStatus?.ok ? 'connected' : 'unavailable'}</span>
+              {postgresView ? <span className="corona-connection" title="Snowflake is contacted when tasks need execution, status checks or cleanup."><i /> Snowflake on demand</span> : <span className={`corona-connection ${snowflakeStatus?.ok ? 'connected' : 'disconnected'}`} title={snowflakeStatus?.error || `Snowflake ${snowflakeStatus?.mode || 'connection'}`}><i /> Snowflake {snowflakeStatus?.ok ? 'connected' : 'unavailable'}</span>}
               <button type="button" className={`corona-settings-button ${page === 'settings' ? 'active' : ''}`} aria-label="Open settings" title="Settings" onClick={() => navigate('settings')}><span aria-hidden="true">⚙</span></button>
               <button type="button" className="corona-logout-button" aria-label="Log out of KUMO Monitor" title="Log out" onClick={logout}>
                 <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path d="M10 5H5v14h5M14 8l4 4-4 4M8 12h10" /></svg>

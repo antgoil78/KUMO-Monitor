@@ -72,13 +72,21 @@ export function executionParents(runs) {
   return parents
 }
 
+function executionParentGroups(runs) {
+  const groups = new Map([...executionParents(runs)].map(([key, parent]) => [key, [parent]]))
+  for (const root of runs) if (Array.isArray(root.parentExecutionIds)) {
+    groups.set(executionKey(root), [...new Set(root.parentExecutionIds)])
+  }
+  return groups
+}
+
 export function connectedExecutions(runs, selection) {
   if (!selection) return new Set()
-  const parents = executionParents(runs)
+  const parents = executionParentGroups(runs)
   const nodes = runs.flatMap(root => [root, ...root.jobs.map(job => ({ ...job, workflowId: root.workflowId }))])
   const byId = new Map(nodes.map(run => [run.executionId, executionKey(run)]))
   const neighbors = new Map()
-  for (const [child, parentId] of parents) {
+  for (const [child, parentIds] of parents) for (const parentId of parentIds) {
     const parent = byId.get(parentId)
     if (!parent) continue
     if (!neighbors.has(parent)) neighbors.set(parent, [])
@@ -96,7 +104,7 @@ export function connectedExecutions(runs, selection) {
 
 export function timelineLayout(rows, runs, start, end, now, width, compact = false) {
   const laneStep = compact ? 23 : 28, barHeight = compact ? 18 : 23
-  const locations = new Map(), parents = executionParents(runs)
+  const locations = new Map(), parents = executionParentGroups(runs)
   let height = 0
   const laidOut = rows.map(row => {
     const lanes = timelineLanes(row.runs, start, end, now, width)
@@ -112,16 +120,18 @@ export function timelineLayout(rows, runs, start, end, now, width, compact = fal
   })
   const connections = []
   for (const child of locations.values()) {
-    const parent = locations.get(parents.get(executionKey(child.run)))
-    if (!parent || parent === child) continue
-    const fromX = parent.workflow && parent.run.runId === child.run.runId ? parent.left : parent.right
-    const toX = child.left
-    const fromY = parent.y + barHeight / 2, toY = child.y - barHeight / 2
-    // Use the gap between rows as a bend; bar endpoints stay accurate when
-    // clipped, zoomed, stacked in lanes, or shown with a minimum pixel width.
-    const bendY = (fromY + toY) / 2
-    const path = `M ${fromX} ${fromY} V ${bendY} H ${toX} V ${toY}`
-    connections.push({ id: `${parent.run.executionId}:${child.run.executionId}`, parent: parent.run, child: child.run, fromX, toX, fromY, toY, path, waiting: !child.run.start })
+    for (const parentId of parents.get(executionKey(child.run)) || []) {
+      const parent = locations.get(parentId)
+      if (!parent || parent === child) continue
+      const fromX = parent.workflow && parent.run.runId === child.run.runId ? parent.left : parent.right
+      const toX = child.left
+      const fromY = parent.y + barHeight / 2, toY = child.y - barHeight / 2
+      // Use the gap between rows as a bend; bar endpoints stay accurate when
+      // clipped, zoomed, stacked in lanes, or shown with a minimum pixel width.
+      const bendY = (fromY + toY) / 2
+      const path = `M ${fromX} ${fromY} V ${bendY} H ${toX} V ${toY}`
+      connections.push({ id: `${parent.run.executionId}:${child.run.executionId}`, parent: parent.run, child: child.run, fromX, toX, fromY, toY, path, waiting: !child.run.start })
+    }
   }
   return { rows: laidOut, height, connections }
 }

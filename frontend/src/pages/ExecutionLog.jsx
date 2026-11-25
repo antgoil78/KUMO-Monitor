@@ -271,7 +271,7 @@ export default function ExecutionLog({ runId = '', workflowId = '', workflowName
     try {
       setLoading(true)
       setError(null)
-      setData(await (orchestration ? api.orchestrationLog(workflowId, runId, orchestration.jobId) : api.executionLog(runId, workflowId)))
+      setData(await (orchestration ? orchestration.source === 'POSTGRES' ? api.postgresLog(workflowId, runId, orchestration.jobId) : api.orchestrationLog(workflowId, runId, orchestration.jobId) : api.executionLog(runId, workflowId)))
     } catch (err) {
       setError(err.message)
     } finally {

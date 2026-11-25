@@ -1,0 +1,61 @@
+{
+  "environment": "TST",
+  "applied": true,
+  "status": "OBJECTS_VERIFIED_SERVICE_READY_TASK_STATES_RESTORED",
+  "add_columns": [
+    "JOB_EXECUTION_MODE",
+    "PARENT_MUST_BE_NEWER"
+  ],
+  "changed_procedures": [
+    "SP_RESOLVE_WORKFLOW_COMMAND",
+    "SP_ORCH_EVALUATE_DEPENDENCIES",
+    "SP_ORCH_DISPATCH_DEPENDENCIES",
+    "SP_ORCH_REQUEST_RUN",
+    "SP_ORCH_EXECUTE_JOB",
+    "SP_ORCH_EXECUTE_WORKFLOW",
+    "SP_ORCH_RECONCILE",
+    "SP_ORCH_START_RUN"
+  ],
+  "add_view": true,
+  "dev_definitions_older_than_merged_release": [
+    "SP_RESOLVE_WORKFLOW_COMMAND"
+  ],
+  "tasks_before": [
+    {
+      "name": "TASK_ORCH_MAINTENANCE",
+      "state": "started",
+      "schedule": "1 MINUTE",
+      "warehouse": "KUMO_ELT_GEN_1",
+      "definition": "CALL KUMO_TST.MONITOR_APP.SP_ORCH_RECONCILE(NULL)"
+    },
+    {
+      "name": "TASK_ORCH_WF_1A080D0D_2F09_5D09_90E5_AC6E3B0EDA59_SCHEDULER",
+      "state": "started",
+      "schedule": "USING CRON 0 14 * * 1-5 UTC",
+      "warehouse": "KUMO_ELT_GEN_1",
+      "definition": "CALL KUMO_TST.MONITOR_APP.SP_ORCH_RUN_SCHEDULED('1a080d0d-2f09-5d09-90e5-ac6e3b0eda59')"
+    },
+    {
+      "name": "TASK_ORCH_WF_7BD217DC_319C_5EE6_833D_CEBE361CB26E_SCHEDULER",
+      "state": "started",
+      "schedule": "USING CRON 0 6 * * 1-5 UTC",
+      "warehouse": "KUMO_ELT_GEN_1",
+      "definition": "CALL KUMO_TST.MONITOR_APP.SP_ORCH_RUN_SCHEDULED('7bd217dc-319c-5ee6-833d-cebe361cb26e')"
+    }
+  ],
+  "service_before": {
+    "status": "RUNNING",
+    "auto_resume": "true",
+    "spec_digest": "9aab1379e27ac7ed3788204916103ff3008470a2b61203ac0b9db4417f89ce76"
+  },
+  "dev_changed": false,
+  "catalog_replaced": false,
+  "business_commands_executed": false,
+  "initial_verification_issue": "Unexpected admission signature",
+  "catalog_and_parameters_preserved": true,
+  "procedure_definitions_match_merged_release": true,
+  "verification_recovered_after_optional_argument_metadata_check": true,
+  "guard_tests_passed": 7,
+  "tasks_restored_at_utc": "2026-11-17T15:01:14.286365+00:00",
+  "original_task_states_restored": true
+}

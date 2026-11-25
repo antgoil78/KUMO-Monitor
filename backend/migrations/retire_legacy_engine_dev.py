@@ -1,4 +1,4 @@
-"""Retire DEV execution entry points; preserve old history and all TST objects.
+"""Retire execution entry points in an explicitly selected DEV or TST environment.
 
 Read-only unless --apply. Suspend old tasks, archive their entry points and queue
 with X_ names, and persist the environment-specific retirement setting. No
@@ -22,16 +22,20 @@ PROCEDURES = (
 )
 
 
-def run(apply=False):
+def run(apply=False, environment='DEV'):
+    if environment not in ('DEV', 'TST'):
+        raise ValueError('Select DEV or TST explicitly')
+    database = 'KUMO_' + environment
+    APP, META = database + '.MONITOR_APP', database + '.MONITOR_META'
     with connect() as connection, connection.cursor(DictCursor) as cursor:
         def query(sql, params=()):
             cursor.execute(sql,params); return cursor.fetchall()
-        query('USE DATABASE KUMO_DEV')
+        query('USE DATABASE '+database)
         query('USE SCHEMA '+APP)
-        # Hard guard: this migration cannot be redirected to TST by local env.
+        # Local credentials/environment variables cannot redirect the target.
         env=query(f"SELECT PARAMETER_VALUE FROM {META}.APPLICATION_PARAMETERS WHERE INSTANCE_NAME='DEFAULT' AND PARAMETER_GROUP='ENVIRONMENT' AND PARAMETER_KEY='DATABASE' AND ACTIVE_FL=TRUE")
-        if len(env)!=1 or env[0]['PARAMETER_VALUE']!='KUMO_DEV': raise ValueError('Expected DEV environment routing')
-        tables={row['TABLE_NAME'] for row in query("SELECT TABLE_NAME FROM KUMO_DEV.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='MONITOR_META' AND TABLE_NAME IN ('WORKFLOW_RUN_QUEUE','X_WORKFLOW_RUN_QUEUE')")}
+        if len(env)!=1 or env[0]['PARAMETER_VALUE']!=database: raise ValueError('Expected '+environment+' environment routing')
+        tables={row['TABLE_NAME'] for row in query(f"SELECT TABLE_NAME FROM {database}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='MONITOR_META' AND TABLE_NAME IN ('WORKFLOW_RUN_QUEUE','X_WORKFLOW_RUN_QUEUE')")}
         if len(tables)!=1: raise ValueError('Expected exactly one original or archived queue')
         queue=next(iter(tables))
         pending=query(f"SELECT COUNT(*) N FROM {META}.{queue} WHERE UPPER(TRIM(STATUS)) NOT IN ('DONE','SUCCESS','SUCCEEDED','FAILED','ERROR','SKIPPED','CANCELLED','CANCELED') OR STATUS IS NULL")[0]['N']
@@ -60,11 +64,11 @@ def run(apply=False):
             if archived and (archived['state']!='suspended' or any(archived.get(key)!=row.get(key) for key in ('definition','warehouse','schedule','condition','comment'))):raise ValueError('Task archive name collision')
             grants[row['name']]=query('SHOW GRANTS ON TASK '+APP+'.'+row['name'])
             if any(grant['granted_to'] not in ('ROLE','DATABASE_ROLE') for grant in grants[row['name']]):raise ValueError('Unexpected task grant recipient')
-        running=query("SELECT NAME FROM TABLE(KUMO_DEV.INFORMATION_SCHEMA.TASK_HISTORY(SCHEDULED_TIME_RANGE_START=>DATEADD('hour',-24,CURRENT_TIMESTAMP()),RESULT_LIMIT=>10000)) WHERE STATE='EXECUTING'")
+        running=query(f"SELECT NAME FROM TABLE({database}.INFORMATION_SCHEMA.TASK_HISTORY(SCHEDULED_TIME_RANGE_START=>DATEADD('hour',-24,CURRENT_TIMESTAMP()),RESULT_LIMIT=>10000)) WHERE STATE='EXECUTING'")
         if any(row['NAME'] in {task['name'] for task in old_tasks} for row in running): raise ValueError('An old task is executing; let it finish')
         schedules=query(f'SELECT COUNT(*) N FROM {META}.WORKFLOW_TASKS WHERE IS_ENABLED=TRUE')[0]['N']
         procedure_names=sorted({prefix+name for name,_ in PROCEDURES for prefix in ('','X_')})
-        rows=query("SELECT PROCEDURE_NAME,ARGUMENT_SIGNATURE FROM KUMO_DEV.INFORMATION_SCHEMA.PROCEDURES WHERE PROCEDURE_SCHEMA='MONITOR_APP' AND PROCEDURE_NAME IN ("+','.join('%s' for _ in procedure_names)+')',tuple(procedure_names))
+        rows=query(f"SELECT PROCEDURE_NAME,ARGUMENT_SIGNATURE FROM {database}.INFORMATION_SCHEMA.PROCEDURES WHERE PROCEDURE_SCHEMA='MONITOR_APP' AND PROCEDURE_NAME IN ("+','.join('%s' for _ in procedure_names)+')',tuple(procedure_names))
         existing={(row['PROCEDURE_NAME'],re.sub(r'\b[A-Za-z_][A-Za-z0-9_]*\s+(?=(?:VARCHAR|BOOLEAN|NUMBER|FLOAT)\b)','',row['ARGUMENT_SIGNATURE']).replace(' ','').strip('()')) for row in rows}
         for name,signature in PROCEDURES:
             if sum((prefix+name,signature) in existing for prefix in ('','X_'))!=1: raise ValueError('Missing or ambiguous procedure '+name+'('+signature+')')
@@ -77,9 +81,9 @@ def run(apply=False):
         cleanup=query(f"SELECT j.JOB_ID,j.SQL_COMMAND FROM {META}.JOB j JOIN {META}.DEPENDENCIES d ON j.JOB_ID=d.JOB_ID JOIN {META}.WORKFLOW w ON w.WORKFLOW_ID=d.WORKFLOW_ID WHERE w.WORKFLOW_NAME='MAINTENANCE - CLEANUP'")
         if len(cleanup)!=1: raise ValueError('Expected one migrated maintenance job')
         command=cleanup[0]['SQL_COMMAND']
-        updated,count=re.subn(r'(?im)^\s*CALL\s+(?:\[DATABASE\]|KUMO_DEV)\.(?:\[MONITOR_APP_SCHEMA\]|MONITOR_APP)\.SP_CLEANUP_OLD_TMP_TASKS\s*\(\s*1\s*\)\s*;\s*', '', command)
+        updated,count=re.subn(r'(?im)^\s*CALL\s+(?:\[DATABASE\]|'+database+r')\.(?:\[MONITOR_APP_SCHEMA\]|MONITOR_APP)\.SP_CLEANUP_OLD_TMP_TASKS\s*\(\s*1\s*\)\s*;\s*', '', command)
         if 'SP_CLEANUP_OLD_TMP_TASKS' in updated.upper(): raise ValueError('Unexpected maintenance cleanup invocation')
-        result=dict(applied=apply,environment='DEV',tasks=[row['name'] for row in old_tasks],procedures=[name+'('+signature+')' for name,signature in PROCEDURES],queue=queue,old_history_preserved=True,tst_changed=False,new_schedules_activated=False,old_schedule_flags_preserved=schedules,new_runs_preserved=new_active,maintenance_call_removed=bool(count))
+        result=dict(applied=apply,environment=environment,tasks=[row['name'] for row in old_tasks],procedures=[name+'('+signature+')' for name,signature in PROCEDURES],queue=queue,old_history_preserved=True,tst_changed=apply and environment=='TST',new_schedules_activated=False,old_schedule_flags_preserved=schedules,new_runs_preserved=new_active,maintenance_call_removed=bool(count))
         if not apply:return result
         for row in old_tasks:query('ALTER TASK '+APP+'.'+row['name']+' SUSPEND')
         if queue=='WORKFLOW_RUN_QUEUE':query(f'ALTER TABLE {META}.WORKFLOW_RUN_QUEUE RENAME TO {META}.X_WORKFLOW_RUN_QUEUE')
@@ -104,10 +108,12 @@ def run(apply=False):
             query(f'CREATE STREAM {META}.X_WORKFLOW_EXECUTION_QUEUE_STREAM CLONE {META}.WORKFLOW_EXECUTION_QUEUE_STREAM COPY GRANTS')
             query(f'DROP STREAM {META}.WORKFLOW_EXECUTION_QUEUE_STREAM')
         if count:query(f'UPDATE {META}.JOB SET SQL_COMMAND=%s WHERE JOB_ID=%s AND SQL_COMMAND=%s',(updated,cleanup[0]['JOB_ID'],command))
-        query(f"MERGE INTO {META}.APPLICATION_PARAMETERS t USING (SELECT 'DEFAULT' INSTANCE_NAME,'ORCHESTRATION' PARAMETER_GROUP,'LEGACY_ENGINE_RETIRED' PARAMETER_KEY) s ON t.INSTANCE_NAME=s.INSTANCE_NAME AND t.PARAMETER_GROUP=s.PARAMETER_GROUP AND t.PARAMETER_KEY=s.PARAMETER_KEY WHEN MATCHED THEN UPDATE SET PARAMETER_VALUE='true',VALUE_TYPE='BOOLEAN',ACTIVE_FL=TRUE,UPDATED_DTTM=CURRENT_TIMESTAMP() WHEN NOT MATCHED THEN INSERT (INSTANCE_NAME,PARAMETER_GROUP,PARAMETER_KEY,PARAMETER_VALUE,VALUE_TYPE,ACTIVE_FL,DESCRIPTION) VALUES(s.INSTANCE_NAME,s.PARAMETER_GROUP,s.PARAMETER_KEY,'true','BOOLEAN',TRUE,'DEV uses the new orchestration engine; old execution entry points are archived with X_ names')")
+        query(f"MERGE INTO {META}.APPLICATION_PARAMETERS t USING (SELECT 'DEFAULT' INSTANCE_NAME,'ORCHESTRATION' PARAMETER_GROUP,'LEGACY_ENGINE_RETIRED' PARAMETER_KEY) s ON t.INSTANCE_NAME=s.INSTANCE_NAME AND t.PARAMETER_GROUP=s.PARAMETER_GROUP AND t.PARAMETER_KEY=s.PARAMETER_KEY WHEN MATCHED THEN UPDATE SET PARAMETER_VALUE='true',VALUE_TYPE='BOOLEAN',ACTIVE_FL=TRUE,UPDATED_DTTM=CURRENT_TIMESTAMP() WHEN NOT MATCHED THEN INSERT (INSTANCE_NAME,PARAMETER_GROUP,PARAMETER_KEY,PARAMETER_VALUE,VALUE_TYPE,ACTIVE_FL,DESCRIPTION) VALUES(s.INSTANCE_NAME,s.PARAMETER_GROUP,s.PARAMETER_KEY,'true','BOOLEAN',TRUE,'{environment} uses the new orchestration engine; old execution entry points are archived with X_ names')")
         return result
 
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--apply',action='store_true')
-    print(json.dumps(run(parser.parse_args().apply),indent=2))
+    parser.add_argument('--environment',choices=('DEV','TST'),default='DEV')
+    args=parser.parse_args()
+    print(json.dumps(run(args.apply,args.environment),indent=2))

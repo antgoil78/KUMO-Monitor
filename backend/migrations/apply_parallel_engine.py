@@ -1,7 +1,7 @@
 """Deploy the parallel engine with temporary manual runs and persistent schedulers.
 
 Default is read-only. --apply replaces this engine's suspended v1 manual tasks,
-prepares configured workflow schedulers suspended, and enables housekeeping.
+prepares configured workflow schedulers suspended, and enables stream dispatch.
 Existing engine objects, schedules and execution tables are never changed.
 """
 import argparse
@@ -16,6 +16,9 @@ sys.path.insert(0, str(ROOT / 'backend'))
 import config
 
 PROCEDURES = {
+    'SP_ORCH_LAUNCH_RUN': '(VARCHAR)',
+    'SP_ORCH_FINISH_RUN': '(VARCHAR,VARCHAR)',
+    'SP_ORCH_DISPATCH': '()',
     'SP_ORCH_EVALUATE_DEPENDENCIES': '(VARCHAR)',
     'SP_ORCH_DISPATCH_DEPENDENCIES': '(VARCHAR)',
     'SP_ORCH_REQUEST_RUN': '(VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,BOOLEAN,VARCHAR)',
@@ -26,6 +29,16 @@ PROCEDURES = {
     'SP_ORCH_RUN_SCHEDULED': '(VARCHAR)',
 }
 DDL = ROOT / 'snowflake' / 'ddl' / 'KUMO_DEV'
+
+
+def require_pre_stream_release(cursor):
+    """Old TST upgraders must not copy the DEV trial without its stream objects."""
+    cursor.execute("SELECT COUNT(*) N FROM KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS "
+                   "WHERE INSTANCE_NAME='DEFAULT' AND PARAMETER_GROUP='ORCHESTRATION' "
+                   "AND PARAMETER_KEY='STREAM_DISPATCH_ENABLED' AND ACTIVE_FL AND VALUE_TYPE='BOOLEAN' "
+                   "AND LOWER(PARAMETER_VALUE)='true'")
+    if cursor.fetchone()['N']:
+        raise ValueError('DEV stream dispatch requires a dedicated, reviewed TST promotion; this upgrader targets the previous engine')
 
 
 def task_fqn(workflow_id, namespace, run_id=None):
@@ -105,11 +118,14 @@ def run(apply=False, environment_table='KUMO_DEV.MONITOR_META.APPLICATION_PARAME
         # that belongs to an unrelated implementation.
         cursor.execute(f"SELECT PROCEDURE_NAME, COMMENT FROM {config.DB}.INFORMATION_SCHEMA.PROCEDURES WHERE PROCEDURE_SCHEMA = %s AND PROCEDURE_NAME IN (" + ','.join('%s' for _ in PROCEDURES) + ')', (config.SCHEMA, *PROCEDURES))
         for row in cursor.fetchall():
-            if not str(row.get('COMMENT') or '').startswith('KUMO parallel orchestration v'):
+            if not str(row.get('COMMENT') or '').startswith(('KUMO parallel orchestration v', 'KUMO stream dispatch:')):
                 raise ValueError('Unexpected existing procedure: ' + row['PROCEDURE_NAME'])
         if apply:
             cursor.execute(f"ALTER TABLE {config.T_ORCHESTRATION_WORKFLOW} ADD COLUMN IF NOT EXISTS JOB_EXECUTION_MODE VARCHAR(20) NOT NULL DEFAULT 'SEQUENTIAL'")
             cursor.execute(render(DDL / 'MONITOR_META/tables/WORKFLOW_EXECUTION_LOG.sql'))
+            cursor.execute(render(DDL / 'MONITOR_META/tables/ORCH_DISPATCH_EVENTS.sql'))
+            cursor.execute(render(DDL / 'MONITOR_META/tables/ORCH_DISPATCH_DELIVERIES.sql'))
+            cursor.execute(render(DDL / 'MONITOR_META/streams/ORCH_DISPATCH_EVENTS_STREAM.sql'))
             cursor.execute(render(DDL / 'MONITOR_APP/views/V_ORCH_WORKFLOW_RELATIONS.sql'))
             for procedure in PROCEDURES:
                 cursor.execute(render(DDL / ('MONITOR_APP/procedures/' + procedure + '.sql')))
@@ -125,10 +141,18 @@ def run(apply=False, environment_table='KUMO_DEV.MONITOR_META.APPLICATION_PARAME
             housekeeping = render(DDL / 'MONITOR_APP/tasks/TASK_ORCH_MAINTENANCE.sql')
             housekeeping = housekeeping.replace('WAREHOUSE = KUMO_ELT_GEN_1', 'WAREHOUSE = ' + warehouse)
             cursor.execute(housekeeping)
-            cursor.execute(f'ALTER TASK {config.APP_NAMESPACE}.TASK_ORCH_MAINTENANCE RESUME')
+            cursor.execute(render(DDL / 'MONITOR_APP/tasks/TASK_ORCH_DISPATCH.sql').replace('WAREHOUSE = KUMO_ELT_GEN_1', 'WAREHOUSE = ' + warehouse))
+            cursor.execute(f"MERGE INTO {config.T_APPLICATION_PARAMETERS} p USING "
+                           "(SELECT 'DEFAULT' I, 'ORCHESTRATION' G, 'STREAM_DISPATCH_ENABLED' K) s "
+                           "ON p.INSTANCE_NAME=s.I AND p.PARAMETER_GROUP=s.G AND p.PARAMETER_KEY=s.K "
+                           "WHEN MATCHED THEN UPDATE SET PARAMETER_VALUE='true',VALUE_TYPE='BOOLEAN',ACTIVE_FL=TRUE,IS_SECRET=FALSE "
+                           "WHEN NOT MATCHED THEN INSERT (INSTANCE_NAME,PARAMETER_GROUP,PARAMETER_KEY,PARAMETER_VALUE,VALUE_TYPE,ACTIVE_FL,IS_SECRET) "
+                           "VALUES(s.I,s.G,s.K,'true','BOOLEAN',TRUE,FALSE)")
+            cursor.execute(f'ALTER TASK {config.APP_NAMESPACE}.TASK_ORCH_DISPATCH RESUME')
         return dict(applied=apply, namespace=config.METADATA_NAMESPACE, execution_table=config.T_ORCHESTRATION_EXECUTION_LOG,
                     workflow_tasks='created per execution', job_tasks=0, schedulers_prepared=len(definitions),
-                    scheduled_workflows_suspended=True, replaced_manual_tasks=len(old_tasks), housekeeping_enabled=apply,
+                    scheduled_workflows_suspended=True, replaced_manual_tasks=len(old_tasks), housekeeping_enabled=False,
+                    stream_dispatch_enabled=apply,
                     legacy_engine_changed=False, procedures=list(PROCEDURES))
 
 
