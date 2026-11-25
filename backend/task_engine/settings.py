@@ -28,7 +28,13 @@ class Settings:
             raise PermissionError('The PostgreSQL task prototype is disabled')
         if os.getenv('KUMO_ENV', 'DEV').upper() != 'DEV':
             raise PermissionError('The task prototype is DEV only')
-        return cls(os.getenv('KUMO_POSTGRES_DSN', ''),
+        dsn=os.getenv('KUMO_POSTGRES_DSN', '')
+        if not dsn and os.getenv('KUMO_POSTGRES_HOST'):
+            from psycopg.conninfo import make_conninfo
+            dsn=make_conninfo(host=os.environ['KUMO_POSTGRES_HOST'],port=os.getenv('KUMO_POSTGRES_PORT','5432'),
+                dbname=os.getenv('KUMO_POSTGRES_DATABASE','kumo_engine_dev'),user=os.getenv('KUMO_POSTGRES_USER',''),
+                password=os.getenv('KUMO_POSTGRES_PASSWORD',''),sslmode=os.getenv('KUMO_POSTGRES_SSLMODE','prefer'))
+        return cls(dsn,
                    warehouse=os.getenv('KUMO_PG_TASK_WAREHOUSE', 'KUMO_ELT_GEN_1').upper(),
                    role=os.getenv('KUMO_PG_TASK_ROLE', 'KUMO_ADMIN').upper(),
                    poll_seconds=int(os.getenv('KUMO_PG_TASK_POLL_SECONDS', '5')))

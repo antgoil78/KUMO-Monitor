@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import Sidebar from './components/Sidebar.jsx'
 import EnvironmentBadge from './components/EnvironmentBadge.jsx'
 import { api, createKumoEventSource } from './api.js'
+import { useBackendHealth } from './useBackendHealth.js'
 import Dashboard from './pages/Dashboard.jsx'
 import Monitor from './pages/Monitor.jsx'
 import History from './pages/History.jsx'
@@ -62,7 +63,7 @@ export default function App() {
   const [pageContext, setPageContext] = useState({})
   const [topbarSession, setTopbarSession] = useState(null)
   const [identityReady, setIdentityReady] = useState(false)
-  const [buildInfo, setBuildInfo] = useState(null)
+  const { health: buildInfo } = useBackendHealth()
   const [orchestrationSource, setOrchestrationSource] = useState(() => window.sessionStorage.getItem('kumoConfigurationSource'))
   useEffect(() => {
     const change = event => setOrchestrationSource(event.detail)
@@ -76,38 +77,54 @@ export default function App() {
   const serviceEnvironment = buildInfo?.deploymentEnvironment ?? buildInfo?.environment
   const postgresPage = ['orchestrationMonitor', 'orchestrationWorkflow', 'orchestrationDependencies', 'orchestrationJob', 'orchestrationHistory'].includes(page)
     || (page === 'executionLog' && pageContext.orchestration?.source === 'POSTGRES')
-  const postgresView = !!buildInfo?.taskPrototypeEnabled && postgresPage && orchestrationSource !== 'SNOWFLAKE'
+  const postgresView = !!buildInfo?.taskPrototypeEnabled && postgresPage && (buildInfo.postgresEnginePrimary || orchestrationSource !== 'SNOWFLAKE')
 
   useEffect(() => {
     if (buildInfo?.legacyEngineRetired && (['monitor', 'dependencies'].includes(page)
       || (!requestedPage && page === 'dashboard'))) setPage('orchestrationMonitor')
   }, [buildInfo?.legacyEngineRetired, page, requestedPage])
 
-  // Keep one presence connection open for the lifetime of the application,
-  // including pages that do not otherwise consume realtime status events.
+  // Background tabs must release their stream: HTTP/1 browsers share a small
+  // connection pool per origin, and idle streams can starve health/API requests.
   useEffect(() => {
     let cancelled = false
     let source = null
+    let sessionReady = false
     setRealtimeConnected(false)
-    // Register this browser's current Snowflake identity before opening the
-    // presence stream, so run requests cannot inherit an older client actor.
-    Promise.all([api.session().catch(() => null), api.health().catch(() => null)]).then(([sessionData, healthData]) => {
+    function syncPresence() {
       if (cancelled) return
-      if (sessionData) setTopbarSession(sessionData)
-      if (healthData) setBuildInfo(healthData)
-      setIdentityReady(true)
-      if (!healthData) return
-      const sourceChoice = healthData?.taskPrototypeEnabled && postgresPage && orchestrationSource !== 'SNOWFLAKE' ? 'POSTGRES' : 'SNOWFLAKE'
+      if (document.visibilityState === 'hidden' || !sessionReady || !buildInfo) {
+        source?.close()
+        source = null
+        setRealtimeConnected(false)
+        return
+      }
+      if (source) return
+      const sourceChoice = buildInfo.taskPrototypeEnabled && postgresPage && (buildInfo.postgresEnginePrimary || orchestrationSource !== 'SNOWFLAKE') ? 'POSTGRES' : 'SNOWFLAKE'
       source = createKumoEventSource((event) => {
         if (event?.type === 'connected' || event?.type === 'heartbeat') setRealtimeConnected(true)
         window.dispatchEvent(new CustomEvent('kumo:realtime', { detail: event }))
       }, () => setRealtimeConnected(false), { page, orchestrationSource: sourceChoice })
+    }
+    document.addEventListener('visibilitychange', syncPresence)
+    // Register this browser's current Snowflake identity before opening the
+    // presence stream, so run requests cannot inherit an older client actor.
+    api.session().catch(() => null).then(sessionData => {
+      if (cancelled) return
+      if (sessionData) setTopbarSession(sessionData)
+      setIdentityReady(true)
+      sessionReady = true
+      syncPresence()
     })
-    return () => { cancelled = true; source?.close() }
-  }, [page, orchestrationSource, pageContext.orchestration?.source])
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', syncPresence)
+      source?.close()
+    }
+  }, [page, orchestrationSource, pageContext.orchestration?.source, buildInfo])
 
   useEffect(() => {
-    if (!identityReady || postgresView) return undefined
+    if (!identityReady || !buildInfo || postgresView) return undefined
     let cancelled = false
     const loadSnowflakeStatus = () => api.snowflakePing()
       .then(data => { if (!cancelled) setSnowflakeStatus(data) })
@@ -115,7 +132,7 @@ export default function App() {
     loadSnowflakeStatus()
     const id = window.setInterval(loadSnowflakeStatus, 10000)
     return () => { cancelled = true; window.clearInterval(id) }
-  }, [identityReady, postgresView])
+  }, [identityReady, postgresView, buildInfo])
 
   useEffect(() => {
     if (!identityReady) return undefined

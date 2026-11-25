@@ -3,7 +3,7 @@ const groups = {
   running: ['RUNNING', 'IN_PROGRESS', 'EXECUTING', 'STARTING'],
   queued: ['INITIATING', 'QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED'],
   failed: ['FAILED', 'FAILURE', 'ERROR'],
-  warning: ['WARNING', 'WARNINGS', 'WARN', 'VARNING', 'VARNINGAR', 'UNKNOWN', 'BLOCKED'],
+  warning: ['WARNING', 'WARNINGS', 'WARN', 'VARNING', 'VARNINGAR', 'UNKNOWN', 'BLOCKED', 'REVIEW'],
   info: ['INFO', 'DEBUG', 'TRACE', 'NOTICE'],
   skipped: ['SKIPPED'],
   waiting: ['WAITING']
@@ -37,13 +37,13 @@ export function isWorkflowBusy(status) {
   return ['running', 'queued'].includes(statusKind(status))
 }
 
-export default function StatusBadge({ status, showIcon = true }) {
+export default function StatusBadge({ status, showIcon = true, count }) {
   const s = String(status || '—').toUpperCase().replace('-', '—')
   const kind = statusKind(s)
   return (
     <span className={`status-badge ${kind}`}>
       {showIcon && <span className="status-icon">{iconByKind[kind]}</span>}
-      <span>{s}</span>
+      <span>{s}{Number.isInteger(count) && count > 0 && <span className="status-count">({count})</span>}</span>
     </span>
   )
 }

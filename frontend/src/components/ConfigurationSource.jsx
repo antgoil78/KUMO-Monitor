@@ -1,33 +1,33 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api.js'
+import { useBackendHealth } from '../useBackendHealth.js'
 
 export function useConfigurationSource() {
   const [source, setSource] = useState(null)
   const [enabled, setEnabled] = useState(false)
-  const [error, setError] = useState('')
+  const { health, error, retry } = useBackendHealth()
   useEffect(() => {
-    let alive = true
-    api.health().then(health => {
-      if (!alive) return
-      const available = health.environment === 'DEV' && health.taskPrototypeEnabled === true
-      setEnabled(available)
-      setSource(available && window.sessionStorage.getItem('kumoConfigurationSource') !== 'SNOWFLAKE' ? 'POSTGRES' : 'SNOWFLAKE')
-    }).catch(() => { if (alive) setError('Could not determine the configuration source. Reload this page to retry.') })
-    return () => { alive = false }
-  }, [])
+    if (!health) return
+    const available = health.environment === 'DEV' && health.taskPrototypeEnabled === true
+    setEnabled(available)
+    setSource(available && (health.postgresEnginePrimary || window.sessionStorage.getItem('kumoConfigurationSource') !== 'SNOWFLAKE') ? 'POSTGRES' : 'SNOWFLAKE')
+  }, [health])
   function change(value) {
     window.sessionStorage.setItem('kumoConfigurationSource', value)
     window.dispatchEvent(new CustomEvent('kumo:configuration-source', { detail: value }))
     setSource(value)
   }
-  return { source, enabled, change, error, trial: source === 'POSTGRES' }
+  return { source, enabled, change, error, retry, primary: !!health?.postgresEnginePrimary, trial: source === 'POSTGRES' }
 }
 
 export default function ConfigurationSource({ selection, disabled, revision, revisions }) {
-  if (selection.error) return <div className="alert error" role="alert">{selection.error}</div>
+  if (selection.error) return <div className="alert error" role="alert">
+    Could not determine the configuration source. Retrying automatically…
+    <small>{selection.error}</small>
+    <button type="button" onClick={selection.retry}>Retry now</button>
+  </div>
   if (!selection.enabled) return null
   return <div className="orchestration-context">
-    <label>Configuration source <select aria-label="Configuration source" value={selection.source || 'POSTGRES'} disabled={disabled} onChange={event => selection.change(event.target.value)}>
+    <label>Configuration source <select aria-label="Configuration source" value={selection.source || 'POSTGRES'} disabled={disabled || selection.primary} onChange={event => selection.change(event.target.value)}>
       <option value="POSTGRES">PostgreSQL · DEV workflows</option>
       <option value="SNOWFLAKE">Snowflake · existing workflows</option>
     </select></label>

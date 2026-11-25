@@ -10,10 +10,22 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73
+        env:
+          POSTGRES_USER: kumo_ci
+          POSTGRES_PASSWORD: isolated-ci-only
+          POSTGRES_DB: kumo_engine_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U kumo_ci -d kumo_engine_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
     env:
       KUMO_USE_MOCK: 'true'
       KUMO_ORCHESTRATION_RUNS_ENABLED: 'false'
+      KUMO_TASK_ENGINE_TEST_DSN: postgresql://kumo_ci:isolated-ci-only@127.0.0.1:5432/kumo_engine_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

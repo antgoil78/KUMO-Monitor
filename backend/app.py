@@ -1372,6 +1372,10 @@ def bind_request_context():
     if request.path.startswith("/api/") and request.path != "/api/health":
         _renew_activity_lease()
     g.activity_log_id = None
+    if (config.POSTGRES_ENGINE_PRIMARY and request.method not in ('GET','HEAD','OPTIONS')
+            and request.path.startswith('/api/orchestration/')
+            and not request.path.startswith(TASK_PROTOTYPE_PREFIX)):
+        return _json_error('PostgreSQL owns DEV orchestration. Reload the Workflow page.',410)
     if (request.path.startswith('/api/') and request.path not in _CACHE_ONLY_PATHS
             and not request.path.startswith(TASK_PROTOTYPE_PREFIX)
             and not (request.path=='/api/events' and request.args.get('orchestrationSource')=='POSTGRES'
@@ -1506,6 +1510,7 @@ def _health_snapshot():
         "environment": config.ENVIRONMENT or None,
         "deploymentEnvironment": config.DEPLOYMENT_ENVIRONMENT or None,
         "legacyEngineRetired": config.LEGACY_ENGINE_RETIRED,
+        "postgresEnginePrimary": config.POSTGRES_ENGINE_PRIMARY,
         "environmentReady": _environment_ready,
         "environmentError": _environment_error,
         "streamDispatchEnabled": config.STREAM_DISPATCH_ENABLED,

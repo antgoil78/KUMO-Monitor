@@ -338,6 +338,30 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn('secret',response.get_data(as_text=True))
         self.assertNotIn('private-host',response.get_data(as_text=True))
 
+    def test_primary_engine_rejects_legacy_mutations_before_snowflake_bootstrap(self):
+        with patch.object(self.application.config,'POSTGRES_ENGINE_PRIMARY',True):
+            response=self.client.put('/api/orchestration/configuration',json={})
+        self.assertEqual(response.status_code,410)
+        self.assertIn('PostgreSQL owns DEV orchestration',response.get_data(as_text=True))
+
+    def test_readiness_reports_unhealthy_worker_without_snowflake(self):
+        with patch('task_engine.runtime.readiness',return_value=dict(ok=False,checks=dict(worker=False))) as check:
+            response=self.client.get(self.integration.PREFIX+'/ready')
+        self.assertEqual(response.status_code,503);check.assert_called_once_with(self.database)
+
+    def test_native_recovery_uses_trusted_actor_and_postgres_only(self):
+        run=str(uuid.uuid4());self.database.recover.return_value=dict(ok=True,runId=run,recoveredAttempts=1)
+        with patch.dict(self.application.app.extensions,task_prototype_actor_context=lambda:dict(userName='TRUSTED')):
+            response=self.client.post(self.integration.PREFIX+'/runs/'+run+'/recover',json=dict(actor='FORGED'))
+        self.assertEqual(response.status_code,200)
+        self.database.recover.assert_called_once_with(run,'TRUSTED')
+
+    def test_disabled_execution_controls_prevent_native_recovery(self):
+        with patch.dict(os.environ,{'KUMO_ORCHESTRATION_RUNS_ENABLED':'false'}):
+            response=self.client.post(self.integration.PREFIX+'/runs/'+str(uuid.uuid4())+'/recover')
+        self.assertEqual(response.status_code,503)
+        self.database.recover.assert_not_called()
+
     def test_configuration_routes_use_trusted_actor_without_snowflake_or_execution(self):
         with patch('task_engine.configuration.Configuration') as service,patch.dict(self.application.app.extensions,task_prototype_actor_context=lambda:dict(userName='TRUSTED')):
             for name in ['read','dependencies','orders','workflow','job']:
@@ -406,7 +430,7 @@ class ApiTests(unittest.TestCase):
 
     def test_dependency_routes_use_trusted_actor_and_never_bootstrap_snowflake(self):
         with patch('task_engine.dependencies.Graphs') as service,patch.dict(self.application.app.extensions,task_prototype_actor_context=lambda:dict(userName='TRUSTED')):
-            for name in ['status','start','read','cancel','retry_dispatch']:
+            for name in ['status','start','read','cancel','retry_dispatch','retry']:
                 getattr(service.return_value,name).return_value=dict(ok=True)
             self.assertEqual(self.client.get(self.integration.PREFIX+'/graphs').status_code,200)
             self.assertEqual(self.client.post(self.integration.PREFIX+'/graphs/id/runs',json={'requestId':'one'}).status_code,202)
@@ -414,10 +438,14 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(self.client.get(self.integration.PREFIX+'/cascades/id').status_code,200)
             self.assertEqual(self.client.post(self.integration.PREFIX+'/cascades/id/cancel').status_code,200)
             self.assertEqual(self.client.post(self.integration.PREFIX+'/cascades/id/retry-dispatch').status_code,200)
+            service.return_value.cancel.assert_called_once_with('id',actor='TRUSTED')
+            service.return_value.retry_dispatch.assert_called_once_with('id',actor='TRUSTED')
+            self.assertEqual(self.client.post(self.integration.PREFIX+'/cascades/id/nodes/node/retry',json={'actor':'FORGED'}).status_code,202)
+            service.return_value.retry.assert_called_once_with('id','node','TRUSTED')
 
     def test_disabled_execution_controls_block_dependency_mutations(self):
         with patch('task_engine.dependencies.Graphs') as service,patch.dict(os.environ,KUMO_ORCHESTRATION_RUNS_ENABLED='false'):
-            for path in ['/graphs/id/runs','/cascades/id/cancel','/cascades/id/retry-dispatch']:
+            for path in ['/graphs/id/runs','/cascades/id/cancel','/cascades/id/retry-dispatch','/cascades/id/nodes/node/retry']:
                 self.assertEqual(self.client.post(self.integration.PREFIX+path,json={}).status_code,503)
             service.assert_not_called()
 

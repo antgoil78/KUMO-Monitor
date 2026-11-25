@@ -1,0 +1,51 @@
+name: Publish KUMO Monitor PostgreSQL image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docker/postgres/**
+      - .github/workflows/publish-postgres-image.yml
+
+permissions:
+  contents: read
+
+env:
+  SNOWFLAKE_REGISTRY: ${{ vars.SNOWFLAKE_REGISTRY || 'vymkbmw-ov24823.registry.snowflakecomputing.com' }}
+  KUMO_IMAGE_REPOSITORY: ${{ vars.KUMO_IMAGE_REPOSITORY }}
+  LEGACY_IMAGE_URI: ${{ vars.KUMO_IMAGE_URI }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select immutable database image version
+        shell: bash
+        run: |
+          app_repository="${KUMO_IMAGE_REPOSITORY:-${LEGACY_IMAGE_URI:-${SNOWFLAKE_REGISTRY}/kumo_shared/monitor_app/monitor_repository/kumo-monitor}}"
+          if [[ "${app_repository##*/}" == *:* ]]; then app_repository="${app_repository%:*}"; fi
+          database_repository="${app_repository%/*}/kumo-monitor-postgres"
+          if [[ ! "$database_repository" =~ ^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9_.-]+/[a-z0-9_.-]+/[a-z0-9_.-]+/kumo-monitor-postgres$ ]] || [[ "${database_repository%%/*}" != "$SNOWFLAKE_REGISTRY" ]]; then
+            echo "::error::Invalid Snowflake image repository"
+            exit 1
+          fi
+          version="pg17-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA:0:12}"
+          printf '%s\n' "IMAGE_URI=${database_repository}:${version}" "SPCS_IMAGE_PATH=/${database_repository#*/}:${version}" >> "$GITHUB_ENV"
+      - name: Log in to Snowflake registry
+        env:
+          REGISTRY_USER: ${{ secrets.SNOWFLAKE_USER }}
+          REGISTRY_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+        run: printf '%s' "$REGISTRY_PASSWORD" | docker login "$SNOWFLAKE_REGISTRY" -u "$REGISTRY_USER" --password-stdin
+      - name: Build and publish the pinned PostgreSQL image
+        run: |
+          docker build -f docker/postgres/Dockerfile -t "$IMAGE_URI" docker/postgres
+          docker push "$IMAGE_URI"
+      - name: Record image for explicit service promotion
+        run: |
+          {
+            echo '### Published KUMO Monitor PostgreSQL image'
+            echo "- Image: ${IMAGE_URI}"
+            echo "- SPCS path: ${SPCS_IMAGE_PATH}"
+            echo 'Publishing does not update or recreate the database service or its storage.'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -7,6 +7,7 @@ import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .store import Conflict, WorkflowBusy, normalize
+from .decisions import record as record_decision
 
 UTC = timezone.utc
 
@@ -67,6 +68,18 @@ def config_values(body):
                 graceSeconds=grace, enabled=enabled)
 
 
+def catalog_target(conn,target):
+    from .admission import execution_scope
+    if not isinstance(target,dict) or set(target)!={'graphId','workflowId'}:
+        raise ValueError('A workflow schedule needs graphId and workflowId')
+    graph=conn.execute('SELECT * FROM kumo_task_engine.dependency_graphs WHERE id=%s',(uuid.UUID(str(target['graphId'])),)).fetchone()
+    if not graph or 'catalog' not in graph['definition']:raise ValueError('Select a catalog workflow for scheduling')
+    scope=execution_scope(graph['definition'],target['workflowId'])
+    workflow=next(w for w in graph['definition']['catalog']['workflows'] if w['WORKFLOW_ID']==target['workflowId'])
+    if scope['issues']:raise ValueError('; '.join(scope['issues']))
+    if not graph['enabled'] or not workflow['IS_ENABLED']:raise ValueError('The scheduled workflow is disabled')
+
+
 class Schedules:
     def __init__(self, store):
         self.store = store
@@ -79,13 +92,22 @@ class Schedules:
 
     def create(self, body, actor):
         from psycopg.types.json import Jsonb
-        if not isinstance(body, dict) or set(body) - {'requestId', 'name', 'cron', 'timezone', 'graceSeconds', 'enabled', 'plan'}:
-            raise ValueError('Use requestId, name, cron, timezone, graceSeconds, enabled and a disposable plan')
+        if not isinstance(body, dict) or set(body) - {'requestId', 'name', 'cron', 'timezone', 'graceSeconds', 'enabled', 'plan','target'}:
+            raise ValueError('Use schedule settings and either a workflow target or a disposable plan')
         values = config_values(body)
-        plan = body.get('plan')
-        if not isinstance(plan, dict) or not plan.get('workflowKey') or 'requestId' in plan:
-            raise ValueError('A disposable plan needs a stable workflowKey, jobs and optional mode')
-        request_id, frozen = normalize(dict(plan, requestId=body.get('requestId')))
+        target=body.get('target')
+        if target is not None:
+            if 'plan' in body:raise ValueError('Choose either a workflow target or a disposable plan')
+            if not isinstance(target,dict) or set(target)!={'graphId','workflowId'}:raise ValueError('A workflow schedule needs graphId and workflowId')
+            target=dict(graphId=str(uuid.UUID(str(target['graphId']))),workflowId=str(uuid.UUID(str(target['workflowId']))))
+            request_id=body.get('requestId')
+            if not isinstance(request_id,str) or not 1<=len(request_id.strip())<=128:raise ValueError('A stable requestId is required')
+            request_id=request_id.strip();frozen=target
+        else:
+            plan = body.get('plan')
+            if not isinstance(plan, dict) or not plan.get('workflowKey') or 'requestId' in plan:
+                raise ValueError('A disposable plan needs a stable workflowKey, jobs and optional mode')
+            request_id, frozen = normalize(dict(plan, requestId=body.get('requestId')))
         digest = hashlib.sha256(json.dumps(dict(values, plan=frozen), sort_keys=True).encode()).hexdigest()
         with self.store.transaction() as conn:
             old = conn.execute('SELECT * FROM kumo_task_engine.schedules WHERE request_id=%s', (request_id,)).fetchone()
@@ -93,6 +115,10 @@ class Schedules:
                 if old['creation_hash'] != digest:
                     raise Conflict('Schedule requestId already belongs to a different definition')
                 return dict(ok=True, schedule=old, reused=True)
+            if target is not None:
+                catalog_target(conn,target)
+                if conn.execute("SELECT id FROM kumo_task_engine.schedules WHERE plan->>'graphId'=%s AND plan->>'workflowId'=%s",(str(target['graphId']),target['workflowId'])).fetchone():
+                    raise Conflict('This workflow already has a schedule; refresh before editing it')
             now = conn.execute('SELECT clock_timestamp() AS now').fetchone()['now']
             future = next_fire(values['cron'], values['timezone'], now)  # Validate paused schedules too.
             row = conn.execute('''INSERT INTO kumo_task_engine.schedules
@@ -115,6 +141,7 @@ class Schedules:
             if row['revision'] != body['expectedRevision']:
                 raise Conflict('Schedule changed; refresh before saving')
             values = config_values(dict(dict(name=row['name'], cron=row['cron'], timezone=row['timezone'], graceSeconds=row['grace_seconds'], enabled=row['enabled']), **{k:v for k,v in body.items() if k != 'expectedRevision'}))
+            if values['enabled'] and 'graphId' in row['plan']:catalog_target(conn,row['plan'])
             now = conn.execute('SELECT clock_timestamp() AS now').fetchone()['now']
             future = next_fire(values['cron'], values['timezone'], now)
             changed_clock = values['cron'] != row['cron'] or values['timezone'] != row['timezone'] or not row['enabled']
@@ -133,14 +160,23 @@ class Schedules:
             rows = conn.execute('''SELECT s.*,
                 CASE WHEN s.validation_error IS NOT NULL THEN 'INVALID' WHEN s.enabled THEN 'ENABLED' ELSE 'PAUSED' END AS state,
                 (SELECT jsonb_build_object('state',o.state,'scheduledFor',o.scheduled_for,'windowEnd',o.window_end,
-                    'observedAt',o.observed_at,'reason',o.reason,'runId',o.run_id,'runState',r.state)
+                    'observedAt',o.observed_at,'reason',o.reason,'runId',o.run_id,'cascadeId',o.cascade_id,
+                    'runState',COALESCE(r.state,nr.state,CASE n.state WHEN 'WAITING' THEN 'QUEUED' WHEN 'ADMITTED' THEN 'QUEUED' ELSE n.state END,c.state))
                  FROM kumo_task_engine.schedule_occurrences o LEFT JOIN kumo_task_engine.runs r ON r.id=o.run_id
+                 LEFT JOIN kumo_task_engine.cascades c ON c.id=o.cascade_id
+                 LEFT JOIN kumo_task_engine.cascade_nodes n ON n.cascade_id=c.id AND c.snapshot->'workflowIds'->>n.node_key=s.plan->>'workflowId'
+                 LEFT JOIN kumo_task_engine.runs nr ON nr.id=n.run_id
                  WHERE o.schedule_id=s.id ORDER BY o.scheduled_for DESC LIMIT 1) AS last_occurrence,
                 (SELECT jsonb_build_object('id',r.id,'state',r.state) FROM kumo_task_engine.runs r
                  WHERE r.workflow_key=s.plan->>'workflowKey' AND r.state IN ('QUEUED','RUNNING','UNKNOWN') LIMIT 1) AS active_run
                 FROM kumo_task_engine.schedules s ORDER BY s.created_at DESC LIMIT 100''').fetchall()
-            occurrences = conn.execute('''SELECT o.id,o.schedule_id,o.revision,o.scheduled_for,o.window_end,o.state,o.reason,o.run_id,o.observed_at,r.state AS run_state
+            occurrences = conn.execute('''SELECT o.id,o.schedule_id,o.revision,o.scheduled_for,o.window_end,o.state,o.reason,o.run_id,o.cascade_id,o.observed_at,
+                COALESCE(r.state,nr.state,CASE n.state WHEN 'WAITING' THEN 'QUEUED' WHEN 'ADMITTED' THEN 'QUEUED' ELSE n.state END,c.state) AS run_state
                 FROM kumo_task_engine.schedule_occurrences o LEFT JOIN kumo_task_engine.runs r ON r.id=o.run_id
+                JOIN kumo_task_engine.schedules s ON s.id=o.schedule_id
+                LEFT JOIN kumo_task_engine.cascades c ON c.id=o.cascade_id
+                LEFT JOIN kumo_task_engine.cascade_nodes n ON n.cascade_id=c.id AND c.snapshot->'workflowIds'->>n.node_key=s.plan->>'workflowId'
+                LEFT JOIN kumo_task_engine.runs nr ON nr.id=n.run_id
                 ORDER BY o.observed_at DESC,o.scheduled_for DESC LIMIT 100''').fetchall()
             workers = conn.execute('SELECT * FROM kumo_task_engine.scheduler_workers ORDER BY last_seen DESC').fetchall()
             enabled = conn.execute('SELECT count(*) AS n FROM kumo_task_engine.schedules WHERE enabled').fetchone()['n']
@@ -161,12 +197,29 @@ class Scheduler:
     def record(conn, row, due, state, reason=None, window_end=None):
         from psycopg.types.json import Jsonb
         snapshot = {k:row[k] for k in ('name', 'cron', 'timezone', 'grace_seconds', 'plan')}
-        return conn.execute('''INSERT INTO kumo_task_engine.schedule_occurrences
+        occurrence=conn.execute('''INSERT INTO kumo_task_engine.schedule_occurrences
             (id,schedule_id,revision,scheduled_for,window_end,state,reason,snapshot) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT(schedule_id,scheduled_for) DO NOTHING RETURNING id''',
             (uuid.uuid4(), row['id'], row['revision'], due, window_end, state, reason, Jsonb(snapshot))).fetchone()
+        record_decision(conn,'schedule','OCCURRENCE_MISSED' if state=='MISSED' else 'OCCURRENCE_DUE' if occurrence else 'OCCURRENCE_ALREADY_RECORDED',
+            schedule_id=row['id'],occurrence_id=occurrence['id'] if occurrence else None,
+            scheduledFor=due,scheduleRevision=row['revision'],windowEnd=window_end,reason=reason)
+        return occurrence
 
     def step(self, execution_enabled=True):
+        context={}
+        try:
+            return self._step(execution_enabled,context)
+        except Exception as exc:
+            # Committed decisions from the failed evaluation have rolled back.
+            # Keep only the error, using its type rather than raw SQL/DSN text.
+            if context:
+                with self.store.transaction() as conn:
+                    record_decision(conn,'schedule','SCHEDULE_EVALUATION_ERROR',actor=self.owner,
+                        errorType=type(exc).__name__,evaluationRolledBack=True,**context)
+            raise
+
+    def _step(self, execution_enabled, context):
         # This lock also serializes manual admission and schedule edits. Both the
         # occurrence and run admission commit with the next due time, or none do.
         with self.store.transaction() as conn:
@@ -180,6 +233,7 @@ class Scheduler:
                 ORDER BY next_fire_at LIMIT 1 FOR UPDATE SKIP LOCKED''', (now,)).fetchone()
             if not row:
                 return False
+            context['schedule_id']=row['id']
             conn.execute('SAVEPOINT schedule_evaluation')
             try:
                 original = row['next_fire_at']
@@ -197,14 +251,23 @@ class Scheduler:
                     occurrence = self.record(conn, row, due, 'ADMITTED')
                     if occurrence:
                         plan = {k:v for k,v in row['plan'].items() if k != 'version'}
-                        try:
-                            run = self.store.submit_in_transaction(conn, dict(plan, requestId='schedule-'+str(row['id'])+'-'+due.astimezone(UTC).isoformat()), 'SCHEDULE:'+str(row['id']))
-                        except WorkflowBusy:
-                            conn.execute("UPDATE kumo_task_engine.schedule_occurrences SET state='SKIPPED_OVERLAP',reason='An execution for this trial workflow is still outstanding' WHERE id=%s", (occurrence['id'],))
+                        if 'graphId' in plan:
+                            from .dependencies import Graphs
+                            catalog_target(conn,plan)
+                            result=Graphs(self.store).start_in_transaction(conn,plan['graphId'],
+                                dict(workflowId=plan['workflowId'],requestId='schedule-'+str(row['id'])+'-'+due.astimezone(UTC).isoformat()),
+                                'SCHEDULE:'+str(row['id']),trigger='SCHEDULED')
+                            conn.execute('UPDATE kumo_task_engine.schedule_occurrences SET cascade_id=%s WHERE id=%s',(uuid.UUID(result['cascadeId']),occurrence['id']))
+                            record_decision(conn,'schedule','OCCURRENCE_ADMITTED',
+                                graph_id=plan['graphId'],cascade_id=result['cascadeId'],
+                                schedule_id=row['id'],occurrence_id=occurrence['id'],actor=self.owner,
+                                workflowId=plan['workflowId'],scheduledFor=due,
+                                scheduleRevision=row['revision'],reused=result['reused'])
                         else:
-                            conn.execute('UPDATE kumo_task_engine.schedule_occurrences SET run_id=%s WHERE id=%s', (uuid.UUID(run['runId']), occurrence['id']))
-                            self.store.event(conn, uuid.UUID(run['runId']), 'SCHEDULED', scheduleId=str(row['id']), revision=row['revision'], scheduledFor=due.isoformat())
+                            self.admit_trial(conn,row,plan,due,occurrence)
                 conn.execute('UPDATE kumo_task_engine.schedules SET next_fire_at=%s WHERE id=%s', (future, row['id']))
+                record_decision(conn,'schedule','SCHEDULE_ADVANCED',schedule_id=row['id'],actor=self.owner,
+                    previousFireAt=original,nextFireAt=future,scheduleRevision=row['revision'])
             except ValueError as exc:
                 # Validation errors stop this schedule; database/admission errors
                 # propagate and roll back its entire transaction for recovery.
@@ -213,4 +276,20 @@ class Scheduler:
                 conn.execute('ROLLBACK TO SAVEPOINT schedule_evaluation')
                 conn.execute('UPDATE kumo_task_engine.schedules SET enabled=false,next_fire_at=NULL,validation_error=%s WHERE id=%s', (str(exc), row['id']))
                 Schedules.audit(conn, row, 'INVALID', 'SCHEDULER', reason=str(exc))
+                record_decision(conn,'schedule','SCHEDULE_DISABLED_INVALID',schedule_id=row['id'],actor=self.owner,
+                    reason=str(exc),scheduleRevision=row['revision'])
             return True
+
+    def admit_trial(self,conn,row,plan,due,occurrence):
+        try:
+            run = self.store.submit_in_transaction(conn, dict(plan, requestId='schedule-'+str(row['id'])+'-'+due.astimezone(UTC).isoformat()), 'SCHEDULE:'+str(row['id']))
+        except WorkflowBusy:
+            conn.execute("UPDATE kumo_task_engine.schedule_occurrences SET state='SKIPPED_OVERLAP',reason='An execution for this trial workflow is still outstanding' WHERE id=%s", (occurrence['id'],))
+            record_decision(conn,'schedule','OCCURRENCE_SKIPPED_OVERLAP',schedule_id=row['id'],
+                occurrence_id=occurrence['id'],actor=self.owner,scheduledFor=due,workflowKey=plan['workflowKey'])
+        else:
+            conn.execute('UPDATE kumo_task_engine.schedule_occurrences SET run_id=%s WHERE id=%s', (uuid.UUID(run['runId']), occurrence['id']))
+            self.store.event(conn, uuid.UUID(run['runId']), 'SCHEDULED', scheduleId=str(row['id']), revision=row['revision'], scheduledFor=due.isoformat())
+            record_decision(conn,'schedule','OCCURRENCE_ADMITTED',schedule_id=row['id'],
+                occurrence_id=occurrence['id'],run_id=run['runId'],actor=self.owner,
+                scheduledFor=due,scheduleRevision=row['revision'],reused=run['reused'])

@@ -15,13 +15,13 @@ import useOrchestrationMonitor, { activeWorkflowStatuses, applySubmission } from
 import { RunWorkflowDialog } from './WorkflowExecution.jsx'
 import './OrchestrationMonitor.css'
 
-const statuses = ['RUNNING', 'CLAIMED', 'QUEUED', 'FAILED', 'SUCCESS', 'WARNING', 'SKIPPED', 'CANCELLED', 'NOT RUN', 'WAITING', 'BLOCKED', 'UNKNOWN']
+const statuses = ['RUNNING', 'FAILED', 'SUCCESS', 'WARNING', 'SKIPPED', 'CANCELLED', 'NO RUN', 'UNKNOWN']
 const summaryStatuses = [
   ['SUCCESS', 'success', '✓', 'success'], ['FAILED', 'failed', '×', 'failed'],
-  ['RUNNING', 'running', '▶', 'running/init'], ['QUEUED', 'queued', '●', 'queued'],
-  ['NOT RUN', 'muted', '—', 'not run'], ['WARNING', 'warning', '!', 'warning'],
+  ['RUNNING', 'running', '▶', 'running'],
+  ['NO RUN', 'muted', '—', 'no run'], ['WARNING', 'warning', '!', 'warning'],
   ['SKIPPED', 'skipped', '↷', 'skipped'], ['CANCELLED', 'muted', '—', 'cancelled'],
-  ['WAITING', 'queued', '●', 'waiting'], ['BLOCKED', 'warning', '!', 'blocked'], ['UNKNOWN', 'warning', '!', 'needs review']
+  ['UNKNOWN', 'warning', '!', 'needs review']
 ]
 const timeFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Stockholm', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 const dateFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Stockholm', day: '2-digit', month: 'short', year: 'numeric' })
@@ -45,15 +45,34 @@ function matches(workflow, query) {
     .some(value => String(value || '').toLowerCase().includes(query))
 }
 
-function RunCells({ run, lastRun, now }) {
+function executionOf(workflow) { return workflow.execution || workflow.run }
+
+function RunCells({ run, lastRun, now, stateCell = null }) {
   const timing = lastRun || run
   const start = asDate(timing.start)
   const day = lastRunDay(timing.start, now)
-  const waiting = ['INITIATING', 'CLAIMED', 'QUEUED'].includes(run.status) && !run.start
-  const requested = asDate(run.requestedAt)
-  const waitSeconds = requested ? Math.max(0, Math.floor((now - requested) / 1000)) : null
-  const phase = waiting ? `${run.status === 'INITIATING' && !run.executionId ? 'Submitting request' : 'Waiting to start'}${waitSeconds == null ? '' : ` · ${waitSeconds}s`}` : ''
-  return <><td><span className="om-live-status">{['INITIATING', 'CLAIMED', 'QUEUED', 'RUNNING'].includes(run.status) && <span className="om-spinner" role="img" aria-label={run.status === 'RUNNING' ? 'Execution in progress' : 'Preparing execution'} />}<StatusBadge status={run.status === 'CLAIMED' ? 'INITIATING' : run.status} /></span>{phase && <small>{phase}</small>}</td><td className="om-time" title={timing.start || ''}>{start ? <>{timeFormatter.format(start)}<small className={day.tone ? `om-day-${day.tone}` : ''}>{day.label}</small></> : '—'}</td><td className="om-time">{durationLabel(run, now)}</td></>
+  return <><td className="om-execution-status"><span className="om-live-status">{run.status === 'RUNNING' && <span className="om-spinner" role="img" aria-label="Execution in progress" />}<StatusBadge status={run.status === 'NOT RUN' ? 'NO RUN' : run.status} /></span></td><td className="om-planning-cell">{stateCell || <span className="om-muted">—</span>}</td><td className="om-time" title={timing.start || ''}>{start ? <>{timeFormatter.format(start)}<small className={day.tone ? `om-day-${day.tone}` : ''}>{day.label}</small></> : '—'}</td><td className="om-time">{durationLabel(run, now)}</td></>
+}
+
+function PlanningState({ workflow }) {
+  const plan = workflow.planning
+  if (!plan) return <span className="om-muted">—</span>
+  const status = plan.status === 'EXECUTING' ? '' : plan.status
+  const dependencies = directWaits(plan).filter(item => item.relationship === 'PARENT')
+  const preparing = ['INITIATING', 'QUEUED'].includes(plan.status) && !plan.dispatch?.canRetry
+  const waitingTitle = `${plan.waitingCount || 0} execution requests waiting for this workflow`
+  const recovery = plan.recovery
+  return <div className={`om-planning${plan.status === 'BLOCKED' || plan.status === 'NEEDS REVIEW' || dependencies.some(item => item.statuses.has('UNKNOWN')) ? ' om-error' : ''}`} title={plan.message || undefined}>
+    <span className="om-planning-status">{preparing && <span className="om-spinner" role="img" aria-label="Preparing execution" />}{status && <span title={status === 'WAITING' ? waitingTitle : undefined}><StatusBadge status={status} count={status === 'WAITING' ? plan.waitingCount : undefined} /></span>}{plan.waitingCount > 0 && status !== 'WAITING' && <span title={waitingTitle}><StatusBadge status="WAITING" count={plan.waitingCount} /></span>}{plan.scheduled && status !== 'SCHEDULED' && <StatusBadge status="SCHEDULED" />}</span>
+    {plan.queuedCount > 0 && plan.status !== 'QUEUED' && <small>{plan.queuedCount} queued</small>}
+    {dependencies.length > 0 && <small className="om-dependency-list"><DependencyWaits items={dependencies} /></small>}
+    {plan.stopped && <small>Plan stopped</small>}
+    {plan.dispatch?.canRetry && <small className="om-dispatch-paused">Group dispatch paused</small>}
+    {recovery && <small>{recovery.automatic ? 'Automatic recovery scheduled' : 'Task recovery paused'}{recovery.nextRetryAt && ` · Next connection retry ${formatDateTimeSeconds(recovery.nextRetryAt)}`}</small>}
+    {recovery && plan.message && <small>{plan.message}</small>}
+    {workflow.cancelRequested && <small>{plan.message || 'Cancellation requested'}</small>}
+    {workflow.canRunWithChildren === false && workflow.runUnavailable && !workflow.canRun && !plan.message && plan.status === 'NO PLAN' && <small>{workflow.runUnavailable}</small>}
+  </div>
 }
 
 function RunActions({ name, displayName, disabled, reason, onRun, onHistory, onRunFrom, onDag, canDag, onLog, canLog, onState, enabled, busy, onSchedule, scheduleEnabled, onEditSchedule, onCancel }) {
@@ -124,7 +143,7 @@ function RunActions({ name, displayName, disabled, reason, onRun, onHistory, onR
 
 function JobProgress({ job }) {
   const progress = job.progress
-  if (!progress?.total) return <span className="om-muted">{job.run.status === 'RUNNING' && job.JOB_TYPE === 'DBT' ? 'Waiting for dbt progress…' : jobProgress(job)}</span>
+  if (!progress?.total) return <span className="om-muted">{job.run.status === 'RUNNING' && job.JOB_TYPE === 'DBT' ? job.run.source === 'POSTGRES' ? 'DBT task running' : 'Waiting for dbt progress…' : jobProgress(job)}</span>
   return <div className={`om-progress ${progress.models?.failed || progress.tests?.failed ? 'has-failure' : ''}`}>
     {['models', 'tests'].map(kind => {
       const part = progress[kind]
@@ -150,7 +169,7 @@ function jobProgress(job) {
   if (state === 'SKIPPED') return 'Skipped'
   if (state === 'CANCELLED') return 'Cancelled'
   if (state === 'NOT SELECTED') return 'Not in this execution'
-  if (state === 'NOT RUN') return job.JOB_IS_ENABLED === false ? 'Disabled' : 'No executions yet'
+  if (['NOT RUN', 'NO RUN'].includes(state)) return job.JOB_IS_ENABLED === false ? 'Disabled' : 'No executions yet'
   return 'Awaiting execution'
 }
 
@@ -179,40 +198,64 @@ function ScheduleDialog({ workflow, busy, error, onClose, onSave }) {
 }
 
 function workflowDetail(workflow) {
-  return [workflow.run.waitingFor?.length && `Waiting for ${workflow.run.waitingFor.map(item => `${item.name} (${item.status})`).join(', ')}`,
+  return [!workflow.run.message && workflow.run.waitingFor?.length && `Waiting for ${workflow.run.waitingFor.map(item => `${item.name} (${item.status})`).join(', ')}`,
     workflow.run.message, workflow.WORKFLOW_GROUP || 'Ungrouped', !workflow.IS_ENABLED && 'Disabled',
-    workflow.source === 'POSTGRES' && workflow.runUnavailable,
+    workflow.run.recovery?.nextRetryAt && `Next connection retry ${formatDateTimeSeconds(workflow.run.recovery.nextRetryAt)}`,
+    workflow.source === 'POSTGRES' && !workflow.run.message && workflow.runUnavailable,
     workflow.run.runId && workflow.run.mode?.replaceAll('_', ' '), workflow.run.requestedBy,
     workflow.parentWorkflowName && `After ${workflow.parentWorkflowName}`,
     workflow.queuedCount > 0 && `${workflow.queuedCount} queued`].filter(Boolean).join(' · ')
 }
 
-function jobDetail(job) {
-  return [job.runOnly && 'No longer assigned', job.JOB_IS_ENABLED === false && 'Disabled', job.run.message || jobProgress(job)].filter(Boolean).join(' · ')
+function directWaits(run) {
+  const dependencies = new Map()
+  for (const item of run.waitingFor || []) {
+    if (!['PARENT', 'CHILD', 'SELF'].includes(item.relationship)) continue
+    const key = `${item.relationship}:${item.nodeKey || item.name}`
+    if (!dependencies.has(key)) dependencies.set(key, { ...item, statuses: new Set() })
+    dependencies.get(key).statuses.add(item.status === 'ADMITTED' ? 'QUEUED' : item.status === 'STALE_PARENT' ? 'STALE' : item.status || 'MISSING')
+  }
+  return [...dependencies.values()]
 }
 
-function WorkflowRows({ workflow, onCancel, expanded, onToggle, onHistory, onRun, onDag, onLog, onState, onSchedule, onEditSchedule, busy, now }) {
+function DependencyWaits({ items }) {
+  const labels = { PARENT: 'Parent', CHILD: 'Child', SELF: 'Other run of' }
+  return items.map(item => <span className="om-dependency-item" key={`${item.relationship}:${item.nodeKey || item.name}`} title={item.reason || undefined}>
+    <span>{labels[item.relationship]} {item.name}</span>
+    {[...item.statuses].map(status => <StatusBadge key={status} status={status} showIcon={false} />)}
+  </span>)
+}
+
+function jobDetail(job, dependencyWait = false) {
+  return [job.runOnly && 'No longer assigned', job.JOB_IS_ENABLED === false && 'Disabled',
+    dependencyWait && job.run.status === 'PENDING' ? jobProgress(job) : job.run.message || jobProgress(job)].filter(Boolean).join(' · ')
+}
+
+function WorkflowRows({ workflow, onCancel, onRecover, onRetry, expanded, onToggle, onHistory, onRun, onDag, onLog, onState, onSchedule, onEditSchedule, busy, now }) {
   const { total, succeeded, failed, skipped, cancelled = 0, completed = succeeded + failed + skipped + cancelled } = workflow.progress
-  const parallel = (workflow.run.runId ? workflow.run.jobExecutionMode : workflow.JOB_EXECUTION_MODE) === 'PARALLEL'
+  const execution = executionOf(workflow)
+  const parallel = (execution.runId ? execution.jobExecutionMode : workflow.JOB_EXECUTION_MODE) === 'PARALLEL'
   const percent = workflow.progress.percent ?? (total ? Math.round(completed / total * 100) : 0)
   const progressLabel = `${completed} / ${total} finished · ${succeeded} succeeded${failed ? ` · ${failed} failed` : ''}${skipped ? ` · ${skipped} skipped` : ''}${cancelled ? ` · ${cancelled} cancelled` : ''}`
   const runDisabled = !workflow.canRun || activeWorkflowStatuses.has(workflow.run.status)
-  const runReason = activeWorkflowStatuses.has(workflow.run.status) ? 'Workflow is already queued or running.' : workflow.runUnavailable
+  const runReason = workflow.run.message || workflow.runUnavailable || (activeWorkflowStatuses.has(workflow.run.status) ? 'Workflow is already queued or running.' : '')
   const bodyId = `om-jobs-${workflow.WORKFLOW_ID}`
   const jobById = new Map(workflow.jobs.map(job => [job.JOB_ID, job]))
   const assignedCount = workflow.jobs.filter(job => !job.runOnly).length
+  const dependencies = directWaits(workflow.planning || workflow.run)
+  const compactDependencies = dependencies.length > 0 && !workflow.cancelRequested && !workflow.run.recovery && !workflow.run.dispatch?.canRetry
   return <>
     <tbody className="om-parent">
       <tr className={!workflow.IS_ENABLED ? 'om-row-disabled' : undefined}>
         <th scope="row">
           <div className="om-name">
             <HierarchyToggle expanded={expanded} onClick={onToggle} aria-controls={bodyId} aria-label={`${expanded ? 'Hide' : 'Show'} jobs for ${workflow.WORKFLOW_NAME}`} />
-            <div className="om-name-text"><button type="button" className="om-workflow-link" aria-label={`Execution history for ${workflow.WORKFLOW_NAME}`} onClick={onHistory}><strong title={workflow.WORKFLOW_NAME}>{workflow.WORKFLOW_NAME}</strong></button><small className={workflow.run.message ? 'om-name-detail om-error' : 'om-name-detail'} title={workflowDetail(workflow)}>{workflowDetail(workflow)}</small></div>
-            <RunActions name={`workflow ${workflow.WORKFLOW_NAME}`} displayName={workflow.WORKFLOW_NAME} disabled={runDisabled} reason={runReason} onRun={() => onRun()} onHistory={onHistory} onLog={() => onLog()} canLog={Boolean(workflow.run.runId)} onState={workflow.isUnassigned ? null : () => onState()} onCancel={onCancel} enabled={workflow.IS_ENABLED} busy={busy} onSchedule={onSchedule} scheduleEnabled={workflow.IS_SCHEDULE_ENABLED} onEditSchedule={onEditSchedule} />
+            <div className="om-name-text"><button type="button" className="om-workflow-link" aria-label={`Execution history for ${workflow.WORKFLOW_NAME}`} onClick={onHistory}><strong title={workflow.WORKFLOW_NAME}>{workflow.WORKFLOW_NAME}</strong></button><small className={`om-name-detail${compactDependencies ? ' om-dependency-list' : ''}${['FAILED', 'BLOCKED', 'UNKNOWN'].includes(workflow.run.status) || dependencies.some(item => item.statuses.has('UNKNOWN')) || workflow.run.dispatch?.canRetry ? ' om-error' : ''}`} title={workflowDetail(workflow)}>{workflow.planning ? [workflow.WORKFLOW_GROUP || 'Ungrouped', !workflow.IS_ENABLED && 'Disabled'].filter(Boolean).join(' · ') : compactDependencies ? <DependencyWaits items={dependencies} /> : workflowDetail(workflow)}</small></div>
+            <RunActions name={`workflow ${workflow.WORKFLOW_NAME}`} displayName={workflow.WORKFLOW_NAME} disabled={runDisabled} reason={runReason} onRun={() => onRun()} onHistory={onHistory} onLog={() => onLog()} canLog={Boolean(execution.runId)} onState={workflow.isUnassigned ? null : () => onState()} onCancel={onCancel} enabled={workflow.IS_ENABLED} busy={busy} onSchedule={onSchedule} scheduleEnabled={workflow.IS_SCHEDULE_ENABLED} onEditSchedule={onEditSchedule} />
           </div>
         </th>
-        <td><span className="om-kind">Workflow</span><small>{assignedCount} assigned {assignedCount === 1 ? 'job' : 'jobs'}{parallel ? ' · Parallel' : ''}</small></td>
-        <RunCells run={workflow.run} lastRun={workflow.lastRun} now={now} />
+        <td><span className="om-kind">Workflow</span><small>{assignedCount} assigned {assignedCount === 1 ? 'job' : 'jobs'}{parallel ? ' · Parallel' : ''}</small>{workflow.run.recovery?.canRecover && <button type="button" className="button" disabled={busy} aria-label={`Recover workflow ${workflow.WORKFLOW_NAME}`} onClick={onRecover}>Recover</button>}{workflow.run.retry && <button type="button" className="button" disabled={busy || !workflow.canRun} title={workflow.canRun ? 'Retry this failed workflow and resume its blocked descendants. Completed workflows are retained.' : workflow.runUnavailable} aria-label={`Retry failed workflow ${workflow.WORKFLOW_NAME}`} onClick={onRetry}>Retry</button>}</td>
+        <RunCells run={execution} now={now} stateCell={<PlanningState workflow={workflow} />} />
         <td>{total ? <div className={`om-progress ${failed ? 'has-failure' : ''}`}><span title={progressLabel}>{completed} / {total} finished</span><div className="om-track" role="progressbar" aria-label={`Workflow progress for ${workflow.WORKFLOW_NAME}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><i style={{ width: `${percent}%` }} /></div></div> : <span className="om-muted">No executions yet</span>}</td>
         <td>{workflow.IS_SCHEDULE_ENABLED ? <><span className="om-cron">{workflow.SCHEDULE}</span><small>{workflow.SCHEDULE_TIMEZONE || 'UTC'}{!workflow.IS_ENABLED && ' · Paused with workflow'}</small></> : <span className="om-muted">Not scheduled</span>}</td>
         <td className="om-time"><NextRun workflow={workflow} /></td>
@@ -221,14 +264,14 @@ function WorkflowRows({ workflow, onCancel, expanded, onToggle, onHistory, onRun
     </tbody>
     <tbody id={bodyId} className="om-children" hidden={!expanded}>
       {workflow.jobs.map(job => <tr key={job.JOB_ID} className={!workflow.IS_ENABLED || job.JOB_IS_ENABLED === false ? 'om-row-disabled' : undefined}>
-        <th scope="row"><div className="om-job-name"><span className="om-sequence" title="Configured job order">{String(job.JOB_SEQUENCE || '—').padStart(2, '0')}</span><div className="om-name-text"><strong title={job.JOB_NAME}>{job.JOB_NAME}</strong><small className={job.run.status === 'FAILED' ? 'om-name-detail om-error' : 'om-name-detail'} title={jobDetail(job)}>{jobDetail(job)}</small></div><RunActions name={`${job.JOB_NAME} in ${workflow.WORKFLOW_NAME}`} displayName={job.JOB_NAME} disabled={workflow.source === 'POSTGRES' || runDisabled || job.runOnly || job.JOB_IS_ENABLED === false} reason={workflow.source === 'POSTGRES' ? 'Individual job execution is not available; start the complete dependency group.' : job.runOnly ? 'Job is no longer assigned.' : job.JOB_IS_ENABLED === false ? 'Job is disabled.' : runReason} onRun={() => onRun(job.JOB_ID)} onRunFrom={() => onRun(job.JOB_ID, 'FROM_JOB')} onHistory={() => onHistory(job)} onDag={job.JOB_TYPE === 'DBT' ? () => onDag(job) : undefined} canDag={workflow.source !== 'POSTGRES' && Boolean(job.lastRun?.runId)} onLog={() => onLog(job)} canLog={Boolean(job.run.executionId || job.lastRun?.executionId)} onState={job.runOnly ? null : () => onState(job)} enabled={job.JOB_IS_ENABLED} busy={busy} /></div></th>
+        <th scope="row"><div className="om-job-name"><span className="om-sequence" title="Configured job order">{String(job.JOB_SEQUENCE || '—').padStart(2, '0')}</span><div className="om-name-text"><strong title={job.JOB_NAME}>{job.JOB_NAME}</strong><small className={job.run.status === 'FAILED' ? 'om-name-detail om-error' : 'om-name-detail'} title={jobDetail(job)}>{jobDetail(job, compactDependencies)}</small></div><RunActions name={`${job.JOB_NAME} in ${workflow.WORKFLOW_NAME}`} displayName={job.JOB_NAME} disabled={workflow.source === 'POSTGRES' || runDisabled || job.runOnly || job.JOB_IS_ENABLED === false} reason={workflow.source === 'POSTGRES' ? 'Individual job execution is not available; start the complete dependency group.' : job.runOnly ? 'Job is no longer assigned.' : job.JOB_IS_ENABLED === false ? 'Job is disabled.' : runReason} onRun={() => onRun(job.JOB_ID)} onRunFrom={() => onRun(job.JOB_ID, 'FROM_JOB')} onHistory={() => onHistory(job)} onDag={job.JOB_TYPE === 'DBT' ? () => onDag(job) : undefined} canDag={workflow.source !== 'POSTGRES' && Boolean(job.lastRun?.runId)} onLog={() => onLog(job)} canLog={Boolean(job.run.executionId || job.lastRun?.executionId)} onState={job.runOnly ? null : () => onState(job)} enabled={job.JOB_IS_ENABLED} busy={busy} /></div></th>
         <td><span className="om-kind">{job.JOB_TYPE || '—'}</span><small>{job.JOB_LAYER || 'GENERAL'}</small></td>
         <RunCells run={job.run} lastRun={job.lastRun} now={now} />
         <td><JobProgress job={job} /></td>
         <td><span className="om-dependency">{job.runOnly ? 'See execution history' : parallel ? 'With workflow · Parallel job' : job.PARENT_JOB_ID ? `After ${jobById.get(job.PARENT_JOB_ID)?.JOB_NAME || 'Unknown job'}` : `First job · ${workflow.WORKFLOW_NAME}`}</span><small>{[workflow.IS_SCHEDULE_ENABLED && job.JOB_IS_ENABLED !== false && !job.runOnly && 'With workflow', !job.runOnly && (parallel ? job.hasSqlCondition ? 'SQL condition' : 'Independent job' : dependencyLabel(job))].filter(Boolean).join(' · ') || '—'}</small></td>
         <td className="om-time"><NextRun workflow={workflow} job={job} /></td>
       </tr>)}
-      {!workflow.jobs.length && <tr><td colSpan={8} className="om-empty-jobs">No jobs assigned.</td></tr>}
+      {!workflow.jobs.length && <tr><td colSpan={9} className="om-empty-jobs">No jobs assigned.</td></tr>}
     </tbody>
   </>
 }
@@ -240,6 +283,7 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
   const [now, setNow] = useState(Date.now())
   const [search, setSearch] = useState(monitorState?.search || '')
   const [status, setStatus] = useState(monitorState?.status || '')
+  const [planningStatus, setPlanningStatus] = useState(monitorState?.planningStatus || '')
   const [group, setGroup] = useState(monitorState?.group || '')
   const [expanded, setExpanded] = useState(() => new Set(monitorState?.expanded || []))
   const [view, setView] = useState(() => monitorState?.view || (new URLSearchParams(window.location.search).get('view') === 'timeline' ? 'timeline' : 'table'))
@@ -254,7 +298,7 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
   const statusDelayed = statusAgeSeconds > Math.max(15, (data?.refreshSeconds || 5) * 3)
   const rows = useMemo(() => (data?.rows || []).map(workflow => applySubmission(workflow, data?.submissions)), [data])
   const summary = useMemo(() => rows.filter(workflow => !workflow.isUnassigned).reduce((counts, workflow) => {
-    const state = ['SUBMITTING', 'INITIATING', 'CLAIMED'].includes(workflow.run.status) ? 'RUNNING' : workflow.run.status
+    const state = executionOf(workflow).status === 'NOT RUN' ? 'NO RUN' : executionOf(workflow).status
     counts[state] = (counts[state] || 0) + 1
     return counts
   }, {}), [rows])
@@ -262,7 +306,7 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [])
-  const visible = useMemo(() => rows.filter(workflow => matches(workflow, search.trim().toLowerCase()) && (!status || workflow.run.status === status) && (!group || workflow.WORKFLOW_GROUP === group)), [rows, search, status, group])
+  const visible = useMemo(() => rows.filter(workflow => matches(workflow, search.trim().toLowerCase()) && (!status || (executionOf(workflow).status === 'NOT RUN' ? 'NO RUN' : executionOf(workflow).status) === status) && (!planningStatus || workflow.planning?.status === planningStatus) && (!group || workflow.WORKFLOW_GROUP === group)), [rows, search, status, group, planningStatus])
 
   function toggle(id) {
     setExpanded(current => {
@@ -300,10 +344,50 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
     if (savingRef.current) return
     savingRef.current = true; setSaving(true); setSaveError(''); setNotice('')
     try {
-      const result = await api.setOrchestrationSchedule(workflow.WORKFLOW_ID, payload)
+      let result
+      if (postgres) {
+        const settings = { enabled: payload.enabled, cron: payload.cron ?? workflow.SCHEDULE, timezone: payload.timezone ?? workflow.SCHEDULE_TIMEZONE ?? 'Europe/Stockholm' }
+        result = workflow.scheduler?.id
+          ? await api.updateTaskPrototypeSchedule(workflow.scheduler.id, { ...settings, expectedRevision: workflow.scheduler.revision })
+          : await api.createTaskPrototypeSchedule({ ...settings, requestId: `workflow-schedule:${workflow.graphId}:${workflow.WORKFLOW_ID}`, name: workflow.WORKFLOW_NAME,
+            target: { graphId: workflow.graphId, workflowId: workflow.WORKFLOW_ID } })
+      } else result = await api.setOrchestrationSchedule(workflow.WORKFLOW_ID, payload)
       setNotice(result.warning || `${workflow.WORKFLOW_NAME} schedule ${payload.enabled ? 'enabled' : 'disabled'}.`)
       setScheduleSelection(null); refresh()
     } catch (failure) { setSaveError(failure.message) }
+    finally { savingRef.current = false; setSaving(false) }
+  }
+
+  async function retryDispatch(failure) {
+    if (savingRef.current) return
+    savingRef.current = true; setSaving(true); setSaveError(''); setNotice('')
+    try {
+      await api.retryTaskPrototypeDispatch(failure.cascadeId)
+      setNotice('Dependency dispatch queued for retry. Completed and running jobs are retained.')
+      refresh()
+    } catch (error) { setSaveError(error.message) }
+    finally { savingRef.current = false; setSaving(false) }
+  }
+
+  async function recoverRun(workflow) {
+    if (savingRef.current) return
+    savingRef.current = true; setSaving(true); setSaveError(''); setNotice('')
+    try {
+      await api.recoverTaskPrototypeRun(workflow.run.recovery.runId)
+      setNotice(`${workflow.WORKFLOW_NAME} recovery queued. Submitted tasks are checked without executing them again.`)
+      refresh()
+    } catch (error) { setSaveError(error.message) }
+    finally { savingRef.current = false; setSaving(false) }
+  }
+
+  async function retryWorkflow(workflow) {
+    if (savingRef.current) return
+    savingRef.current = true; setSaving(true); setSaveError(''); setNotice('')
+    try {
+      await api.retryTaskPrototypeWorkflow(workflow.run.retry.cascadeId, workflow.run.retry.nodeId)
+      setNotice(`${workflow.WORKFLOW_NAME} retry accepted. Blocked descendants are waiting again; completed workflows are retained.`)
+      refresh()
+    } catch (error) { setSaveError(error.message) }
     finally { savingRef.current = false; setSaving(false) }
   }
 
@@ -313,7 +397,7 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
   }
 
   function openDetail(workflow, job, kind) {
-    const runId = (kind === 'dag' && job ? job.lastRun?.runId : job ? job.run.runId || job.lastRun?.runId : workflow.run.runId) || ''
+    const runId = (kind === 'dag' && job ? job.lastRun?.runId : job ? job.run.runId || job.lastRun?.runId : executionOf(workflow).runId) || ''
     onNavigate(kind === 'log' ? 'executionLog' : 'dag', { workflowId: workflow.WORKFLOW_ID,
       workflowName: job ? `${workflow.WORKFLOW_NAME} / ${job.JOB_NAME}` : workflow.WORKFLOW_NAME,
       runId, returnPage: 'orchestrationMonitor',
@@ -324,7 +408,11 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
     <PageHeader breadcrumb="Workflow / Monitor" title="Workflow Monitor" subtitle="Workflow and job execution status." actions={<button className="button" type="button" disabled={refreshing} onClick={() => { refresh(); setTimelineRefresh(value => value + 1) }}>{refreshing ? 'Refreshing…' : '↻ Refresh'}</button>} />
     <ConfigurationSource selection={selection} disabled={saving || !!runSelection || !!scheduleSelection} revision={data?.configurationRevision} />
     {!postgres && <TaskEngineTrial />}
-    {postgres && data && <div className="om-notice om-engine-status"><strong>Execution worker: {data.worker?.state}</strong><span>{data.workflowsCount} workflows · {data.jobsCount} jobs · {data.unassignedJobs || 0} unassigned</span></div>}
+    {postgres && data && <div className="om-notice om-engine-status"><strong>Execution worker: {data.worker?.state}</strong>{data.dispatchErrors?.length > 0 && <strong className="om-dispatch-paused">Dependency dispatch: {data.dispatchErrors.length} paused {data.dispatchErrors.length === 1 ? 'group' : 'groups'}</strong>}<span>{data.workflowsCount} workflows · {data.jobsCount} jobs · {data.unassignedJobs || 0} unassigned</span></div>}
+    {postgres && data?.dispatchErrors?.map(failure => <div className="alert error om-dispatch-error" role="alert" key={failure.cascadeId}>
+      <div><strong>Dependency dispatch paused</strong><p>{failure.workflowNames.join(', ')} · Requested {formatDateTimeSeconds(failure.requestedAt)} · {failure.attempts} attempts</p><p>{failure.error || 'Dependency evaluation unavailable'}</p><p>Retry resumes pending dependency decisions. Completed and running jobs are retained.</p></div>
+      <button className="button" type="button" disabled={saving || !data.runsEnabled || !failure.canRetry} aria-label={`Retry dependency dispatch for ${failure.workflowNames.join(', ')}`} onClick={() => retryDispatch(failure)}>Retry dependency dispatch</button>
+    </div>)}
     {postgres && data?.scheduleMessage && <p className="om-footnote">{data.scheduleMessage}</p>}
     {error && <div className="alert error" role="alert">{error}{data && ' Showing the last successful refresh.'}</div>}
     {saveError && !scheduleSelection && <div className="alert error" role="alert">{saveError}</div>}
@@ -339,6 +427,7 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
           <div className="om-view-toggle" role="group" aria-label="Monitor view"><button type="button" aria-pressed={view === 'table'} onClick={() => setView('table')}>Table</button><button type="button" aria-pressed={view === 'timeline'} onClick={() => setView('timeline')}>Timeline</button></div>
           <select className="status-select" aria-label="Filter workflow group" value={group} onChange={event => setGroup(event.target.value)}><option value="">All groups</option>{[...new Set(rows.map(workflow => workflow.WORKFLOW_GROUP).filter(Boolean))].sort().map(value => <option key={value}>{value}</option>)}</select>
           <select className="status-select" aria-label="Filter workflow status" value={status} onChange={event => setStatus(event.target.value)}><option value="">All workflow statuses</option>{statuses.map(value => <option key={value}>{value}</option>)}</select>
+          {postgres && <select className="status-select" aria-label="Filter workflow state" value={planningStatus} onChange={event => setPlanningStatus(event.target.value)}><option value="">All workflow states</option>{['WAITING', 'QUEUED', 'INITIATING', 'BLOCKED', 'NEEDS REVIEW', 'CANCELLING', 'SCHEDULED', 'NO PLAN'].map(value => <option key={value}>{value}</option>)}</select>}
         </div>
       </div>
       <div className="monitor-system-strip om-summary" role="group" aria-label="Workflow summary">
@@ -355,16 +444,16 @@ export default function OrchestrationMonitor({ onNavigate, monitorState = null }
         </span>
       </div>
       <div className="om-list-heading"><span>Workflow / Job hierarchy</span><div><button className="button" type="button" disabled={!visible.length} onClick={() => setExpanded(current => new Set([...current, ...visible.map(workflow => workflow.WORKFLOW_ID)]))}>Expand all</button><button className="button" type="button" disabled={!visible.length} onClick={() => setExpanded(new Set())}>Collapse all</button></div></div>
-      {view === 'timeline' ? <OrchestrationTimeline source={source} workflows={visible} expanded={expanded} onToggle={toggle} now={now} liveGeneratedAt={data.generatedAt} refreshVersion={timelineRefresh} onNavigate={onNavigate} initialState={monitorState?.timeline} monitorFilters={{ search, status, group, expanded: [...expanded] }} onWorkflowControls={workflowId => { setView('table'); setExpanded(current => new Set([...current, workflowId])) }} /> : <div className="om-table-wrap">
+      {view === 'timeline' ? <OrchestrationTimeline source={source} workflows={visible} expanded={expanded} onToggle={toggle} now={now} liveGeneratedAt={data.generatedAt} refreshVersion={timelineRefresh} onNavigate={onNavigate} initialState={monitorState?.timeline} monitorFilters={{ search, status, planningStatus, group, expanded: [...expanded] }} onWorkflowControls={workflowId => { setView('table'); setExpanded(current => new Set([...current, workflowId])) }} /> : <div className="om-table-wrap">
         <table className="om-table om-monitor-table">
           <caption className="visually-hidden">Live workflows with expandable jobs. Times are in Europe/Stockholm. Each workflow and its jobs share the displayed execution.</caption>
-          <colgroup><col className="om-name-col" /><col /><col /><col /><col /><col /><col className="om-trigger-col" /><col className="om-next-col" /></colgroup>
-          <thead><tr>{['Workflow / Job', 'Type / Layer', 'Run status', 'Last Run', 'Duration', 'Job progress', 'Schedule', 'Next Run'].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>
-          {visible.map(workflow => <WorkflowRows key={workflow.WORKFLOW_ID} workflow={workflow} expanded={expanded.has(workflow.WORKFLOW_ID)} onToggle={() => toggle(workflow.WORKFLOW_ID)} onHistory={job => workflow.isUnassigned ? onNavigate('orchestrationJob') : onNavigate('orchestrationHistory', { workflowId: workflow.WORKFLOW_ID, workflowName: workflow.WORKFLOW_NAME, jobId: job?.JOB_ID || '', jobName: job?.JOB_NAME || '' })} onRun={(jobId, mode) => setRunSelection({ workflow, jobId, mode })} now={now} busy={saving || !data.runsEnabled} onState={job => changeState(workflow, job)} onSchedule={postgres ? undefined : () => toggleSchedule(workflow)} onEditSchedule={postgres ? undefined : () => { setSaveError(''); setScheduleSelection(workflow) }} onCancel={postgres && workflow.canCancel && !workflow.cancelRequested ? async () => { try { await api.cancelTaskPrototypeCascade(workflow.cascadeId); refresh() } catch (failure) { setSaveError(failure.message) } } : undefined} onDag={job => openDetail(workflow, job, 'dag')} onLog={job => openDetail(workflow, job, 'log')} />)}
-          {!visible.length && <tbody><tr><td colSpan={8} className="om-empty-jobs">{rows.length ? 'No workflows match your filters.' : 'No workflows configured. Add workflows and jobs on the Workflow page.'}</td></tr></tbody>}
+          <colgroup><col className="om-name-col" /><col /><col /><col className="om-state-col" /><col /><col /><col /><col className="om-trigger-col" /><col className="om-next-col" /></colgroup>
+          <thead><tr>{['Workflow / Job', 'Type / Layer', 'Status', 'State', 'Last Run', 'Duration', 'Job progress', 'Schedule', 'Next Run'].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>
+          {visible.map(workflow => <WorkflowRows key={workflow.WORKFLOW_ID} workflow={workflow} expanded={expanded.has(workflow.WORKFLOW_ID)} onToggle={() => toggle(workflow.WORKFLOW_ID)} onHistory={job => workflow.isUnassigned ? onNavigate('orchestrationJob') : onNavigate('orchestrationHistory', { workflowId: workflow.WORKFLOW_ID, workflowName: workflow.WORKFLOW_NAME, jobId: job?.JOB_ID || '', jobName: job?.JOB_NAME || '' })} onRun={(jobId, mode) => setRunSelection({ workflow, jobId, mode })} now={now} busy={saving || !data.runsEnabled} onRecover={() => recoverRun(workflow)} onRetry={() => retryWorkflow(workflow)} onState={job => changeState(workflow, job)} onSchedule={postgres && !workflow.scheduleAvailable && !workflow.IS_SCHEDULE_ENABLED ? undefined : () => toggleSchedule(workflow)} onEditSchedule={postgres && !workflow.scheduleAvailable && !workflow.scheduler?.id ? undefined : () => { setSaveError(''); setScheduleSelection(workflow) }} onCancel={postgres && workflow.canCancel && !workflow.cancelRequested ? async () => { try { await api.cancelTaskPrototypeCascade(workflow.cascadeId); refresh() } catch (failure) { setSaveError(failure.message) } } : undefined} onDag={job => openDetail(workflow, job, 'dag')} onLog={job => openDetail(workflow, job, 'log')} />)}
+          {!visible.length && <tbody><tr><td colSpan={9} className="om-empty-jobs">{rows.length ? 'No workflows match your filters.' : 'No workflows configured. Add workflows and jobs on the Workflow page.'}</td></tr></tbody>}
         </table>
       </div>}
-      <p className="om-footnote">{view === 'timeline' ? 'Timeline shows executions overlapping the selected window, with jobs grouped under their workflows. Filters use the current workflow status and configuration. Execution details use saved snapshots. Live follows the clock and refreshes history every 15 seconds. Range controls the loaded period; Zoom controls how much time fits on screen. Scroll horizontally to browse the full period. Overlapping runs use separate lanes.' : 'Hierarchy follows current job configuration. Statuses and progress belong to one execution per workflow: active first, then queued, then latest completed. Unselected and disabled jobs are skipped. Older executions may show Not selected. Last Run shows the latest actual start; Duration belongs to the displayed execution. Queued executions show their wait separately. Latest DAG Run opens the job’s latest started execution. Log opens the displayed execution. Click a workflow name for execution history.'}</p>
+      <p className="om-footnote">{view === 'timeline' ? 'Timeline shows executions overlapping the selected window, with jobs grouped under their workflows. Filters use the current workflow status and configuration. Execution details use saved snapshots. Live follows the clock and refreshes history every 15 seconds. Range controls the loaded period; Zoom controls how much time fits on screen. Scroll horizontally to browse the full period. Overlapping runs use separate lanes.' : 'Status, Last Run, Duration, job progress and Log describe the latest actual execution. NO RUN means no execution has started. State describes planned work: WAITING counts execution requests, BLOCKED means the dependency plan stopped, and SCHEDULED indicates an enabled schedule. Direct parent details appear in State; hover for the full reason. Latest DAG Run opens the job’s latest started execution. Log opens the displayed execution. Click a workflow name for execution history.'}</p>
     </>}
     {runSelection && <RunWorkflowDialog workflow={rows.find(row => row.WORKFLOW_ID === runSelection.workflow.WORKFLOW_ID) || runSelection.workflow} jobId={runSelection.jobId} jobs={runSelection.workflow.jobs.filter(job => !job.runOnly)} onClose={() => setRunSelection(null)} initialMode={runSelection.mode} onAccepted={receipt => { acceptSubmission(receipt); setExpanded(current => new Set([...current, runSelection.workflow.WORKFLOW_ID])); setRunSelection(null); refresh() }} />}
     {scheduleSelection && <ScheduleDialog workflow={scheduleSelection} busy={saving} error={saveError} onClose={() => setScheduleSelection(null)} onSave={payload => saveSchedule(scheduleSelection, payload)} />}

@@ -17,12 +17,12 @@ Use `.env.example` as the non-secret template for required variables.
 The queue/stream implementation, including the working changes present before
 this experiment, is preserved at commit `aacf516`, branch
 `checkpoint/stream-queue-20261123` and tag `rollback/stream-queue-20261123`.
-The trial is developed on `feat/postgres-task-engine`. These references are
-local; they have not been pushed. Existing workflows continue to use their
-current stream engine through the Snowflake source. The PostgreSQL source in
-the maintained Monitor now contains the complete DEV workflow/job catalog.
-WF1–WF10 SQL test workflows are compatible with the worker. DBT/business SQL
-execution, graph schedules and production migration are later work.
+The maintained Monitor contains the complete DEV workflow/job catalog in
+PostgreSQL. The [SPCS rollout](snowflake/spcs/README.md#postgresql-dev-rollout)
+uses the same app and promotes PostgreSQL as the DEV engine. Its explicit
+business-command flag enables the DEV SQL and DBT workflows; local disposable
+SQL tests remain available with that flag disabled. TST continues to use its
+selected service version and configuration.
 
 ### Complete PostgreSQL Monitor
 
@@ -51,12 +51,25 @@ Snowflake history remains available through the Snowflake source; it is not
 copied into PostgreSQL. Earlier PostgreSQL trial execution history remains
 visible under the original source workflow IDs.
 
-**Run workflow** on a supported root starts its complete connected dependency
-group, shown in the run dialog. With the current DEV definitions, **Run WF1**
-now includes **WF1–WF10**. Child/individual-job/from-job starts are unavailable.
-Independent groups may execute concurrently. Overlap checks use stable workflow
-keys, including waiting nodes, so an edge edit cannot bypass an outstanding
-older group. Cancellation targets the whole group and waits for confirmation.
+**Run workflow** is available on any supported workflow. Choose **Run only this
+workflow** or **Run workflow and dependencies**. The latter includes downstream
+children, never ancestors; with the current definitions, WF1 includes WF1–WF10.
+A manual entry point does not require earlier parent outcomes. Downstream joins
+still enforce their configured outcome/freshness rules, using exact parent
+executions, including parents outside the selected subtree. Individual-job and
+from-job starts remain unavailable. Queued, running or unknown executions of the
+selected workflow, its direct parents, or its direct children disable Run in
+the GUI and reject manual admission under the same PostgreSQL transaction lock.
+This generic one-level rule also applies to scheduled and downstream admission;
+more distant ancestors and descendants do not block execution. WF10 blocks only
+WF8/WF9 (and itself); WF4 blocks WF2/WF3/WF5/WF6 (and itself). WF1 and then WF2/WF3
+can run while WF10 is active; WF8/WF9 queue if WF10 is still active when reached.
+Choosing dependencies still includes the complete downstream subtree.
+A running execution remains visible
+when a newer group also has a queued instance of the same workflow.
+Independent workflows and sibling-only
+runs can execute concurrently. Cancellation targets the accepted group and
+waits for confirmation.
 Configuration changes never rewrite an accepted group's snapshot. SQL jobs
 validated against the current SELECT-expression restrictions retain that guard
 when edited; unsupported business commands can be retained as configuration
@@ -74,11 +87,28 @@ does not silently select Snowflake. Authentication may resolve identity through
 a warehouse-free Snowflake metadata connection; the header reports Snowflake
 as **on demand** on PostgreSQL pages.
 
+Background tabs close their realtime stream and reconnect when visible. This
+leaves HTTP connection slots available for health and normal API requests when
+several tabs share the same localhost origin. Admitted jobs continue in the
+backend worker while tabs are hidden or closed.
+
 Migration `005_catalog_monitor.sql` preserves existing runs, gives cascade nodes
 stable view identities and replaces the graph-wide admission constraint with a
 per-group constraint. Initialization applies only unapplied numbered migrations;
-repeating it cannot recreate the superseded graph-wide index. Imported graph
-schedules stay inactive; the earlier standalone-example scheduler is separate.
+repeating it cannot recreate the superseded graph-wide index.
+
+Migration `006_workflow_schedules.sql` links backend schedule occurrences to
+catalog executions. Use the Monitor schedule menu to create, edit or pause a
+workflow schedule. The existing `task-engine schedule` process admits these
+occurrences through the dependency engine. A blocked occurrence remains
+**QUEUED** until related executions finish; it retains its accepted snapshot
+and does not expire while waiting. Parent outcomes/freshness rules still apply.
+An already waiting instance is reused, so repeated due occurrences coalesce
+instead of duplicating pending work. Completion commits wake-up work in the
+same PostgreSQL transaction, including waiting executions in other groups.
+Disabling a workflow pauses its schedule; accepted work retains its snapshot.
+Imported schedules stay inactive until explicitly enabled. Standalone trial
+schedules retain their earlier overlap policy.
 DBT progress/DAG execution, SQL conditions, business commands, definition
 creation/deletion and assignment additions/removals remain outside this stage.
 
@@ -270,11 +300,65 @@ Unknown outcomes remain blocked for review. Cancelling a group stops pending
 admissions and requests cancellation of active native work, waiting for native
 confirmation before reporting completion.
 
+The PostgreSQL Monitor shows exhausted dependency-dispatch errors separately
+from native job outcomes. Each active error group has an alert with its workflow
+names, request time, error and attempt count, plus **Retry dependency dispatch**.
+The alerts remain visible across table filters and the timeline, including when
+the workflow row displays an older running instance. Waiting workflows explain
+that dispatch is paused; completed and running jobs keep their actual statuses.
+Worker heartbeat health is displayed independently of paused dispatch groups.
+Retry queues the existing group for dependency evaluation and retains all
+recorded native attempts. It does not restart successful/running jobs or resolve
+a native UNKNOWN outcome. The retry button follows the existing execution
+controls, and a rejected retry leaves the error visible. Waiting History and
+Log entries include the dispatch error explanation. These reads and the retry
+request use PostgreSQL only; native task polling is unchanged.
+
 Dependency evaluation, waiting states, dispatcher health and idle checks use
 PostgreSQL only. SQL/data-readiness predicates still need their own bounded
 evaluation and wake-up design; they are not polled by this trial. Native SQL
 tasks currently produce success, failure or cancellation, not custom warning
 outcomes, although warning rule flags are retained for later migration.
+
+For catalog schedules, an existing queued workflow can fulfill a due occurrence
+only when its frozen group contains every requested downstream workflow and
+uses the current catalog revision. A manual workflow-only run cannot absorb a
+schedule requiring descendants. The scheduler creates a separate queued group
+and leaves the manual snapshot intact; the normal overlap rules determine when
+each workflow can start. Compatible queued groups still share due occurrences.
+Groups with cancellation already requested are excluded from reuse, including
+their waiting descendants. A newly due occurrence gets a separate group and
+retains its own cancellation state. It waits for conflicting native work to
+finish cancellation before starting, and its normal parent outcome rules still
+apply. Occurrences accepted into a shared group before cancellation was
+requested remain part of that shared group. Rejected reuse is recorded as
+`PENDING_CANCELLATION_EXCLUDED` in the PostgreSQL decision history.
+
+Migration `007_dependency_decisions.sql` adds the PostgreSQL-only
+`kumo_task_engine.dependency_decisions` history. It records admission/reuse and
+incompatible scopes, rejected requests, parent outcome/freshness checks, related
+execution blockers, workflow admission/wait/block/skip/cancel decisions, group
+states, wake-ups, dispatch retries/errors, and due/missed/invalid schedule
+decisions. Rows include timestamps, group/workflow/run and schedule identities,
+configuration revision, an evaluation correlation ID and JSONB reasons where
+applicable. Decisions commit with their state changes. After a failed evaluation
+rolls back, only its error/retry record is written in a fresh transaction.
+Rejected manual requests are also recorded after admission rolls back.
+
+Idle and execution-disabled heartbeats add no decision rows. The history stores
+identities, rules and states without SQL commands or raw database exception
+text, and does not query Snowflake. It starts when this migration and code are
+installed; it does not reconstruct earlier decisions. Rows remain available
+after execution records are removed; no automatic history pruning is configured.
+There is no new Monitor view or API for this history yet. Inspect recent rows
+directly in PostgreSQL, optionally filtering by `cascade_id` or `schedule_id`:
+
+```sql
+SELECT id, decided_at, component, decision, cascade_id, node_key, run_id, facts
+FROM kumo_task_engine.dependency_decisions
+ORDER BY id DESC
+LIMIT 100;
+```
 
 The worker CLI also provides `task-engine status` and `task-engine submit
 PLAN.json`. Plans contain a stable `requestId`, optional `workflowKey`,
@@ -287,9 +371,122 @@ trial, so it is not a throughput benchmark. Cancellation is given priority
 over queued submissions, and requires native confirmation. A job that has
 already finished retains its actual outcome when cancellation arrives late.
 
+Temporary Snowflake connection failures (DNS, connection loss and transport
+timeouts) retain the accepted attempt and retry automatically with exponential
+backoff, capped at five minutes. PostgreSQL stores the recovery reason, first
+failure time and next retry time, so restarting the worker does not lose the
+retry. Recovery only runs for recorded work or pending cleanup; an idle worker
+does not probe Snowflake. Authentication, permissions, certificate failures and
+task identity drift retain bounded retries or operator review.
+
+Before submission, recovery reuses and validates the same temporary task. Once
+the durable submission fence has been recorded, recovery only observes its
+history and never repeats EXECUTE TASK. Successful connectivity clears the
+network retry count. If history responds but no invocation can be established,
+the separate six-check ambiguity limit still stops for review. Cleanup outages
+retain the committed workload outcome and retry cleanup without polling a
+completed job's status.
+
+The PostgreSQL Monitor separates **Status** from **State**. Status, Last Run,
+Duration, job results, progress and Log all describe the latest actual execution;
+**NO RUN** means no native execution has started. A newer pending or blocked
+request never replaces that execution's SUCCESS or FAILED result. State describes
+planned work: **WAITING(n)** counts waiting execution requests for the workflow,
+**QUEUED** means admitted work awaiting native execution, and **BLOCKED** identifies
+a stopped dependency plan. **SCHEDULED** indicates an enabled backend schedule;
+Next Run shows its next occurrence. Status and State have separate filters.
+RUNNING is shown only in Status; State stays blank unless there is additional
+planning information, such as waiting requests or an enabled schedule.
+State shows only direct parent names and statuses, with full reasons on hover.
+Child overlap checks still apply; Run controls explain those exclusions. Waiting
+and queued counts remain separate even while an execution runs.
+History and Log retain each request's lifecycle, including requests that never
+started. This display split does not change dependency admission or reopen a
+stopped plan; use the existing Retry or Run actions as appropriate.
+
+For a confirmed SQL failure, the Monitor's **Retry** action retries the failed
+workflow and restores its unexecuted blocked descendants to **WAITING**. The
+failed workflow uses its current job configuration, so a repaired SQL command
+can run; descendants retain their accepted dependency rules and job plans.
+Successful or still-running parents keep their original execution bindings.
+Completed workflows are not rerun, and cancelled or superseded branches are not
+resumed. The normal **Run** action remains a new execution with the chosen scope.
+
+Recovery creates a new execution group linked to the original nodes. Failed and
+blocked history remains unchanged. PostgreSQL records each retry and resumed
+workflow, including its actor and source execution. Concurrent retries of the
+same failure reuse one durable request; direct parent/child exclusions still
+apply. This path is separate from connection recovery and never retries UNKNOWN
+outcomes as new work.
+
+The Monitor shows automatic recovery and the next retry time. Safely recoverable
+UNKNOWN attempts expose **Recover**, including older task-creation failures.
+This queues the same attempt: pre-submission failures resume creation, and
+submitted attempts only resume observation. Task drift cannot use this action.
+Cancellation remains in force during recovery. The API uses the trusted actor,
+honours execution controls and records recovery requests and connection retry
+decisions in PostgreSQL. Migration `008_connection_recovery.sql` is PostgreSQL
+only; apply it with `flask --app app task-engine init` using the configured DEV
+environment before restarting the API and worker.
+
+`backend/tests/test_postgres_connection_recovery.py` simulates long DNS/connection
+outages, lost create/execute acknowledgements, worker restart, cancellation,
+cleanup failures, thirty concurrent recovery requests, and WF1–WF10 completion
+after WF4 recovers. It also checks that missing history remains bounded and no
+native work is executed twice.
+
 For automated PostgreSQL tests, create a separate database ending in `_test`
 and set `KUMO_TASK_ENGINE_TEST_DSN` to it. The tests truncate only that isolated
-database. The opt-in `backend/tests/live_postgres_task_engine.py --run` performs
+database. `backend/tests/test_postgres_multiuser.py` adds 30-user coverage using
+the maintained Flask app on an ephemeral loopback port and real PostgreSQL.
+Only Snowflake identity resolution and native outcomes are simulated. It checks
+distinct per-user attribution, simultaneous starts and request replays, direct
+neighbor exclusions, independent runs, competing configuration revisions,
+concurrent cancel/retry/start requests, and realtime disconnect/reconnect with
+no new identity lookup. Cancellation and dispatch retry HTTP actions retain the
+trusted request actor in the PostgreSQL decision history.
+
+The load case keeps 30 SSE streams open while every user polls a synthetic
+26-workflow/51-job Monitor every two seconds. It also reads History and health,
+advances simulated work, checks final status visibility for every user, verifies
+presence returns to zero, and rejects any Snowflake connection or bootstrap.
+It reports latency percentiles and application PostgreSQL connection peaks.
+The default load window is ten seconds; use sixty seconds for a longer check:
+
+```bash
+# Set KUMO_TASK_ENGINE_TEST_DSN to the separate _test database first.
+KUMO_MULTIUSER_LOAD_SECONDS=60 python -m unittest discover -s backend/tests -p 'test_postgres_multiuser.py' -v
+```
+
+These are single-process HTTP tests, not a browser-rendering or SPCS ingress
+capacity test. The current PostgreSQL Monitor uses one snapshot request per
+browser every two seconds; thirty open Monitors produce about fifteen requests
+per second. SSE streams retain no PostgreSQL connection. Exact response times
+depend on hardware, history volume and concurrent workloads; use the reported
+percentiles when comparing them with the polling interval.
+
+`backend/tests/test_postgres_dependency_scenarios.py` also exercises the WF1–WF10
+joins and direct-neighbor exclusions. It checks simultaneous WF2/WF5 and
+WF2/WF3/WF5 entry runs, all six parent/child completion orders for a queued WF4,
+WF5's downstream progress, cancellation confirmation, unknown outcomes, and
+missing, failed or stale external parents. The fixture preserves DEV's parent
+freshness flags. Monitor, History and Log name the blocking parent or child and
+its actual state; an idle workflow whose Run button is disabled stays NOT RUN.
+Blocker labels refresh from PostgreSQL between dispatcher evaluations. A
+finished blocker shows "Awaiting dependency evaluation" until the scheduler
+evaluates it; historical terminal decisions retain their recorded outcomes.
+Normal waits are displayed without error styling; unknown outcomes need review.
+
+Two acceptance cases explicitly use `expectedFailure`: starting WF2/WF5 or
+WF2/WF3/WF5 with downstream workflows included on every request. The current
+engine reserves all future nodes, so a later independent entry may be rejected
+by an earlier group's waiting descendant. Missing external parents are also
+pinned at admission and do not bind to later requests. The passing workflow-only
+and scheduled-WF4 checks do not establish that these full-scope cases work.
+These tests keep the unresolved behavior visible without changing reservation,
+parent-binding, freshness or execution rules as part of the status work.
+
+The opt-in `backend/tests/live_postgres_task_engine.py --run` performs
 disposable DEV native-task tests and a 90-second idle check. Load the local
 environment files before invoking it; the script does not read secrets files.
 Its targeted report is written to `review/`. Generated tasks are excluded from
@@ -318,9 +515,12 @@ checkpoint branch moves. Git switching does not cancel native executions or
 undo PostgreSQL state. Retain the PostgreSQL volume until any unresolved
 attempts have been reviewed; do not reset them to queued.
 
-This is local/DEV scaffolding for an SPCS-hosted backend architecture. It does
-not provision PostgreSQL for SPCS, replace existing workflow schedules, update
-SPCS services, publish images, or modify TST.
+The [DEV SPCS rollout](snowflake/spcs/README.md#postgresql-dev-rollout) hosts this
+same backend in SPCS, with a separate persistent PostgreSQL service and an
+independent PostgreSQL image workflow. `KUMO_PG_BUSINESS_JOBS_ENABLED=true`
+enables frozen business SQL and DBT commands in native tasks; the local disposable
+SQL trial remains the default when that flag is false. DEV releases do not
+change TST services or enable legacy scheduled maintenance.
 
 Validated on 2026-11-23: 348 backend tests (including 30 prototype tests with
 real isolated PostgreSQL where applicable), three new browser tests, frontend

@@ -9,6 +9,9 @@ export function applySubmission(workflow, submissions = []) {
   // learned its run ID. A late receipt must never hide RUNNING or SUCCESS.
   if (!submission || workflow.run.requestId === submission.requestId ||
       (submission.runId && workflow.run.runId === submission.runId)) return workflow
+  if (workflow.source === 'POSTGRES') return { ...workflow, canRun: false, runUnavailable: 'Workflow is being prepared.',
+    planning: { ...workflow.planning, status: submission.status === 'QUEUED' ? 'QUEUED' : 'INITIATING',
+      requestId: submission.requestId, requestedAt: submission.submittedAt, waitingFor: [], message: 'Workflow is being prepared.' } }
   const jobIndex = workflow.jobs.findIndex(job => job.JOB_ID === submission.jobId)
   let first = true
   return { ...workflow, canRun: false, runUnavailable: 'Workflow is being prepared.',

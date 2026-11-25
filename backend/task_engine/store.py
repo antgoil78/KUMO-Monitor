@@ -36,26 +36,36 @@ def normalize(body):
         raise ValueError('Use SEQUENTIAL/PARALLEL mode with 1–16 disposable SQL jobs')
     keys=[];normalized=[]
     for index,job in enumerate(jobs):
-        if not isinstance(job,dict) or set(job)-{'key','sql','timeoutSeconds','dependsOn'}:
+        if not isinstance(job,dict) or set(job)-{'key','sql','command','type','timeoutSeconds','dependsOn'}:
             raise ValueError('Jobs accept key, sql, timeoutSeconds and dependsOn')
         key=job.get('key',str(index+1));sql=job.get('sql');timeout=job.get('timeoutSeconds',60)
         if not isinstance(key,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',key) or key in keys:
             raise ValueError('Job keys must be unique simple identifiers')
         # First prototype executes SELECT expressions only, never business tables,
         # CALLs, dbt or DML. One statement, without object/session references.
-        if (not isinstance(sql,str) or len(sql)>4000 or not re.match(r'^\s*SELECT\s+',sql,re.I)
+        command = job.get('command')
+        if command is not None:
+            from .commands import definition
+            command = definition(command)
+            if job.get('type', command['workflowType']) != command['workflowType'] or sql is not None:
+                raise ValueError('Job type must match its command; supply either sql or command')
+        elif job.get('type','SQL') != 'SQL':
+            raise ValueError('DBT jobs require a frozen command definition')
+        if command is None and (not isinstance(sql,str) or len(sql)>4000 or not re.match(r'^\s*SELECT\s+',sql,re.I)
                 or re.search(r';|--|/\*|\*/|\b(FROM|JOIN|INTO|CALL|EXECUTE|USE|ALTER|CREATE|DROP|INSERT|UPDATE|DELETE|COPY|PUT|GET)\b|\$\$',sql,re.I)
                 or re.search(r'\b(?:SYSTEM\$(?!WAIT\b)[A-Z_]+|[A-Z_][A-Z0-9_$]*\s*\.)',sql,re.I)):
             raise ValueError('Prototype jobs must be single SELECT expressions without table references; SYSTEM$WAIT is allowed')
-        functions=re.findall(r'\b([A-Za-z_][A-Za-z0-9_$]*)\s*\(',sql)
+        functions=re.findall(r'\b([A-Za-z_][A-Za-z0-9_$]*)\s*\(',sql or '') if command is None else []
         if any(f.upper() not in {'SYSTEM$WAIT','ABS','TO_NUMBER','TRY_TO_NUMBER','TO_VARCHAR','CURRENT_TIMESTAMP'} for f in functions):
             raise ValueError('This function is outside the disposable SQL prototype allowlist')
-        if isinstance(timeout,bool) or not isinstance(timeout,int) or not 1 <= timeout <= 300:
-            raise ValueError('Prototype timeouts must be 1–300 seconds')
+        limit = 86400 if command is not None else 300
+        if isinstance(timeout,bool) or not isinstance(timeout,int) or not 1 <= timeout <= limit:
+            raise ValueError(f'Job timeouts must be 1–{limit} seconds')
         deps=job.get('dependsOn',keys[-1:] if mode=='SEQUENTIAL' else [])
         if not isinstance(deps,list) or any(not isinstance(d,str) or d not in keys for d in deps) or len(set(deps))!=len(deps):
             raise ValueError('Dependencies must reference distinct preceding job keys')
-        normalized.append(dict(key=key,sql=sql.strip(),timeoutSeconds=timeout,dependsOn=deps))
+        content = dict(command=command,type=command['workflowType']) if command is not None else dict(sql=sql.strip())
+        normalized.append(dict(key=key,timeoutSeconds=timeout,dependsOn=deps,**content))
         keys.append(key)
     definition=dict(mode=mode,jobs=normalized,version=1)
     if workflow_key is not None:definition['workflowKey']=workflow_key
@@ -74,6 +84,7 @@ class Store:
 
     def initialize(self):
         with self.connect() as conn:
+            conn.execute('SELECT pg_advisory_xact_lock(671928341)')
             conn.execute(Path(__file__).with_name('schema.sql').read_text())
             for path in sorted(Path(__file__).with_name('migrations').glob('*.sql')):
                 version=int(path.name.split('_',1)[0])
@@ -148,9 +159,38 @@ class Store:
         if not conn.execute('SELECT id FROM kumo_task_engine.runs WHERE id=%s',(run_id,)).fetchone():raise LookupError('Prototype run not found')
         conn.execute('UPDATE kumo_task_engine.runs SET cancel_requested=true WHERE id=%s',(run_id,))
         conn.execute("UPDATE kumo_task_engine.attempts SET state='CANCELLED',ended_at=clock_timestamp(),next_check_at=NULL WHERE run_id=%s AND state='QUEUED'",(run_id,))
-        conn.execute("UPDATE kumo_task_engine.attempts SET next_check_at=clock_timestamp() WHERE run_id=%s AND state IN ('SUBMITTING','SUBMITTED','SCHEDULED','RUNNING')",(run_id,))
+        conn.execute("UPDATE kumo_task_engine.attempts SET next_check_at=clock_timestamp() WHERE run_id=%s AND state IN ('CREATING','SUBMITTING','SUBMITTED','SCHEDULED','RUNNING')",(run_id,))
         self.event(conn,run_id,'CANCEL_REQUESTED')
         self.refresh(conn,run_id)
+
+    def recover(self,run_id,actor):
+        from .recovery import recovery_stage
+        run_id=uuid.UUID(str(run_id))
+        with self.transaction() as conn:
+            if not conn.execute('SELECT id FROM kumo_task_engine.runs WHERE id=%s',(run_id,)).fetchone():
+                raise LookupError('Run not found')
+            jobs=conn.execute('''SELECT *,lease_until>clock_timestamp() AS leased FROM kumo_task_engine.attempts
+                WHERE run_id=%s AND state='UNKNOWN' FOR UPDATE''',(run_id,)).fetchall()
+            recoverable=[(job,recovery_stage(job)) for job in jobs if recovery_stage(job) and not job['leased']]
+            if not recoverable:raise Conflict('No safely recoverable attempts; task identity or outcome needs operator review')
+            for job,stage in recoverable:
+                conn.execute('''UPDATE kumo_task_engine.attempts SET state=%s,error=NULL,recovery_checks=0,
+                    recovery_kind=NULL,recovery_started_at=NULL,next_check_at=clock_timestamp(),lease_owner=NULL,lease_until=NULL
+                    WHERE id=%s''',(stage,job['id']))
+                self.event(conn,run_id,'NATIVE_RECOVERY_REQUESTED',job['id'],actor=actor,stage=stage,
+                    observationOnly=stage=='SUBMITTING')
+                self.recovery_decision(conn,run_id,'NATIVE_RECOVERY_REQUESTED',actor=actor,
+                    attemptId=job['id'],stage=stage,observationOnly=stage=='SUBMITTING')
+            self.refresh(conn,run_id)
+            self.queue_dependency_work(conn,run_id,reason='NATIVE_RECOVERY_REQUESTED')
+        return dict(ok=True,runId=str(run_id),recoveredAttempts=len(recoverable))
+
+    @staticmethod
+    def recovery_decision(conn,run_id,decision,*,actor=None,**facts):
+        from .decisions import record
+        node=conn.execute('''SELECT n.cascade_id,n.node_key,c.graph_id,c.graph_revision FROM kumo_task_engine.cascade_nodes n
+            JOIN kumo_task_engine.cascades c ON c.id=n.cascade_id WHERE n.run_id=%s''',(run_id,)).fetchone()
+        record(conn,'native-recovery',decision,run_id=run_id,actor=actor,**(node or {}),**facts)
 
     def refresh(self,conn,run_id):
         run=conn.execute('SELECT * FROM kumo_task_engine.runs WHERE id=%s',(run_id,)).fetchone()
@@ -171,12 +211,20 @@ class Store:
             if state=='UNKNOWN' and run['state']!='UNKNOWN':self.queue_dependency_work(conn,run_id)
 
     @staticmethod
-    def queue_dependency_work(conn,run_id):
+    def queue_dependency_work(conn,run_id,reason='NATIVE_OUTCOME_RECORDED'):
+        from .decisions import record
         # This outbox update commits with the outcome. No external dispatch can
         # fail or change a successful parent's workload result.
-        conn.execute('''INSERT INTO kumo_task_engine.dependency_work(cascade_id)
-            SELECT cascade_id FROM kumo_task_engine.cascade_nodes WHERE run_id=%s
-            ON CONFLICT(cascade_id) DO UPDATE SET state='PENDING',next_check_at=clock_timestamp(),attempts=0,error=NULL''',(run_id,))
+        awakened=conn.execute('''INSERT INTO kumo_task_engine.dependency_work(cascade_id)
+            SELECT DISTINCT waiting.id FROM kumo_task_engine.cascade_nodes n
+            JOIN kumo_task_engine.cascades origin ON origin.id=n.cascade_id
+            JOIN kumo_task_engine.cascades waiting ON waiting.graph_id=origin.graph_id
+            WHERE n.run_id=%s AND waiting.state IN ('QUEUED','RUNNING','UNKNOWN')
+            ON CONFLICT(cascade_id) DO UPDATE SET state='PENDING',next_check_at=clock_timestamp(),attempts=0,error=NULL
+            RETURNING cascade_id''',(run_id,)).fetchall()
+        for group in awakened:
+            record(conn,'dependency','EVALUATION_ENQUEUED',cascade_id=group['cascade_id'],
+                run_id=run_id,reason=reason)
 
     def claim(self,owner):
         with self.transaction() as conn:
@@ -193,7 +241,7 @@ class Store:
                     SELECT 1 FROM kumo_task_engine.attempts p WHERE p.run_id=a.run_id AND p.job_key=ANY(a.depends_on) AND p.state<>'SUCCESS'))
                     OR a.state IN ('CREATING','SUBMITTING','SUBMITTED','SCHEDULED','RUNNING')
                     OR a.cleanup_state='PENDING')
-                ORDER BY (r.cancel_requested AND a.state IN ('SUBMITTING','SUBMITTED','SCHEDULED','RUNNING')) DESC,
+                ORDER BY (r.cancel_requested AND a.state IN ('CREATING','SUBMITTING','SUBMITTED','SCHEDULED','RUNNING')) DESC,
                     (a.cleanup_state='PENDING') DESC,a.next_check_at,a.position
                 LIMIT 1 FOR UPDATE OF a SKIP LOCKED""").fetchone()
             if not job:return None
@@ -204,7 +252,7 @@ class Store:
             return job
 
     def update(self,job,owner,**changes):
-        allowed={'state','task_id','native_group_id','native_attempt','query_id','submit_started_at','native_started_at','observed_at','ended_at','error','recovery_checks','next_check_at','cleanup_state','cleanup_attempts','cleanup_error'}
+        allowed={'state','task_id','native_group_id','native_attempt','query_id','submit_started_at','native_started_at','observed_at','ended_at','error','recovery_checks','next_check_at','cleanup_state','cleanup_attempts','cleanup_error','recovery_kind','recovery_started_at'}
         if not changes or set(changes)-allowed:raise ValueError('Invalid attempt update')
         with self.transaction() as conn:
             row=conn.execute('SELECT * FROM kumo_task_engine.attempts WHERE id=%s AND lease_owner=%s AND lease_until>clock_timestamp() FOR UPDATE',(job['id'],owner)).fetchone()
@@ -214,6 +262,15 @@ class Store:
             conn.execute(sql,(*changes.values(),job['id']))
             if 'state' in changes and changes['state']!=row['state']:
                 self.event(conn,row['run_id'],'ATTEMPT_STATE',job['id'],state=changes['state'])
+            if changes.get('recovery_kind')=='NETWORK':
+                facts=dict(attemptId=job['id'],stage='CLEANUP' if row['cleanup_state']=='PENDING' else row['state'],
+                    checks=changes['recovery_checks'],nextRetryAt=changes['next_check_at'],
+                    reason=changes.get('cleanup_error') or changes.get('error'))
+                self.event(conn,row['run_id'],'NATIVE_CONNECTION_RETRY',job['id'],stage=facts['stage'],checks=facts['checks'],nextRetryAt=str(facts['nextRetryAt']))
+                self.recovery_decision(conn,row['run_id'],'NATIVE_CONNECTION_RETRY',actor=str(owner),**facts)
+            elif row['recovery_kind']=='NETWORK' and 'recovery_kind' in changes:
+                self.event(conn,row['run_id'],'NATIVE_CONNECTION_RESTORED',job['id'])
+                self.recovery_decision(conn,row['run_id'],'NATIVE_CONNECTION_RESTORED',actor=str(owner),attemptId=job['id'])
             self.refresh(conn,row['run_id'])
         job.update(changes)
 

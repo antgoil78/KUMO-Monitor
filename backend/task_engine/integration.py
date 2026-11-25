@@ -30,7 +30,7 @@ def encode(value):
 def error(exc):
     status=409 if isinstance(exc,Conflict) else 404 if isinstance(exc,LookupError) else 400 if isinstance(exc,ValueError) else 503
     # Do not return PostgreSQL connection errors/DSNs to the browser.
-    message=str(exc) if isinstance(exc,(Conflict,LookupError,ValueError,PermissionError)) else 'Prototype database unavailable; check the local worker and PostgreSQL'
+    message=str(exc) if isinstance(exc,(Conflict,LookupError,ValueError,PermissionError)) else 'Engine database unavailable; check the worker and PostgreSQL'
     return jsonify(ok=False,error=message),status
 
 
@@ -52,6 +52,13 @@ def read(run_id):return jsonify(encode(store().read(run_id)))
 
 @blueprint.route(PREFIX+'/runs/<run_id>/cancel',methods=['POST'])
 def cancel(run_id):return jsonify(encode(store().cancel(run_id)))
+
+
+@blueprint.route(PREFIX+'/runs/<run_id>/recover',methods=['POST'])
+def recover(run_id):
+    if os.getenv('KUMO_ORCHESTRATION_RUNS_ENABLED','').lower()!='true':raise PermissionError('Execution controls are disabled')
+    actor=current_app.extensions['task_prototype_actor_context']()
+    return jsonify(encode(store().recover(run_id,actor.get('userName') or 'LOCAL_DEV')))
 
 
 @blueprint.route(PREFIX+'/schedules')
@@ -107,6 +114,13 @@ def monitor():
     return jsonify(encode(Monitor(store()).payload()))
 
 
+@blueprint.route(PREFIX+'/ready')
+def ready():
+    from .runtime import readiness
+    result=readiness(store())
+    return jsonify(result),200 if result['ok'] else 503
+
+
 @blueprint.route(PREFIX+'/history')
 def history():
     from .monitor import Monitor
@@ -139,7 +153,17 @@ def cascade_action(cascade_id,action):
     if action not in ('cancel','retry-dispatch'):raise LookupError('Unknown dependency trial action')
     if os.getenv('KUMO_ORCHESTRATION_RUNS_ENABLED','').lower()!='true':raise PermissionError('Execution controls are disabled')
     service=Graphs(store())
-    return jsonify(encode(service.cancel(cascade_id) if action=='cancel' else service.retry_dispatch(cascade_id)))
+    actor=current_app.extensions['task_prototype_actor_context']()
+    user=actor.get('userName') or 'LOCAL_DEV'
+    return jsonify(encode(service.cancel(cascade_id,actor=user) if action=='cancel' else service.retry_dispatch(cascade_id,actor=user)))
+
+
+@blueprint.route(PREFIX+'/cascades/<cascade_id>/nodes/<node_id>/retry',methods=['POST'])
+def retry_workflow(cascade_id,node_id):
+    from .dependencies import Graphs
+    if os.getenv('KUMO_ORCHESTRATION_RUNS_ENABLED','').lower()!='true':raise PermissionError('Execution controls are disabled')
+    actor=current_app.extensions['task_prototype_actor_context']()
+    return jsonify(encode(Graphs(store()).retry(cascade_id,node_id,actor.get('userName') or 'LOCAL_DEV'))),202
 
 
 def register(app,actor_context):
@@ -209,11 +233,21 @@ def register(app,actor_context):
         from .snowflake_tasks import SnowflakeTasks
         from .worker import Worker
         db=store();worker=Worker(db,SnowflakeTasks(db.settings));dependencies=DependencyWorker(db)
+        if not once and os.getenv('KUMO_TASK_ENGINE_RUNTIME_ENABLED','').lower()=='true':
+            from threading import Thread
+            from .runtime import worker_heartbeat
+            def heartbeat():
+                while True:
+                    try:worker_heartbeat(db,dependencies.owner)
+                    except Exception as exc:click.echo('Worker heartbeat unavailable: '+type(exc).__name__,err=True)
+                    time.sleep(5)
+            Thread(target=heartbeat,name='native-worker-heartbeat',daemon=True).start()
         click.echo('DEV prototype worker started; only recorded disposable attempts are eligible')
         while True:
             try:
-                dispatched=dependencies.step(execution_enabled=os.getenv('KUMO_ORCHESTRATION_RUNS_ENABLED','').lower()=='true')
-                processed=worker.step() or dispatched
+                enabled=os.getenv('KUMO_TASK_ENGINE_WORKER_ENABLED','true').lower()=='true'
+                dispatched=dependencies.step(execution_enabled=enabled and os.getenv('KUMO_ORCHESTRATION_RUNS_ENABLED','').lower()=='true')
+                processed=(worker.step() if enabled else False) or dispatched
             except Exception as exc:
                 if once:raise click.ClickException('Worker paused: '+type(exc).__name__) from None
                 click.echo('Worker paused; PostgreSQL recovery will retry: '+type(exc).__name__,err=True)

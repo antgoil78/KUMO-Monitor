@@ -26,6 +26,7 @@ RUN pip install --no-cache-dir \
     snowflake-connector-python==3.17.4 \
     Flask==3.0.0 \
     Flask-CORS==4.0.0 \
+    gunicorn==23.0.0 \
     python-dotenv==1.0.0 \
     'psycopg[binary]==3.3.9' \
     croniter==7.0.0

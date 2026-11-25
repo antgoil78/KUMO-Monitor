@@ -11,6 +11,7 @@ import uuid
 
 from .dependencies import digest,graph_definition,record_revision
 from .store import Conflict,normalize
+from .commands import enabled as business_enabled
 
 CATALOG_KEY='dev-workflow-catalog'
 
@@ -65,13 +66,20 @@ def compile_catalog(body):
                 reason.append('Job assignments must form one ordered chain');break
             rule=candidates[0];job=jobs.get(rule['JOB_ID'])
             if job is None:reason.append('Assigned job is missing');break
-            if job.get('JOB_TYPE')!='SQL':reason.append(str(job.get('JOB_TYPE') or 'Unknown')+' execution is not enabled in this worker')
-            if rule.get('ALLOW') is False or rule.get('SQL') or any(rule.get(f) is not None for f in ('SUCCESS','WARNING','ERROR')):
+            if job.get('JOB_TYPE') not in (('SQL','DBT') if business_enabled() else ('SQL',)):reason.append(str(job.get('JOB_TYPE') or 'Unknown')+' execution is not enabled in this worker')
+            standard_gate = business_enabled() and (rule.get('SUCCESS'),rule.get('WARNING'),rule.get('ERROR')) == (True,False,False)
+            if rule.get('ALLOW') is False or rule.get('SQL') or (not standard_gate and any(rule.get(f) is not None for f in ('SUCCESS','WARNING','ERROR'))):
                 reason.append('Job dependency gates require additional execution support')
             if any(job.get(f) for f in ('ON_SUCCESS_COMMAND_LINE','ON_WARNING_COMMAND_LINE','ON_ERROR_COMMAND_LINE')):
                 reason.append('Job outcome commands require additional execution support')
+            content=dict(sql=job.get('SQL_COMMAND'))
+            if business_enabled() and job.get('JOB_TYPE') in ('SQL','DBT'):
+                from workflow_commands import DBT_PROJECT_TEMPLATE,DBT_TARGET_TEMPLATE
+                command=(dict(workflowType='SQL',sqlCommand=job.get('SQL_COMMAND')) if job['JOB_TYPE']=='SQL' else
+                    dict(workflowType='DBT',dbtCommand=job.get('DBT_COMMAND'),dbtProjectFqn=job.get('DBT_PROJECT_FQN') or DBT_PROJECT_TEMPLATE,dbtTarget=job.get('DBT_TARGET') or DBT_TARGET_TEMPLATE))
+                content=dict(type=job['JOB_TYPE'],command=command)
             ordered.append(dict(key=job['JOB_ID'],name=job['JOB_NAME'],description=job.get('DESCRIPTION') or '',layer=job.get('JOB_LAYER') or 'GENERAL',
-                enabled=bool(job.get('IS_ENABLED')),sql=job.get('SQL_COMMAND'),timeoutSeconds=int(job.get('TIMEOUT_SECONDS') or 60)))
+                enabled=bool(job.get('IS_ENABLED')),timeoutSeconds=int(job.get('TIMEOUT_SECONDS') or 60),**content))
             remaining.remove(rule);parent=job['JOB_ID']
         node=dict(key=keys[identity],name=wf['WORKFLOW_NAME'],group=wf.get('WORKFLOW_GROUP') or '',description=wf.get('DESCRIPTION') or '',
             enabled=bool(wf.get('IS_ENABLED')),allow=not headers or bool(headers[0].get('PARENT_ID')) or headers[0].get('ALLOW') is not False,
@@ -170,6 +178,19 @@ class CatalogConfiguration:
     def read(self):
         with self.store.connect() as conn:return self.payload(conn,self.graph(conn))
 
+    def recompile(self,actor):
+        """Apply new engine capabilities to the master, retaining accepted snapshots."""
+        from psycopg.types.json import Jsonb
+        with self.store.transaction() as conn:
+            graph=conn.execute('SELECT * FROM kumo_task_engine.dependency_graphs WHERE key=%s',(CATALOG_KEY,)).fetchone()
+            if not graph:return None
+            definition=compile_catalog(dict(key=CATALOG_KEY,name=graph['name'],enabled=graph['enabled'],catalog=graph['definition']['catalog']))
+            if digest(definition)!=graph['definition_hash']:
+                graph=conn.execute('''UPDATE kumo_task_engine.dependency_graphs SET definition=%s,definition_hash=%s,revision=revision+1,
+                    updated_by=%s,updated_at=clock_timestamp() WHERE id=%s RETURNING *''',(Jsonb(definition),digest(definition),actor,graph['id'])).fetchone()
+                record_revision(conn,graph)
+            return graph
+
     def change(self,body,actor,mutate):
         from psycopg.types.json import Jsonb
         if not isinstance(body,dict) or type(body.get('revision')) is not int:raise ValueError('Supply the loaded configuration revision')
@@ -182,6 +203,13 @@ class CatalogConfiguration:
                 graph=conn.execute('''UPDATE kumo_task_engine.dependency_graphs SET definition=%s,definition_hash=%s,revision=revision+1,
                     updated_by=%s,updated_at=clock_timestamp() WHERE id=%s RETURNING *''',(Jsonb(definition),digest(definition),str(actor)[:256],graph['id'])).fetchone()
                 record_revision(conn,graph)
+                disabled=[w['WORKFLOW_ID'] for w in definition['catalog']['workflows'] if not w['IS_ENABLED']]
+                if disabled:
+                    from .schedules import Schedules
+                    paused=conn.execute("""UPDATE kumo_task_engine.schedules SET enabled=false,next_fire_at=NULL,revision=revision+1,
+                        updated_by=%s,updated_at=clock_timestamp() WHERE enabled AND plan->>'graphId'=%s
+                        AND plan->>'workflowId'=ANY(%s) RETURNING *""",(str(actor)[:256],str(graph['id']),disabled)).fetchall()
+                    for schedule in paused:Schedules.audit(conn,schedule,'PAUSED',actor,reason='Workflow disabled')
             return self.payload(conn,graph)
 
     def workflow(self,identity,body,actor):
@@ -201,7 +229,7 @@ class CatalogConfiguration:
             row=next((j for j in raw['jobs'] if j['JOB_ID']==identity),None)
             if not row:raise LookupError('Job not found')
             restricted=False
-            if row.get('JOB_TYPE')=='SQL':
+            if row.get('JOB_TYPE')=='SQL' and not business_enabled():
                 try:
                     normalize(dict(requestId='catalog-validation',jobs=[dict(key=identity,sql=row.get('SQL_COMMAND'),timeoutSeconds=int(row.get('TIMEOUT_SECONDS') or 60))]))
                     restricted=True

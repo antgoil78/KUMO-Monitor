@@ -19,8 +19,9 @@
 .om-list-heading .button { padding: 6px 10px; font-size: 11px; }
 .om-table-wrap { overflow-x: auto; border: 1px solid #2c2e33; border-radius: 4px; background: #191c24; }
 .om-table { width: 100%; min-width: 1080px; border-collapse: collapse; table-layout: fixed; text-align: left; font-size: 12px; }
-.om-monitor-table { min-width: 1320px; }
-.om-page .om-monitor-table .om-name-col { width: 30%; }
+.om-monitor-table { min-width: 1480px; }
+.om-page .om-monitor-table .om-name-col { width: 25%; }
+.om-page .om-monitor-table .om-state-col { width: 18%; }
 .om-page .om-monitor-table .om-trigger-col { width: 14%; }
 .om-monitor-table .om-next-col { width: 10%; }
 .om-name-text { flex: 1; min-width: 0; }
@@ -42,7 +43,11 @@
 .om-action-options button:focus-visible { outline: 2px solid #8fc2ff; outline-offset: -2px; background: #293346; }
 .om-action-options button:disabled { opacity: .35; cursor: default; background: transparent; }
 .om-action-icon { display: block; flex-shrink: 0; }
-.om-live-status { display: inline-flex; align-items: center; gap: 6px; }
+.om-live-status { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; }
+.om-planning-status { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; }
+.om-planning-status .status-count { color: #8fc2ff; font-variant-numeric: tabular-nums; }
+.om-planning .om-dependency-list { display: flex; flex-wrap: wrap; gap: 3px 10px; }
+.om-planning-cell { overflow-wrap: anywhere; }
 .om-spinner { display: inline-block; width: 11px; height: 11px; flex-shrink: 0; border: 2px solid #334b43; border-top-color: #36d78d; border-radius: 50%; animation: om-spin .8s linear infinite; }
 @keyframes om-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .om-spinner { animation: none; border-color: #36d78d; border-right-color: transparent; } }
@@ -101,6 +106,10 @@
 .om-monitor-table .om-workflow-link { width: 100%; }
 .om-monitor-table small { margin-top: 2px; line-height: 14px; }
 .om-monitor-table .om-name-detail { margin: 1px 0 0; padding: 0; }
+.om-monitor-table .om-name-detail.om-dependency-list { display: flex; flex-wrap: wrap; gap: 3px 10px; overflow: visible; white-space: normal; }
+.om-dependency-item { display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.om-dependency-item .status-badge { font-size: inherit; }
+.om-dependency-item .status-badge.muted { color: var(--amber); }
 .om-monitor-table .om-progress { gap: 3px; }
 .om-monitor-table .om-progress > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .om-monitor-table .om-dependency { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -115,3 +124,6 @@
   border-radius: 4px;
   font-size: 12px;
 }
+.om-dispatch-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.om-dispatch-error p { margin: 4px 0; }
+.om-dispatch-paused { color: #ed8c93; }

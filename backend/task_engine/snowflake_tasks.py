@@ -8,6 +8,9 @@ class TaskDrift(RuntimeError):
 
 
 def body_for(job):
+    if job['snapshot'].get('command') is not None:
+        from .commands import task_body
+        return task_body(job['snapshot']['command'],job['run_id'])
     # The prototype validator accepts one SELECT expression only. A native SQL
     # error propagates to FAILED; no wrapper can hide it behind SUCCEEDED.
     return job['snapshot']['sql']

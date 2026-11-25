@@ -132,18 +132,21 @@ KUMO_SESSION_CACHE_SECONDS = int(os.getenv("KUMO_SESSION_CACHE_SECONDS", "300"))
 KUMO_ACTIVITY_LEASE_SECONDS = int(os.getenv("KUMO_ACTIVITY_LEASE_SECONDS", "90"))
 KUMO_LOOKUP_USER_PROFILE = os.getenv("KUMO_LOOKUP_USER_PROFILE", "false").strip().lower() in ("1", "true", "yes", "y")
 ORCHESTRATION_RUNS_ENABLED = os.getenv("KUMO_ORCHESTRATION_RUNS_ENABLED", "false").strip().lower() in ("1", "true", "yes")
-LEGACY_ENGINE_RETIRED = False
+POSTGRES_ENGINE_PRIMARY = os.getenv('KUMO_POSTGRES_ENGINE_PRIMARY','').lower() == 'true'
+if POSTGRES_ENGINE_PRIMARY and (ENVIRONMENT != 'DEV' or os.getenv('KUMO_TASK_PROTOTYPE_ENABLED','').lower() != 'true'):
+    raise ValueError('The primary PostgreSQL engine requires the DEV task engine to be enabled')
+LEGACY_ENGINE_RETIRED = POSTGRES_ENGINE_PRIMARY
 STREAM_DISPATCH_ENABLED = False
 
 
 def apply_orchestration_settings(rows):
     """Retirement is persisted per environment, so TST keeps its current engine."""
     global LEGACY_ENGINE_RETIRED, STREAM_DISPATCH_ENABLED, T_QUEUE
-    LEGACY_ENGINE_RETIRED = any(row.get('PARAMETER_KEY') == 'LEGACY_ENGINE_RETIRED'
+    LEGACY_ENGINE_RETIRED = POSTGRES_ENGINE_PRIMARY or any(row.get('PARAMETER_KEY') == 'LEGACY_ENGINE_RETIRED'
                                 and row.get('ACTIVE_FL') and row.get('VALUE_TYPE') == 'BOOLEAN'
                                 and str(row.get('PARAMETER_VALUE')).lower() == 'true' for row in rows)
     T_QUEUE = METADATA_NAMESPACE + ('.X_WORKFLOW_RUN_QUEUE' if LEGACY_ENGINE_RETIRED else '.WORKFLOW_RUN_QUEUE')
-    STREAM_DISPATCH_ENABLED = any(row.get('PARAMETER_KEY') == 'STREAM_DISPATCH_ENABLED'
+    STREAM_DISPATCH_ENABLED = not POSTGRES_ENGINE_PRIMARY and any(row.get('PARAMETER_KEY') == 'STREAM_DISPATCH_ENABLED'
                                   and row.get('ACTIVE_FL') and row.get('VALUE_TYPE') == 'BOOLEAN'
                                   and str(row.get('PARAMETER_VALUE')).lower() == 'true' for row in rows)
 

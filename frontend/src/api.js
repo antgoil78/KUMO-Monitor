@@ -44,6 +44,7 @@ async function requestJson(url, options = {}) {
   return data
 }
 let sessionRequest = null
+let healthRequest = null
 
 // The same editors use an explicit store; PostgreSQL failures never fall back
 // to Snowflake and cannot accidentally save into the original catalog.
@@ -63,7 +64,13 @@ export function configurationApi(source) {
 export const api = {
   batchControl: params => requestJson(`/api/lim/batch-control?${new URLSearchParams(params)}`, { timeoutMs: 120000 }),
   batchControlGroups: params => requestJson(`/api/lim/batch-control/groups?${new URLSearchParams(params)}`, { timeoutMs: 120000 }),
-  health: () => requestJson('/api/health'),
+  health: () => {
+    if (!healthRequest) {
+      healthRequest = requestJson('/api/health', { timeoutMs: 10000 })
+        .finally(() => { healthRequest = null })
+    }
+    return healthRequest
+  },
   taskPrototypeStatus: () => requestJson('/api/orchestration/task-engine'),
   taskPrototypeSchedules: () => requestJson('/api/orchestration/task-engine/schedules'),
   taskPrototypeGraphs: () => requestJson('/api/orchestration/task-engine/graphs'),
@@ -73,6 +80,8 @@ export const api = {
   taskPrototypeCascade: id => requestJson(`/api/orchestration/task-engine/cascades/${id}`),
   cancelTaskPrototypeCascade: id => requestJson(`/api/orchestration/task-engine/cascades/${id}/cancel`, { method: 'POST' }),
   retryTaskPrototypeDispatch: id => requestJson(`/api/orchestration/task-engine/cascades/${id}/retry-dispatch`, { method: 'POST' }),
+  recoverTaskPrototypeRun: id => requestJson(`/api/orchestration/task-engine/runs/${id}/recover`, { method: 'POST' }),
+  retryTaskPrototypeWorkflow: (cascadeId, nodeId) => requestJson(`/api/orchestration/task-engine/cascades/${cascadeId}/nodes/${nodeId}/retry`, { method: 'POST' }),
   createTaskPrototypeSchedule: body => requestJson('/api/orchestration/task-engine/schedules', { method: 'POST', body: JSON.stringify(body) }),
   updateTaskPrototypeSchedule: (id, body) => requestJson(`/api/orchestration/task-engine/schedules/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   taskPrototypeRun: id => requestJson(`/api/orchestration/task-engine/runs/${id}`),

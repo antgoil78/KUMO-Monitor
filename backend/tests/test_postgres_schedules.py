@@ -240,7 +240,7 @@ class PostgresScheduleTests(unittest.TestCase):
         self.store.initialize();self.store.initialize()
         self.assertEqual(self.store.read(run)['run']['request_id'],'v1-history')
         with self.store.connect() as conn:
-            self.assertEqual([r['version'] for r in conn.execute('SELECT version FROM kumo_task_engine.schema_version ORDER BY version').fetchall()],[1,2,3,4,5])
+            self.assertEqual([r['version'] for r in conn.execute('SELECT version FROM kumo_task_engine.schema_version ORDER BY version').fetchall()],[1,2,3,4,5,6,7,8])
 
 
 if __name__=='__main__':unittest.main()

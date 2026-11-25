@@ -7,11 +7,10 @@ export FLASK_APP=backend.app
 export FLASK_ENV=production
 export PYTHONUNBUFFERED=1
 
-echo "Starting Flask backend server..."
-python -m flask run --host=0.0.0.0 --port=5000 &
-BACKEND_PID=$!
+if [ "${KUMO_TASK_ENGINE_RUNTIME_ENABLED:-false}" = "true" ]; then
+    exec python -m task_engine.runtime
+fi
 
-echo "Flask backend started on port 5000"
-echo "React frontend will be served from backend on http://localhost:5000"
-
-wait $BACKEND_PID
+exec python -m gunicorn --bind 0.0.0.0:5000 --workers 1 \
+    --worker-class gthread --threads 64 --timeout 120 \
+    --graceful-timeout 20 backend.app:app

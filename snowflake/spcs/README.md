@@ -2,8 +2,8 @@
 
 App releases go through Git and
 [`deploy-image.yml`](../../.github/workflows/deploy-image.yml). Push to `main`
-to trigger it automatically, or use its manual dispatch to publish a feature
-branch. The workflow builds and publishes the versioned container image. It
+to trigger it automatically after a reviewed merge. The workflow builds and
+publishes the versioned container image. It
 does not execute `ALTER SERVICE`; updating the running service is a separate
 promotion step. Use the GitHub Actions path for releases unless a direct service
 update is explicitly requested.
@@ -52,6 +52,91 @@ for user identity; application reads/writes continue to use the service owner.
 `KUMO_LIM_ROLE` is set to that same owner for File Ingestion's role selection.
 Keep passwords out of the spec: the app uses the Snowflake-provided service
 OAuth token.
+
+## PostgreSQL DEV rollout
+
+The maintained app supports the DEV backend engine using two independent SPCS
+services in `KUMO_SHARED_MONITOR_POOL`:
+
+| Service | Purpose | Image workflow |
+| --- | --- | --- |
+| `KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE` | Web/API, native/dependency worker and scheduler | `deploy-image.yml` |
+| `KUMO_DEV.MONITOR_APP.KUMO_MONITOR_POSTGRES_SERVICE` | PostgreSQL 17 and its persistent 10 GiB block volume | `publish-postgres-image.yml` |
+
+The PostgreSQL workflow runs on `main` only when its Dockerfile or workflow
+changes. It publishes the pinned upstream image as `kumo-monitor-postgres` in the
+existing image repository. Publishing either image does not update a service.
+App promotions must not recreate, restart or replace the PostgreSQL service.
+The database endpoint is private TCP; it is never exposed through public ingress.
+
+Provision `KUMO_DEV.MONITOR_APP.KUMO_MONITOR_POSTGRES_CREDENTIALS` as a Snowflake
+`PASSWORD` secret outside Git, then render the database service:
+
+```bash
+python snowflake/spcs/render_postgres_service.py \
+  --image /kumo_shared/monitor_app/monitor_repository/kumo-monitor-postgres:pg17-<build> \
+  --output /tmp/create-dev-postgres.sql
+```
+
+This uses `CREATE SERVICE`, never `CREATE OR REPLACE`. Snowflake block volumes
+survive service upgrades and suspension/resume, but dropping the service deletes
+its volume. Do not drop/recreate it for app releases. See the
+[Snowflake block storage reference](https://docs.snowflake.com/en/developer-guide/snowpark-container-services/block-storage-volume).
+
+Preserve the current app service's endpoint/resources and add:
+
+```yaml
+env:
+  KUMO_ENV: DEV
+  KUMO_TASK_PROTOTYPE_ENABLED: "true"
+  KUMO_POSTGRES_ENGINE_PRIMARY: "true"
+  KUMO_TASK_ENGINE_RUNTIME_ENABLED: "true"
+  KUMO_PG_BUSINESS_JOBS_ENABLED: "true"
+  KUMO_TASK_ENGINE_WORKER_ENABLED: "true"
+  KUMO_POSTGRES_HOST: <database-service-dns-name>
+  KUMO_POSTGRES_DATABASE: kumo_engine_dev
+  KUMO_PG_TASK_ROLE: KUMO_ADMIN
+  KUMO_PG_TASK_WAREHOUSE: KUMO_ELT_GEN_1
+secrets:
+  - snowflakeSecret: KUMO_DEV.MONITOR_APP.KUMO_MONITOR_POSTGRES_CREDENTIALS
+    secretKeyRef: username
+    envVarName: KUMO_POSTGRES_USER
+  - snowflakeSecret: KUMO_DEV.MONITOR_APP.KUMO_MONITOR_POSTGRES_CREDENTIALS
+    secretKeyRef: password
+    envVarName: KUMO_POSTGRES_PASSWORD
+readinessProbe:
+  port: 5000
+  path: /api/orchestration/task-engine/ready
+```
+
+The entrypoint initializes incremental PostgreSQL migrations under the engine's
+transaction lock, recompiles the master capabilities, and supervises one Gunicorn
+process (one worker, 64 threads), one dependency/native worker, and one scheduler.
+If any child exits, it terminates its siblings and exits so SPCS can recover the
+whole app instance. SIGTERM is forwarded; interrupted submissions retain their
+durable fence and lease. Startup, health/readiness and idle worker/scheduler
+checks use PostgreSQL only. `/ready` requires the master and fresh heartbeats for
+both background processes; `/api/health` remains a lightweight liveness endpoint.
+
+Before moving state, stop local DEV admission, scheduler and worker, and confirm
+no unresolved native tasks remain. Transfer only the `kumo_task_engine` schema
+using `pg_dump`/`pg_restore` into the empty SPCS database. This preserves master
+IDs/revisions, schedules, history and decision logs. Transfer data via a private
+temporary stage; remove it after verification. Never commit the dump or secret.
+Start SPCS with admission and native processing disabled until database counts,
+Monitor/History/Log and readiness have been verified. Then enable DEV runs and
+the native worker. Do not run local and SPCS workers against separate copies of
+the same DEV workflow configuration.
+
+SQL and DBT commands use the maintained `SP_RESOLVE_WORKFLOW_COMMAND` resolver
+inside their unique native task. Frozen definitions, run IDs, configured timeouts,
+dependency exclusion, submission ambiguity recovery, cancellation and cleanup
+apply to both types. SQL statement blocks and DBT native failures propagate to
+task failure. Monitor status and progress use PostgreSQL native execution state;
+model-level DBT progress/DAG exploration is not part of this rollout. Existing
+unsupported custom dependency SQL, outcome hooks and command jobs remain explicit
+configuration exclusions rather than being silently ignored. Creating/deleting
+catalog objects and changing assignments retain the existing trial restrictions.
 
 ## DEV worksheet scripts
 

@@ -1,0 +1,34 @@
+spec:
+  containers:
+    - name: postgres
+      image: ${POSTGRES_IMAGE}
+      env:
+        POSTGRES_DB: kumo_engine_dev
+        PGDATA: /var/lib/postgresql/data/pgdata
+        POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+      secrets:
+        - snowflakeSecret: KUMO_DEV.MONITOR_APP.KUMO_MONITOR_POSTGRES_CREDENTIALS
+          secretKeyRef: username
+          envVarName: POSTGRES_USER
+        - snowflakeSecret: KUMO_DEV.MONITOR_APP.KUMO_MONITOR_POSTGRES_CREDENTIALS
+          secretKeyRef: password
+          envVarName: POSTGRES_PASSWORD
+      volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+      resources:
+        requests:
+          cpu: "0.25"
+          memory: 0.5Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+  endpoints:
+    - name: postgres
+      port: 5432
+      protocol: TCP
+      public: false
+  volumes:
+    - name: postgres-data
+      source: block
+      size: 10Gi
