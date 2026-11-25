@@ -110,7 +110,14 @@ same PostgreSQL transaction, including waiting executions in other groups.
 Disabling a workflow pauses its schedule; accepted work retains its snapshot.
 Imported schedules stay inactive until explicitly enabled. Standalone trial
 schedules retain their earlier overlap policy.
-DBT progress/DAG execution, SQL conditions, business commands, definition
+The DEV catalog schedule migration registers every saved cron/timezone as a
+paused backend schedule, including intent for disabled workflows. It preserves
+existing PostgreSQL schedule edits, configuration revisions and execution history.
+With the DEV engine environment configured, preview with
+`PYTHONPATH=backend python backend/migrations/migrate_dev_postgres_schedules.py`;
+apply with `--apply --expected-revision <reviewed catalog revision>`.
+Rerunning it adds only missing workflow schedules and never enables them.
+DBT model progress/DAG exploration, SQL conditions, definition
 creation/deletion and assignment additions/removals remain outside this stage.
 
 The existing Flask app accepts trial runs into PostgreSQL. A separate worker

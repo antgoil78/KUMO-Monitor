@@ -1,0 +1,70 @@
+{
+  "ok": true,
+  "createdCount": 15,
+  "preservedSchedules": 0,
+  "workflowSchedules": 15,
+  "enabledSchedules": 0,
+  "scheduler": {
+    "state": "HEALTHY",
+    "liveWorkers": 1,
+    "lastSeen": "2026-11-25 15:11:49.685973+00:00",
+    "overdueSchedules": 0
+  },
+  "catalogRevision": 6,
+  "catalogUnchanged": true,
+  "workflowCount": 26,
+  "jobCount": 51,
+  "before": {
+    "runs": 193,
+    "attempts": 205,
+    "cascades": 37,
+    "schedule_occurrences": 3,
+    "schedules": 4
+  },
+  "after": {
+    "runs": 193,
+    "attempts": 205,
+    "cascades": 37,
+    "schedule_occurrences": 3,
+    "schedules": 19
+  },
+  "historyCountsUnchanged": true,
+  "monitorScheduleCount": 15,
+  "createdScheduleIds": [
+    "46e22172-2989-5c76-9354-96be13a7d8e9",
+    "2b154e24-6ba4-5765-8198-3f94ea3fda17",
+    "3e02836d-4e4a-5f13-a30a-a5e32eccf079",
+    "ea001b14-cebe-55bd-b390-94cf32c65122",
+    "287c333c-0f58-5cf7-a783-5ca7632ff343",
+    "9f5e70ff-db4c-5841-88f1-6c0a34558c99",
+    "7e954fe4-4424-55df-a903-2645f9b88b87",
+    "0048bc9c-3bc8-5bc1-be3b-05cde1c3d4be",
+    "d1fa6b43-fee2-5c6d-9d0f-3c6424cc8e6c",
+    "f9afac03-c38b-5987-a15e-22f4f60572ce",
+    "b324f547-b7c2-5b66-97f8-335c5a3ef0a7",
+    "2fbc5992-e46b-5f76-b0f8-5f7fbff381c3",
+    "9d0fb129-2e03-507c-a80a-47e1bf1cc471",
+    "da54cf47-ea50-50fc-8c12-f3b4736b472f",
+    "3de97617-9073-5f83-a87c-bf9be29fed20"
+  ],
+  "environment": "DEV",
+  "verifiedAt": "2026-11-25T15:12:43.411317+00:00",
+  "sourceCoverage": {
+    "workflows": 26,
+    "jobs": 51,
+    "dependencyRecords": 80,
+    "missingWorkflows": 0,
+    "missingJobs": 0,
+    "dependencyDefinitionsMatch": true,
+    "unsupportedDefinitions": 0
+  },
+  "postgresEditsPreserved": true,
+  "testSchedulesPreserved": 4,
+  "localMigrationTests": {
+    "count": 6,
+    "businessCommandsEnabled": "passed",
+    "disposableSqlMode": "passed"
+  },
+  "tstChanged": false,
+  "legacyTasksStarted": 0
+}
