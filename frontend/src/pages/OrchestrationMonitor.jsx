@@ -47,11 +47,14 @@ function matches(workflow, query) {
 
 function executionOf(workflow) { return workflow.execution || workflow.run }
 
-function RunCells({ run, lastRun, now, stateCell = null }) {
+function RunCells({ run, lastRun, now, stateCell = null, legacyWaiting = false }) {
   const timing = lastRun || run
   const start = asDate(timing.start)
   const day = lastRunDay(timing.start, now)
-  return <><td className="om-execution-status"><span className="om-live-status">{run.status === 'RUNNING' && <span className="om-spinner" role="img" aria-label="Execution in progress" />}<StatusBadge status={run.status === 'NOT RUN' ? 'NO RUN' : run.status} /></span></td><td className="om-planning-cell">{stateCell || <span className="om-muted">—</span>}</td><td className="om-time" title={timing.start || ''}>{start ? <>{timeFormatter.format(start)}<small className={day.tone ? `om-day-${day.tone}` : ''}>{day.label}</small></> : '—'}</td><td className="om-time">{durationLabel(run, now)}</td></>
+  const waiting = legacyWaiting && ['INITIATING', 'CLAIMED', 'QUEUED'].includes(run.status) && !run.start
+  const requested = asDate(run.requestedAt)
+  const phase = waiting ? `${run.status === 'INITIATING' && !run.executionId ? 'Submitting request' : 'Waiting to start'}${requested ? ` · ${Math.max(0, Math.floor((now - requested) / 1000))}s` : ''}` : ''
+  return <><td className="om-execution-status"><span className="om-live-status">{run.status === 'RUNNING' && <span className="om-spinner" role="img" aria-label="Execution in progress" />}<StatusBadge status={run.status === 'NOT RUN' ? 'NO RUN' : run.status} /></span>{phase && <small>{phase}</small>}</td><td className="om-planning-cell">{stateCell || <span className="om-muted">—</span>}</td><td className="om-time" title={timing.start || ''}>{start ? <>{timeFormatter.format(start)}<small className={day.tone ? `om-day-${day.tone}` : ''}>{day.label}</small></> : '—'}</td><td className="om-time">{durationLabel(run, now)}</td></>
 }
 
 function PlanningState({ workflow }) {
@@ -255,7 +258,7 @@ function WorkflowRows({ workflow, onCancel, onRecover, onRetry, expanded, onTogg
           </div>
         </th>
         <td><span className="om-kind">Workflow</span><small>{assignedCount} assigned {assignedCount === 1 ? 'job' : 'jobs'}{parallel ? ' · Parallel' : ''}</small>{workflow.run.recovery?.canRecover && <button type="button" className="button" disabled={busy} aria-label={`Recover workflow ${workflow.WORKFLOW_NAME}`} onClick={onRecover}>Recover</button>}{workflow.run.retry && <button type="button" className="button" disabled={busy || !workflow.canRun} title={workflow.canRun ? 'Retry this failed workflow and resume its blocked descendants. Completed workflows are retained.' : workflow.runUnavailable} aria-label={`Retry failed workflow ${workflow.WORKFLOW_NAME}`} onClick={onRetry}>Retry</button>}</td>
-        <RunCells run={execution} now={now} stateCell={<PlanningState workflow={workflow} />} />
+        <RunCells run={execution} now={now} legacyWaiting={!workflow.planning} stateCell={<PlanningState workflow={workflow} />} />
         <td>{total ? <div className={`om-progress ${failed ? 'has-failure' : ''}`}><span title={progressLabel}>{completed} / {total} finished</span><div className="om-track" role="progressbar" aria-label={`Workflow progress for ${workflow.WORKFLOW_NAME}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><i style={{ width: `${percent}%` }} /></div></div> : <span className="om-muted">No executions yet</span>}</td>
         <td>{workflow.IS_SCHEDULE_ENABLED ? <><span className="om-cron">{workflow.SCHEDULE}</span><small>{workflow.SCHEDULE_TIMEZONE || 'UTC'}{!workflow.IS_ENABLED && ' · Paused with workflow'}</small></> : <span className="om-muted">Not scheduled</span>}</td>
         <td className="om-time"><NextRun workflow={workflow} /></td>

@@ -137,6 +137,8 @@ model-level DBT progress/DAG exploration is not part of this rollout. Existing
 unsupported custom dependency SQL, outcome hooks and command jobs remain explicit
 configuration exclusions rather than being silently ignored. Creating/deleting
 catalog objects and changing assignments retain the existing trial restrictions.
+PostgreSQL completion events do not yet invoke the existing Snowflake notification
+rules. Do not rely on those notifications during this DEV trial.
 
 ## DEV worksheet scripts
 

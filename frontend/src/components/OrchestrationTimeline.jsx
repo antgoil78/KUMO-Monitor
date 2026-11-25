@@ -28,7 +28,7 @@ function mergeLive(history, workflows, generatedAt) {
     if (previous && Date.parse(generatedAt || '') > Date.parse(workflow.liveGeneratedAt || '')) continue
     // The table shows actual execution jobs; the timeline also includes requests
     // that have not started, using their own frozen request snapshot.
-    const jobs = current.jobs || workflow.jobs.filter(job => job.run.runId === current.runId && job.run.executionId).map(job => ({ ...job.run, jobId: job.JOB_ID, name: job.JOB_NAME, type: job.JOB_TYPE, layer: job.JOB_LAYER }))
+    const jobs = (workflow.source === 'POSTGRES' && current.jobs) || workflow.jobs.filter(job => job.run.runId === current.runId && job.run.executionId).map(job => ({ ...job.run, jobId: job.JOB_ID, name: job.JOB_NAME, type: job.JOB_TYPE, layer: job.JOB_LAYER }))
     runs.set(key, { ...previous, ...current, workflowId: workflow.WORKFLOW_ID, workflowName: previous?.workflowName || workflow.WORKFLOW_NAME,
       jobs: previous ? previous.jobs.map(job => ({ ...job, ...jobs.find(live => live.executionId === job.executionId) })).concat(jobs.filter(job => !previous.jobs.some(old => old.executionId === job.executionId))) : jobs })
   }
