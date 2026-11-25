@@ -344,6 +344,12 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code,410)
         self.assertIn('PostgreSQL owns DEV orchestration',response.get_data(as_text=True))
 
+    def test_primary_engine_accepts_only_configured_workflow_admission(self):
+        with patch.dict(os.environ,KUMO_POSTGRES_ENGINE_PRIMARY='true'):
+            self.assertEqual(self.client.post(self.integration.PREFIX+'/runs',json=plan()).status_code,410)
+            self.assertEqual(self.client.post(self.integration.PREFIX+'/schedules',json={'plan':plan()}).status_code,400)
+        self.database.submit.assert_not_called()
+
     def test_readiness_reports_unhealthy_worker_without_snowflake(self):
         with patch('task_engine.runtime.readiness',return_value=dict(ok=False,checks=dict(worker=False))) as check:
             response=self.client.get(self.integration.PREFIX+'/ready')

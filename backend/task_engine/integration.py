@@ -41,6 +41,8 @@ def status():return jsonify(encode(store().status()))
 @blueprint.route(PREFIX+'/runs',methods=['POST'])
 def submit():
     if os.getenv('KUMO_ORCHESTRATION_RUNS_ENABLED','').lower()!='true':raise PermissionError('Execution controls are disabled')
+    if os.getenv('KUMO_POSTGRES_ENGINE_PRIMARY','').lower()=='true':
+        return jsonify(ok=False,error='Start a configured workflow through the Monitor'),410
     # Identity follows the app's trusted request context, never a payload actor.
     actor=current_app.extensions['task_prototype_actor_context']()
     return jsonify(store().submit(request.get_json(silent=True),actor.get('userName') or 'LOCAL_DEV')),202
@@ -71,8 +73,11 @@ def schedules():
 def create_schedule():
     from .schedules import Schedules
     if os.getenv('KUMO_ORCHESTRATION_RUNS_ENABLED','').lower()!='true':raise PermissionError('Execution controls are disabled')
+    body=request.get_json(silent=True)
+    if os.getenv('KUMO_POSTGRES_ENGINE_PRIMARY','').lower()=='true' and not (isinstance(body,dict) and isinstance(body.get('target'),dict) and body['target'].get('graphId')):
+        raise ValueError('Schedules must target a configured workflow')
     actor=current_app.extensions['task_prototype_actor_context']()
-    return jsonify(encode(Schedules(store()).create(request.get_json(silent=True),actor.get('userName') or 'LOCAL_DEV'))),201
+    return jsonify(encode(Schedules(store()).create(body,actor.get('userName') or 'LOCAL_DEV'))),201
 
 
 @blueprint.route(PREFIX+'/schedules/<schedule_id>',methods=['PATCH'])
