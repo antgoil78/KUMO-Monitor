@@ -1378,7 +1378,7 @@ def bind_request_context():
         return _json_error('PostgreSQL owns DEV orchestration. Reload the Workflow page.',410)
     if (request.path.startswith('/api/') and request.path not in _CACHE_ONLY_PATHS
             and not request.path.startswith(TASK_PROTOTYPE_PREFIX)
-            and not (request.path=='/api/events' and request.args.get('orchestrationSource')=='POSTGRES'
+            and not (request.path=='/api/events' and (config.POSTGRES_ENGINE_PRIMARY or request.args.get('orchestrationSource')=='POSTGRES')
                      and os.getenv('KUMO_TASK_PROTOTYPE_ENABLED','').lower()=='true' and config.ENVIRONMENT=='DEV')
             and request.method != 'OPTIONS'):
         try:
@@ -2175,7 +2175,7 @@ def events():
     client_metadata = {
         "clientId": str(request.args.get("clientId") or "")[:100],
         "page": str(request.args.get("page") or "Unknown page")[:100],
-        "orchestrationSource": 'POSTGRES' if request.args.get('orchestrationSource')=='POSTGRES' and os.getenv('KUMO_TASK_PROTOTYPE_ENABLED','').lower()=='true' and config.ENVIRONMENT=='DEV' else 'SNOWFLAKE',
+        "orchestrationSource": 'POSTGRES' if (config.POSTGRES_ENGINE_PRIMARY or request.args.get('orchestrationSource')=='POSTGRES') and os.getenv('KUMO_TASK_PROTOTYPE_ENABLED','').lower()=='true' and config.ENVIRONMENT=='DEV' else 'SNOWFLAKE',
         "ipAddress": _client_ip(),
         "userName": actor.get("userName") or "UNKNOWN",
         "displayName": actor.get("displayName") or actor.get("userName") or "Unknown user",

@@ -404,6 +404,15 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(response.status_code,200)
             self.assertIn('data:',response.get_data(as_text=True))
 
+    def test_primary_presence_ignores_stale_snowflake_browser_preferences(self):
+        with patch.dict(os.environ,KUMO_TASK_PROTOTYPE_ENABLED='true'),patch.object(self.application.config,'ENVIRONMENT','DEV'),\
+             patch.object(self.application.config,'POSTGRES_ENGINE_PRIMARY',True),\
+             patch.object(self.application.realtime_broker,'stream',return_value=iter(['data: {}\n\n'])) as stream:
+            response=self.client.get('/api/events?orchestrationSource=SNOWFLAKE&page=orchestrationMonitor')
+            self.assertEqual(response.status_code,200)
+            response.get_data()
+            self.assertEqual(stream.call_args.args[0]['orchestrationSource'],'POSTGRES')
+
     def test_feature_flag_and_non_dev_environment_prevent_database_access(self):
         with patch.object(self.integration,'store',wraps=lambda:Store(Settings.from_environment())):
             for values in [dict(KUMO_TASK_PROTOTYPE_ENABLED='false'),dict(KUMO_TASK_PROTOTYPE_ENABLED='true',KUMO_ENV='TST')]:
