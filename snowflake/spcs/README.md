@@ -83,7 +83,9 @@ survive service upgrades and suspension/resume, but dropping the service deletes
 its volume. Do not drop/recreate it for app releases. See the
 [Snowflake block storage reference](https://docs.snowflake.com/en/developer-guide/snowpark-container-services/block-storage-volume).
 
-Preserve the current app service's endpoint/resources and add:
+Preserve the current app service's endpoint and memory settings. The DEV rollout
+uses CPU requests of 0.25 for the app and 0.1 for PostgreSQL, with a limit of 1
+each, to fit the existing shared pool alongside TST without adding a node. Add:
 
 ```yaml
 env:
@@ -147,14 +149,20 @@ rules. Do not rely on those notifications during this DEV trial.
 [`alter_dev_service.sql`](alter_dev_service.sql) updates that same DEV service
 for subsequent deployments. The create script records the initial published
 version `build-215-1-022ffedd2bf2`. The update script selects GitHub Actions image
-`build-216-1-0ce9611cf217` and its verified digest. This update was executed on
-20 October 2026 at the user's explicit request; the running container was verified
-`READY` with the published digest. The promotion receipt is
+`build-229-1-7034518aaa10` and its verified digest for the PostgreSQL engine.
+The 25 November 2026 rollout preserves the endpoint and memory settings and
+reduces the app CPU reservation to share the existing pool with PostgreSQL.
+The database definition is
+[`create_dev_postgres_service.sql`](create_dev_postgres_service.sql); use it only
+for initial creation, preserving the existing service and block volume thereafter.
+The state transfer, restart and SQL/DBT validation results are recorded in
+[`dev-postgres-spcs-deployment-20261125.json`](../../review/dev-postgres-spcs-deployment-20261125.json).
+The earlier 20 October image promotion is recorded in
 [`dev-spcs-actions-promotion.json`](../../review/dev-spcs-actions-promotion.json).
 Change both tag and digest together when selecting another
 build: a stale digest can keep the previous image running despite a new tag.
-The update preserves existing environment settings, endpoint configuration and
-resources. Setup and creation were executed on 19 October 2026; the DEV service
+The update preserves unrelated environment settings and endpoint configuration.
+Setup and creation were executed on 19 October 2026; the DEV service
 is running with `KUMO_ADMIN` as owner. The initial deployment receipt is recorded
 in [`dev-service-deployment-result.json`](../../review/dev-service-deployment-result.json),
 and the readiness updates are recorded in

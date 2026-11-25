@@ -1,0 +1,199 @@
+{
+  "environment": "DEV",
+  "deployedAt": "2026-11-25T14:36:33.542350+00:00",
+  "sourceCommit": "7034518aaa105e2df7d5a84a1b061de9a45925bb",
+  "pullRequest": "https://github.com/antgoil78/KUMO-Monitor/pull/16",
+  "endpoint": "https://mnztue-vymkbmw-ov24823.snowflakecomputing.app",
+  "appImage": "/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-229-1-7034518aaa10",
+  "appDigest": "sha256:9ee66b06dded07a5ae990d3dd0243b7f36f8f00e37e9e5cb8d6e2d8a9252c649",
+  "postgresImage": "/kumo_shared/monitor_app/monitor_repository/kumo-monitor-postgres:pg17-1-1-7034518aaa10",
+  "computePool": {
+    "name": "KUMO_SHARED_MONITOR_POOL",
+    "minNodes": 1,
+    "maxNodes": 1,
+    "appCpuRequest": 0.25,
+    "postgresCpuRequest": 0.1
+  },
+  "services": {
+    "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE": [
+      {
+        "database_name": "KUMO_DEV",
+        "schema_name": "MONITOR_APP",
+        "service_name": "KUMO_MONITOR_SERVICE",
+        "service_status": "RUNNING",
+        "instance_id": "0",
+        "instance_status": "READY",
+        "container_name": "monitor",
+        "status": "READY",
+        "message": "Running",
+        "image_name": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-229-1-7034518aaa10",
+        "image_digest": "sha256:9ee66b06dded07a5ae990d3dd0243b7f36f8f00e37e9e5cb8d6e2d8a9252c649",
+        "restart_count": 0,
+        "start_time": "2026-11-25T14:33:48Z",
+        "last_exit_code": null,
+        "last_restart_time": null
+      }
+    ],
+    "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_POSTGRES_SERVICE": [
+      {
+        "database_name": "KUMO_DEV",
+        "schema_name": "MONITOR_APP",
+        "service_name": "KUMO_MONITOR_POSTGRES_SERVICE",
+        "service_status": "RUNNING",
+        "instance_id": "0",
+        "instance_status": "READY",
+        "container_name": "postgres",
+        "status": "READY",
+        "message": "Running",
+        "image_name": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor-postgres:pg17-1-1-7034518aaa10",
+        "image_digest": "sha256:a7e48749dface727faa018c8a65b2df26f8693c7e9f4c881abc6a6df5d4adc8a",
+        "restart_count": 0,
+        "start_time": "2026-11-25T14:32:36Z",
+        "last_exit_code": null,
+        "last_restart_time": null
+      }
+    ]
+  },
+  "postgresVolumes": [
+    {
+      "volume_name": "postgres-data",
+      "instance_id": "0",
+      "container_name": "postgres",
+      "volume_type": "block",
+      "size": "10Gi",
+      "iops": 3000,
+      "throughput": 125,
+      "encryption": "SNOWFLAKE_SSE",
+      "snapshot_used": null,
+      "stage_source": null,
+      "volume_mounts": "/var/lib/postgresql/data"
+    }
+  ],
+  "configuration": {
+    "workflows": 26,
+    "jobs": 51,
+    "sqlJobs": 25,
+    "dbtJobs": 26,
+    "revision": 6
+  },
+  "transferredCounts": {
+    "dependency_graphs": 2,
+    "graph_revisions": 10,
+    "cascades": 35,
+    "cascade_nodes": 212,
+    "runs": 181,
+    "attempts": 190,
+    "dependency_decisions": 2021,
+    "schedules": 4
+  },
+  "readCheck": {
+    "ok": true,
+    "version": "build-229-1-7034518aaa10",
+    "workflows": 26,
+    "jobs": 51,
+    "configurationRevision": 6,
+    "checks": {
+      "configuration": true,
+      "database": true,
+      "scheduler": true,
+      "schema": true,
+      "worker": true
+    },
+    "counts": {
+      "dependency_graphs": 2,
+      "graph_revisions": 11,
+      "cascades": 35,
+      "cascade_nodes": 212,
+      "runs": 181,
+      "attempts": 190,
+      "dependency_decisions": 2021,
+      "schedules": 4
+    }
+  },
+  "persistenceCheck": {
+    "ok": true,
+    "version": "build-229-1-7034518aaa10",
+    "workflows": 26,
+    "jobs": 51,
+    "configurationRevision": 6,
+    "checks": {
+      "configuration": true,
+      "database": true,
+      "scheduler": true,
+      "schema": true,
+      "worker": true
+    },
+    "counts": {
+      "dependency_graphs": 2,
+      "graph_revisions": 11,
+      "cascades": 35,
+      "cascade_nodes": 212,
+      "runs": 181,
+      "attempts": 190,
+      "dependency_decisions": 2021,
+      "schedules": 4
+    }
+  },
+  "nativeCheck": {
+    "ok": true,
+    "runId": "26567d1c-0a37-4820-af43-9071e69071e0",
+    "state": "SUCCESS",
+    "jobs": [
+      {
+        "kind": "SQL",
+        "state": "SUCCESS",
+        "cleanup": "DONE",
+        "queryId": "01c8a62a-020c-0acf-0004-a4f208a70d86",
+        "error": null
+      },
+      {
+        "kind": "DBT",
+        "state": "SUCCESS",
+        "cleanup": "DONE",
+        "queryId": "01c8a62a-020c-0acf-0004-a4f208a70da2",
+        "error": null
+      }
+    ]
+  },
+  "legacyTasks": [
+    {
+      "name": "TASK_ORCH_DISPATCH",
+      "state": "suspended",
+      "schedule": null
+    },
+    {
+      "name": "TASK_ORCH_MAINTENANCE",
+      "state": "suspended",
+      "schedule": null
+    },
+    {
+      "name": "X_TASK_WF_MASTER_DISPATCHER",
+      "state": "suspended",
+      "schedule": null
+    }
+  ],
+  "localProcessesStopped": [
+    1871250,
+    1802749,
+    1749344
+  ],
+  "migrationArtifactsRemoved": true,
+  "schedules": {
+    "saved": 4,
+    "enabled": 0
+  },
+  "validation": {
+    "ci": "https://github.com/antgoil78/KUMO-Monitor/actions/runs/45633081420",
+    "backendTests": 560,
+    "expectedFailures": 2,
+    "browserTests": 69
+  },
+  "limitations": [
+    "DEV trial only; TST unchanged.",
+    "Existing Snowflake notification rules are not invoked by PostgreSQL completion events.",
+    "Custom dependency SQL, outcome hooks and command jobs remain unsupported.",
+    "Catalog creation, deletion and assignment controls retain trial restrictions.",
+    "DBT model-level progress/DAG integration and warning/artifact classification remain incomplete.",
+    "Two expected-failure tests for overlapping full-scope admission remain documented."
+  ]
+}
