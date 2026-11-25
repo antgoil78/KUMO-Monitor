@@ -79,7 +79,7 @@ def compile_catalog(body):
                     dict(workflowType='DBT',dbtCommand=job.get('DBT_COMMAND'),dbtProjectFqn=job.get('DBT_PROJECT_FQN') or DBT_PROJECT_TEMPLATE,dbtTarget=job.get('DBT_TARGET') or DBT_TARGET_TEMPLATE))
                 content=dict(type=job['JOB_TYPE'],command=command)
             ordered.append(dict(key=job['JOB_ID'],name=job['JOB_NAME'],description=job.get('DESCRIPTION') or '',layer=job.get('JOB_LAYER') or 'GENERAL',
-                enabled=bool(job.get('IS_ENABLED')),timeoutSeconds=int(job.get('TIMEOUT_SECONDS') or 60),**content))
+                enabled=bool(job.get('IS_ENABLED')),timeoutSeconds=int(job['TIMEOUT_SECONDS'] if job.get('TIMEOUT_SECONDS') is not None else 21600 if business_enabled() else 60),**content))
             remaining.remove(rule);parent=job['JOB_ID']
         node=dict(key=keys[identity],name=wf['WORKFLOW_NAME'],group=wf.get('WORKFLOW_GROUP') or '',description=wf.get('DESCRIPTION') or '',
             enabled=bool(wf.get('IS_ENABLED')),allow=not headers or bool(headers[0].get('PARENT_ID')) or headers[0].get('ALLOW') is not False,

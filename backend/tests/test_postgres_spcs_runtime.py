@@ -137,7 +137,9 @@ class BusinessPostgresTests(unittest.TestCase):
         row=next(w for w in Monitor(self.store).payload()['rows'] if w['WORKFLOW_NAME']=='DBT workflow')
         self.assertEqual(row['run']['status'],'SUCCESS')
         self.assertEqual(row['run']['jobs'][0]['type'],'DBT')
+        self.assertEqual(self.monitor.log(self.ids['DBT workflow'],row['run']['runId'])['history']['WORKFLOW_TYPE'],'DBT')
         self.assertEqual(self.store.read(run)['jobs'][0]['snapshot']['command'],dbt_command() | {'dbtCommand':'dbt build'})
+        self.assertEqual(self.store.read(run)['jobs'][0]['snapshot']['timeoutSeconds'],21600)
         self.assertEqual(len(tasks.executions),1);self.assertEqual(len(tasks.drops),1)
 
     def test_readiness_requires_database_master_and_both_process_heartbeats(self):

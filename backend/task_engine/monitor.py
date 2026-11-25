@@ -266,7 +266,9 @@ class Monitor:
             if job_id and not any(j['jobId']==job_id for j in root['jobs']):raise LookupError('Job is not in this execution snapshot')
             events=conn.execute('SELECT * FROM kumo_task_engine.events WHERE run_id=%s ORDER BY sequence',(row['run_id'],)).fetchall() if row['run_id'] else []
         jobs=[j for j in root['jobs'] if not job_id or j['jobId']==job_id]
-        return dict(ok=True,source='POSTGRES',history=dict(WORKFLOW_NAME=root['workflowName'],WORKFLOW_ID=workflow_id,WORKFLOW_TYPE='SQL',STATUS=root['status'],
+        kinds={j['type'] for j in root['jobs']}
+        workflow_type=next(iter(kinds)) if len(kinds)==1 else 'MIXED'
+        return dict(ok=True,source='POSTGRES',history=dict(WORKFLOW_NAME=root['workflowName'],WORKFLOW_ID=workflow_id,WORKFLOW_TYPE=workflow_type,STATUS=root['status'],
             REQUESTED_BY=root['requestedBy'],REQUESTED_AT=root['requestedAt'],START_TIME=root['start'],END_TIME=root['end'],TRIGGER_SOURCE='POSTGRES',ERROR_MESSAGE=root['message']),
             jobExecutions=[dict(JOB_POSITION=j['position'],JOB_NAME=j['name'],STATUS=j['status'],STARTED_AT=j['start'],ENDED_AT=j['end'],ERROR_MESSAGE=j['message'],QUERY_ID=j['queryId'],TASK_CLEANUP=j['cleanupState']) for j in jobs],
             runLog=[dict(LOG_DTTM=e['created_at'],ORIGIN='PostgreSQL worker',TYPE=e['kind'],MESSAGE=e['facts']) for e in events],modelProgress=[],testProgress=[],warnings={})
