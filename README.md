@@ -70,10 +70,10 @@ when a newer group also has a queued instance of the same workflow.
 Independent workflows and sibling-only
 runs can execute concurrently. Cancellation targets the accepted group and
 waits for confirmation.
-Configuration changes never rewrite an accepted group's snapshot. SQL jobs
-validated against the current SELECT-expression restrictions retain that guard
-when edited; unsupported business commands can be retained as configuration
-without becoming executable.
+Configuration changes never rewrite an accepted group's snapshot. The DEV SPCS
+business-command flag enables SQL and DBT execution. With that flag disabled,
+local disposable SQL jobs retain the SELECT-expression guard. Unsupported
+definitions remain visible with disabled execution controls.
 
 The backend worker alone polls Snowflake's Information Schema `TASK_HISTORY`
 for recorded outstanding native submissions, including native queue states.
@@ -81,8 +81,9 @@ It persists results in PostgreSQL, cleans up, then stops polling those tasks.
 It continues admitted work without connected browsers. Browser status refreshes
 read PostgreSQL every two seconds; timeline/history reads also use PostgreSQL.
 PostgreSQL presence connections do not start the existing Snowflake cache,
-dashboard or lock readers. If a separate Snowflake-source client is connected,
-that client can still activate its existing readers. Missing feature discovery
+dashboard or lock readers. Primary DEV also overrides stale Snowflake browser
+presence, keeping those readers disabled. In a non-primary local trial, a separate
+Snowflake-source client can still activate its existing readers. Missing feature discovery
 does not silently select Snowflake. Authentication may resolve identity through
 a warehouse-free Snowflake metadata connection; the header reports Snowflake
 as **on demand** on PostgreSQL pages.
