@@ -2,17 +2,67 @@
 from .store import TERMINAL
 
 
+def workflow_rules(catalog):
+    """Bypass disabled parents, retaining the nearest enabled ancestor's rules."""
+    workflows={w['WORKFLOW_ID']:w for w in catalog['workflows']}
+    headers={i:[] for i in workflows}
+    for rule in catalog['raw_records']:
+        if not rule.get('JOB_ID') and rule['WORKFLOW_ID'] in headers:
+            headers[rule['WORKFLOW_ID']].append(rule)
+
+    def expand(rule, path):
+        parent=rule.get('PARENT_ID')
+        if parent not in workflows or workflows[parent]['IS_ENABLED']:
+            return [dict(rule)]
+        if parent in path:
+            raise ValueError('Disabled workflow dependencies contain a cycle')
+        return [edge for upstream in headers[parent] if upstream.get('PARENT_ID')
+                for edge in expand(upstream,path|{parent})]
+
+    result={}
+    for identity,workflow in workflows.items():
+        if not workflow['IS_ENABLED']:
+            result[identity]=headers[identity]
+            continue
+        rules={}
+        for source in headers[identity]:
+            for rule in expand(source,set()):
+                parent=rule.get('PARENT_ID')
+                rule.update(WORKFLOW_ID=identity,JOB_ID=None)
+                if parent in rules:
+                    # A shared ancestor must satisfy every enabled path to this join.
+                    old=rules[parent]
+                    old['ALLOW']=old.get('ALLOW') is not False and rule.get('ALLOW') is not False
+                    old['PARENT_MUST_BE_NEWER']=bool(old.get('PARENT_MUST_BE_NEWER') or rule.get('PARENT_MUST_BE_NEWER'))
+                    for field in ('SUCCESS','WARNING','ERROR'):
+                        old[field]=False if old.get(field) is False or rule.get(field) is False else old.get(field) if old.get(field) is not None else rule.get(field)
+                    old['SQL']=old.get('SQL') or rule.get('SQL')
+                else:
+                    rules[parent]=rule
+        result[identity]=list(rules.values())
+    return result
+
+
 def execution_scope(definition, identity, include_children=True):
     workflows = {w['WORKFLOW_ID']: w for w in definition['catalog']['workflows']}
     if identity not in workflows:
         raise LookupError('Workflow is not in the PostgreSQL catalog')
     parents = {i: set() for i in workflows}
     children = {i: set() for i in workflows}
+    original_parents={i:set() for i in workflows}
+    original_children={i:set() for i in workflows}
     for rule in definition['catalog']['raw_records']:
         child, parent = rule.get('WORKFLOW_ID'), rule.get('PARENT_ID')
         if not rule.get('JOB_ID') and child in workflows and parent in workflows:
-            parents[child].add(parent)
-            children[parent].add(child)
+            original_parents[child].add(parent)
+            original_children[parent].add(child)
+    for child,rules in workflow_rules(definition['catalog']).items():
+        if not workflows[child]['IS_ENABLED']:continue
+        for rule in rules:
+            parent=rule.get('PARENT_ID')
+            if parent in workflows:
+                parents[child].add(parent)
+                children[parent].add(child)
 
     def reachable(start, edges):
         found, pending = {start}, [start]
@@ -22,18 +72,23 @@ def execution_scope(definition, identity, include_children=True):
                 pending.append(other)
         return found
 
-    descendants = reachable(identity, children)
-    selected = descendants if include_children else {identity}
-    related = {identity} | parents[identity] | children[identity]
+    descendants = reachable(identity, original_children)
+    selected = {i for i in (descendants if include_children else {identity}) if workflows[i]['IS_ENABLED']}
+    def neighbors(i):
+        # Already accepted runs keep their snapshot, including work disabled later.
+        disabled_neighbors={j for j in original_parents[i]|original_children[i] if not workflows[j]['IS_ENABLED']}
+        return {i}|parents[i]|children[i]|disabled_neighbors
+    related = neighbors(identity)
     keys = definition['workflowKeys']
-    guards = {keys[i]: sorted(keys[j] for j in {i} | parents[i] | children[i]) for i in selected}
+    guards = {keys[i]: sorted(keys[j] for j in neighbors(i)) for i in selected}
     issues = [workflows[i]['WORKFLOW_NAME'] + ': ' + reason for i in sorted(selected)
               for reason in definition['executionIssues'].get(i, [])]
     selected_keys = {keys[i] for i in selected}
-    relationships = {keys[i]: {keys[j]: 'SELF' if j == i else 'PARENT' if j in parents[i] else 'CHILD'
-                    for j in {i} | parents[i] | children[i]} for i in selected}
+    relationships = {keys[i]: {keys[j]: 'SELF' if j == i else 'PARENT' if j in parents[i]|original_parents[i] else 'CHILD'
+                    for j in neighbors(i)} for i in selected}
     return dict(keys=sorted(selected_keys), identities=sorted(selected), relatedKeys=sorted(keys[i] for i in related),relationships=relationships,
-                guards=guards, issues=issues, workflows=[w['WORKFLOW_NAME'] for i,w in workflows.items() if i in selected])
+                guards=guards, issues=issues, workflows=[w['WORKFLOW_NAME'] for i,w in workflows.items() if i in selected],
+                disabledKeys=sorted(keys[i] for i in (descendants if include_children else {identity}) if not workflows[i]['IS_ENABLED']))
 
 
 def outstanding(conn, graph_id, keys, *, exclude=None):

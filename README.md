@@ -65,6 +65,13 @@ more distant ancestors and descendants do not block execution. WF10 blocks only
 WF8/WF9 (and itself); WF4 blocks WF2/WF3/WF5/WF6 (and itself). WF1 and then WF2/WF3
 can run while WF10 is active; WF8/WF9 queue if WF10 is still active when reached.
 Choosing dependencies still includes the complete downstream subtree.
+Disabled workflows are omitted from new execution plans. A → disabled B → C
+becomes A → C: C waits for A under A's upstream conditions, while B's outcome,
+freshness and execution capabilities do not block the chain. Consecutive disabled
+workflows are bypassed, and shared ancestors must satisfy the combined conditions
+of every path to a join. Overlap protection uses these effective dependencies.
+The decision log records the workflows omitted from each accepted request.
+Configuration edits retain the frozen plans and running work of accepted groups.
 A running execution remains visible
 when a newer group also has a queued instance of the same workflow.
 Independent workflows and sibling-only

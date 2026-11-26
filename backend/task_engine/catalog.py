@@ -41,13 +41,17 @@ def compile_catalog(body):
     for rows,field in [(data['workflows'],'WORKFLOW_NAME'),(data['jobs'],'JOB_NAME')]:
         if any(not isinstance(r.get(field),str) or not r[field].strip() for r in rows) or len({r[field].strip().casefold() for r in rows})!=len(rows):
             raise ValueError('Workflow and job names must be nonempty and unique')
+    from .admission import workflow_rules
+    effective_rules=workflow_rules(raw)
     keys={identity:workflow_key(identity) for identity in workflows};issues={identity:[] for identity in workflows};nodes=[]
     for identity,wf in workflows.items():
         reason=issues[identity];rules=[r for r in data['raw_records'] if r.get('WORKFLOW_ID')==identity]
-        headers=[r for r in rules if not r.get('JOB_ID')];members=[r for r in rules if r.get('JOB_ID')]
+        all_headers=[r for r in rules if not r.get('JOB_ID')]
+        headers=effective_rules[identity]
+        members=[r for r in rules if r.get('JOB_ID')]
         if identity in data['invalidWorkflows']:reason.append('Resolve invalid or duplicate dependency references')
         if not members:reason.append('No jobs assigned')
-        if not headers:reason.append('Workflow trigger configuration is missing')
+        if not all_headers:reason.append('Workflow trigger configuration is missing')
         if wf.get('WAREHOUSE_NAME') and wf['WAREHOUSE_NAME'].upper()!=os.getenv('KUMO_PG_TASK_WAREHOUSE','KUMO_ELT_GEN_1').upper():
             reason.append('The configured warehouse differs from this worker\'s warehouse')
         parents=[]
@@ -93,11 +97,14 @@ def compile_catalog(body):
     while changed:
         changed=False
         for identity in workflows:
-            for r in data['raw_records']:
-                if r.get('WORKFLOW_ID')==identity and not r.get('JOB_ID') and r.get('PARENT_ID') in issues and issues[r['PARENT_ID']] and not issues[identity]:
+            for r in effective_rules[identity]:
+                if (workflows[identity]['IS_ENABLED']
+                        and r.get('PARENT_ID') in issues and workflows[r['PARENT_ID']]['IS_ENABLED']
+                        and issues[r['PARENT_ID']] and not issues[identity]):
                     issues[identity].append('Parent workflow requires unsupported execution features');changed=True
     supported={keys[i] for i in workflows if not issues[i]}
-    compiled=graph_definition(dict(key=body['key'],name=body['name'],enabled=body.get('enabled',True),nodes=[n for n in nodes if n['key'] in supported])) if supported else dict(key=body['key'],name=body['name'],enabled=body.get('enabled',True),nodes=[],version=1)
+    compiled_nodes=[n for n in nodes if n['key'] in supported and n['enabled']]
+    compiled=graph_definition(dict(key=body['key'],name=body['name'],enabled=body.get('enabled',True),nodes=compiled_nodes)) if compiled_nodes else dict(key=body['key'],name=body['name'],enabled=body.get('enabled',True),nodes=[],version=1)
     return dict(compiled,catalog=deepcopy(raw),workflowKeys=keys,executionIssues={k:list(dict.fromkeys(v)) for k,v in issues.items()})
 
 
