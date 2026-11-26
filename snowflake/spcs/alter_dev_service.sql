@@ -1,4 +1,4 @@
--- DEV PostgreSQL orchestration promotion; preserves the existing endpoint and resources.
+-- DEV app promotion; only the app image and digest change.
 USE ROLE KUMO_ADMIN;
 ALTER SERVICE KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE FROM SPECIFICATION $$
 {
@@ -6,8 +6,8 @@ ALTER SERVICE KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE FROM SPECIFICATION $$
     "containers": [
       {
         "name": "monitor",
-        "image": "/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-232-1-31bd91225e71",
-        "sha256": "@sha256:14691f81c06d3ceb97c4590375d5f6adde54d32a77378d566198a81299eb1459",
+        "image": "/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-234-1-9c16705be69d",
+        "sha256": "@sha256:c2515b6762e63ea3315d8e2077811125919ca6a7de274e732cb3933e8834589f",
         "env": {
           "KUMO_ENVIRONMENT_TABLE": "KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS",
           "KUMO_ENV": "DEV",
@@ -45,12 +45,16 @@ ALTER SERVICE KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE FROM SPECIFICATION $$
         },
         "secrets": [
           {
-            "snowflakeSecret": "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_POSTGRES_CREDENTIALS",
+            "snowflakeSecret": {
+              "objectName": "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_POSTGRES_CREDENTIALS"
+            },
             "secretKeyRef": "username",
             "envVarName": "KUMO_POSTGRES_USER"
           },
           {
-            "snowflakeSecret": "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_POSTGRES_CREDENTIALS",
+            "snowflakeSecret": {
+              "objectName": "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_POSTGRES_CREDENTIALS"
+            },
             "secretKeyRef": "password",
             "envVarName": "KUMO_POSTGRES_PASSWORD"
           }

@@ -1,0 +1,72 @@
+{
+  "environment": "DEV",
+  "verifiedAt": "2026-11-26T16:12:56.163094+00:00",
+  "sourceCommit": "9c16705be69ddfcf59953b7156f2f5669fec49f9",
+  "pullRequest": "https://github.com/antgoil78/KUMO-Monitor/pull/20",
+  "endpoint": "https://mnztue-vymkbmw-ov24823.snowflakecomputing.app",
+  "appImage": "/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-234-1-9c16705be69d",
+  "appDigest": "sha256:c2515b6762e63ea3315d8e2077811125919ca6a7de274e732cb3933e8834589f",
+  "previousImage": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-232-1-31bd91225e71",
+  "promotionQueryId": "01c8ac2a-010c-0a22-0004-a4f208b27166",
+  "serviceContainers": [
+    {
+      "database_name": "KUMO_DEV",
+      "schema_name": "MONITOR_APP",
+      "service_name": "KUMO_MONITOR_SERVICE",
+      "service_status": "RUNNING",
+      "instance_id": "0",
+      "instance_status": "READY",
+      "container_name": "monitor",
+      "status": "READY",
+      "message": "Running",
+      "image_name": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-234-1-9c16705be69d",
+      "image_digest": "sha256:c2515b6762e63ea3315d8e2077811125919ca6a7de274e732cb3933e8834589f",
+      "restart_count": 0,
+      "start_time": "2026-11-26T16:10:55Z",
+      "last_exit_code": null,
+      "last_restart_time": null
+    }
+  ],
+  "validation": {
+    "ci": "https://github.com/antgoil78/KUMO-Monitor/actions/runs/45854213601",
+    "backendTests": 580,
+    "expectedFailures": 2,
+    "browserTests": 72,
+    "focusedPostgresPreviewTests": 5,
+    "build": "https://github.com/antgoil78/KUMO-Monitor/actions/runs/45855415696"
+  },
+  "deployedReadCheck": {
+    "ok": true,
+    "image": "build-234-1-9c16705be69d",
+    "readiness": {
+      "configuration": true,
+      "database": true,
+      "scheduler": true,
+      "schema": true,
+      "worker": true
+    },
+    "workflow": "WF1",
+    "fullWorkflowCount": 10,
+    "ownWorkflowCount": 1,
+    "joinWorkflows": 3,
+    "compactFrontend": true,
+    "configurationRevision": 28,
+    "workflows": 26,
+    "jobs": 51,
+    "worker": "HEALTHY",
+    "businessRunsSubmitted": 0
+  },
+  "changes": {
+    "serviceFields": [
+      "image",
+      "sha256"
+    ],
+    "databaseMigration": false,
+    "postgresServiceChanged": false,
+    "scheduleChanges": false,
+    "workflowConfigurationChanges": false,
+    "businessRunsSubmitted": 0,
+    "tstChanged": false
+  },
+  "temporaryVerificationJobRemoved": true
+}
