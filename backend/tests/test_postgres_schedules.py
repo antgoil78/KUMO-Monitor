@@ -129,7 +129,10 @@ class PostgresScheduleTests(unittest.TestCase):
 
     def test_competing_workers_admit_one_run(self):
         row=self.create();self.due(row)
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        # Exercise competing transactions without a real minute rollover adding
+        # another eligible occurrence; calendar behavior is tested separately.
+        future=datetime.now(UTC)+timedelta(days=1)
+        with patch('task_engine.schedules.next_fire',return_value=future),ThreadPoolExecutor(max_workers=4) as pool:
             results=list(pool.map(lambda _:Scheduler(self.store).step(),range(4)))
         self.assertEqual(sum(results),1);self.assertEqual(len(self.rows('runs')),1)
         self.assertEqual(len(self.rows('schedule_occurrences')),1)
@@ -139,7 +142,8 @@ class PostgresScheduleTests(unittest.TestCase):
         def manual():
             try:return self.store.submit(dict(requestId='manual',workflowKey='trial',jobs=[dict(sql='SELECT 1')]),'USER')
             except WorkflowBusy:return None
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        future=datetime.now(UTC)+timedelta(days=1)
+        with patch('task_engine.schedules.next_fire',return_value=future),ThreadPoolExecutor(max_workers=2) as pool:
             a=pool.submit(manual);b=pool.submit(self.worker.step);a.result();b.result()
         self.assertEqual(len(self.rows('runs')),1)
         self.assertIn(self.rows('schedule_occurrences')[0]['state'],('ADMITTED','SKIPPED_OVERLAP'))
