@@ -1,0 +1,133 @@
+{
+  "environment": "DEV",
+  "verifiedAt": "2026-11-26T15:33:16.721077+00:00",
+  "sourceCommit": "31bd91225e71b7313f13f32c190334b2697ce4e5",
+  "pullRequest": "https://github.com/antgoil78/KUMO-Monitor/pull/19",
+  "endpoint": "https://mnztue-vymkbmw-ov24823.snowflakecomputing.app",
+  "appImage": "/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-232-1-31bd91225e71",
+  "appDigest": "sha256:14691f81c06d3ceb97c4590375d5f6adde54d32a77378d566198a81299eb1459",
+  "behavior": {
+    "disabledWorkflow": "Omitted from newly accepted execution plans, irrespective of its own outgoing dependency rules.",
+    "ancestorDependency": "Enabled descendants wait for the nearest enabled ancestors through any disabled workflows.",
+    "acceptedPlans": "Existing accepted plan snapshots remain frozen.",
+    "overlap": "Effective enabled ancestors and descendants guard overlap; previously admitted work remains guarded until it finishes.",
+    "audit": "REQUEST_ACCEPTED facts record ignoredDisabledWorkflowKeys."
+  },
+  "validation": {
+    "ci": "https://github.com/antgoil78/KUMO-Monitor/actions/runs/45847968722",
+    "backendTests": 575,
+    "expectedFailures": 2,
+    "browserTests": 69,
+    "focusedDisabledWorkflowPostgresTests": 9,
+    "focusedTestsBusinessJobsModes": [
+      false,
+      true
+    ],
+    "schedulerAndCalendarTests": 26,
+    "notes": [
+      "Two existing expected failures cover overlapping full-scope admission.",
+      "Two concurrency test fixtures hold next_fire beyond the race window to remove minute rollover interference; scheduler runtime behavior is unchanged."
+    ]
+  },
+  "before": {
+    "ok": true,
+    "image": "build-229-1-7034518aaa10",
+    "catalogRevision": 18,
+    "disabledWorkflows": 1,
+    "disabledOmitted": false,
+    "cutoff": "2026-11-26T15:09:40.372932+00:00",
+    "snapshotHash": "271b3ffc56f8fe11dea5ea16df38f666",
+    "counts": {
+      "runs": 270,
+      "attempts": 284,
+      "cascades": 53,
+      "schedules": 20
+    },
+    "activeRuns": 1,
+    "enabledSchedules": 0,
+    "readiness": {
+      "configuration": true,
+      "database": true,
+      "scheduler": true,
+      "schema": true,
+      "worker": true
+    },
+    "workflows": 26,
+    "jobs": 51
+  },
+  "after": {
+    "ok": true,
+    "image": "build-232-1-31bd91225e71",
+    "catalogRevision": 23,
+    "disabledWorkflows": 1,
+    "disabledOmitted": true,
+    "cutoff": "2026-11-26T15:09:40.372932+00:00",
+    "snapshotHash": "271b3ffc56f8fe11dea5ea16df38f666",
+    "counts": {
+      "runs": 277,
+      "attempts": 291,
+      "cascades": 54,
+      "schedules": 20
+    },
+    "activeRuns": 0,
+    "enabledSchedules": 0,
+    "readiness": {
+      "configuration": true,
+      "database": true,
+      "scheduler": true,
+      "schema": true,
+      "worker": true
+    },
+    "workflows": 26,
+    "jobs": 51
+  },
+  "services": {
+    "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE": [
+      {
+        "database_name": "KUMO_DEV",
+        "schema_name": "MONITOR_APP",
+        "service_name": "KUMO_MONITOR_SERVICE",
+        "service_status": "RUNNING",
+        "instance_id": "0",
+        "instance_status": "READY",
+        "container_name": "monitor",
+        "status": "READY",
+        "message": "Running",
+        "image_name": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-232-1-31bd91225e71",
+        "image_digest": "sha256:14691f81c06d3ceb97c4590375d5f6adde54d32a77378d566198a81299eb1459",
+        "restart_count": 0,
+        "start_time": "2026-11-26T15:30:09Z",
+        "last_exit_code": null,
+        "last_restart_time": null
+      }
+    ],
+    "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_POSTGRES_SERVICE": [
+      {
+        "database_name": "KUMO_DEV",
+        "schema_name": "MONITOR_APP",
+        "service_name": "KUMO_MONITOR_POSTGRES_SERVICE",
+        "service_status": "RUNNING",
+        "instance_id": "0",
+        "instance_status": "READY",
+        "container_name": "postgres",
+        "status": "READY",
+        "message": "Running",
+        "image_name": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor-postgres:pg17-1-1-7034518aaa10",
+        "image_digest": "sha256:a7e48749dface727faa018c8a65b2df26f8693c7e9f4c881abc6a6df5d4adc8a",
+        "restart_count": 0,
+        "start_time": "2026-11-25T14:32:36Z",
+        "last_exit_code": null,
+        "last_restart_time": null
+      }
+    ]
+  },
+  "preservation": {
+    "acceptedPlanSnapshotsUnchanged": true,
+    "postgresServiceUnchanged": true,
+    "schedulesActivatedByDeployment": 0,
+    "businessRunsSubmittedByDeployment": 0,
+    "countChanges": "Live user activity can add runs or edit configuration between the read-only checks.",
+    "tstChanged": false
+  },
+  "temporaryCheckJobsRemoved": true
+}

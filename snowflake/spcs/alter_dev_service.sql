@@ -1,4 +1,4 @@
--- DEV PostgreSQL orchestration promotion; preserves the endpoint and memory settings; shares CPU with PostgreSQL.
+-- DEV PostgreSQL orchestration promotion; preserves the existing endpoint and resources.
 USE ROLE KUMO_ADMIN;
 ALTER SERVICE KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE FROM SPECIFICATION $$
 {
@@ -6,8 +6,8 @@ ALTER SERVICE KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE FROM SPECIFICATION $$
     "containers": [
       {
         "name": "monitor",
-        "image": "/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-229-1-7034518aaa10",
-        "sha256": "@sha256:9ee66b06dded07a5ae990d3dd0243b7f36f8f00e37e9e5cb8d6e2d8a9252c649",
+        "image": "/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-232-1-31bd91225e71",
+        "sha256": "@sha256:14691f81c06d3ceb97c4590375d5f6adde54d32a77378d566198a81299eb1459",
         "env": {
           "KUMO_ENVIRONMENT_TABLE": "KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS",
           "KUMO_ENV": "DEV",
