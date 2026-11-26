@@ -146,6 +146,14 @@ def start_graph(graph_id):
     return jsonify(encode(Graphs(store()).start(graph_id,request.get_json(silent=True),actor.get('userName') or 'LOCAL_DEV'))),202
 
 
+@blueprint.route(PREFIX+'/graphs/<graph_id>/plan')
+def preview_graph(graph_id):
+    from .monitor import Monitor
+    include=request.args.get('includeChildren','true')
+    if include not in ('true','false'):raise ValueError('includeChildren must be true or false')
+    return jsonify(encode(Monitor(store()).preview(graph_id,request.args.get('workflowId'),include=='true')))
+
+
 @blueprint.route(PREFIX+'/cascades/<cascade_id>')
 def cascade(cascade_id):
     from .dependencies import Graphs

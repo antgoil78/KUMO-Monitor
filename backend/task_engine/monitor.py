@@ -22,6 +22,16 @@ def task_state(value):
 class Monitor:
     def __init__(self,store):self.store=store
 
+    def preview(self,graph_id,workflow_id,include_children=True):
+        from .admission import execution_preview
+        with self.store.connect() as conn:
+            conn.execute('SET TRANSACTION READ ONLY')
+            graph=CatalogConfiguration(self.store).graph(conn)
+            if str(graph['id'])!=str(uuid.UUID(str(graph_id))):
+                raise LookupError('Workflow catalog not found')
+            plan=execution_preview(graph['definition'],workflow_id,include_children)
+        return dict(ok=True,graphId=str(graph['id']),configurationRevision=graph['revision'],**plan)
+
     def records(self,conn,filters=None,latest=False,started=False,node_id=None,workflow_id=None,planning=False):
         clauses=[];params=[];filters=filters or {}
         scheduled_sql="""EXISTS(SELECT 1 FROM kumo_task_engine.schedule_occurrences o JOIN kumo_task_engine.schedules s ON s.id=o.schedule_id

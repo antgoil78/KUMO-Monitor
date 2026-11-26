@@ -78,6 +78,17 @@ async function setup(page, { started = false, healthUnavailable = false, waitFor
       if (state.fail) return route.fulfill({ status: 503, json: { error: 'PostgreSQL status unavailable' } })
       body = { ...state.data, rows: state.data.rows.map(monitorRow) }
     }
+    if (path === prefix + '/graphs/graph/plan') {
+      if (state.rejectPreview) return route.fulfill({ status: 503, json: { error: 'Plan temporarily unavailable' } })
+      const params = new URL(req.url()).searchParams
+      const workflowId = params.get('workflowId'), includeChildren = params.get('includeChildren') === 'true'
+      const nodes = state.data.rows.filter(row => row.WORKFLOW_ID === workflowId || (includeChildren && workflowId === wf && row.WORKFLOW_ID === child))
+        .map(row => ({ key: row.WORKFLOW_ID, workflowId: row.WORKFLOW_ID, name: row.WORKFLOW_NAME, mode: 'SEQUENTIAL',
+          parents: row.WORKFLOW_ID === child && workflowId !== child ? [{ key: wf, name: 'WF1', inPlan: true, allow: true, success: true, warning: false, error: false, parentMustBeNewer: true }] : [],
+          jobs: row.jobs.map(job => ({ key: job.JOB_ID, name: job.JOB_NAME, type: job.JOB_TYPE, layer: job.JOB_LAYER })), issues: [] }))
+      body = state.plan || { ok: true, rootKey: workflowId, includeChildren, configurationRevision: 1, nodes, omitted: [], issues: [] }
+      if (state.previewGate && includeChildren) await state.previewGate
+    }
     if (req.method() !== 'GET') state.writes.push({ path, body: req.postData() ? req.postDataJSON() : null })
     if (path === prefix + '/graphs/graph/runs') {
       if (state.rejectStart) return route.fulfill({ status: 503, json: { error: 'Admission response unavailable' } })
@@ -413,7 +424,12 @@ test('root Run starts the full dependency group once and shows queued and waitin
   const state = await setup(page)
   await page.getByRole('button', { name: 'Run workflow WF1', exact: true }).click()
   await expect(page.getByRole('dialog')).toContainText('Start here and evaluate downstream workflows')
-  await expect(page.getByRole('dialog')).toContainText('WF1, WF2')
+  const plan = page.getByRole('region', { name: 'Execution plan', exact: true })
+  await expect(plan).toContainText('2 workflows')
+  await expect(plan.locator('.run-plan-node')).toHaveCount(2)
+  await plan.locator('.run-plan-entry > summary').click()
+  await plan.getByText('1 job · Sequential', { exact: true }).first().click()
+  await expect(plan.getByText('WF1 job', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Run workflow', exact: true }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
   expect(state.writes[0]).toMatchObject({ path: prefix + '/graphs/graph/runs', body: { workflowId: wf } })
@@ -428,12 +444,72 @@ test('a middle workflow can be run alone without starting its dependencies', asy
   const state = await setup(page)
   await page.getByRole('button', { name: 'Run workflow WF2', exact: true }).click()
   await page.getByLabel('Execution scope', { exact: true }).selectOption('WORKFLOW')
+  await expect(page.getByRole('region', { name: 'Execution plan', exact: true })).toContainText('1 workflow')
   await expect(page.getByRole('dialog')).toContainText('This run does not start downstream workflows')
   await page.getByRole('button', { name: 'Run workflow', exact: true }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
   expect(state.writes[0]).toMatchObject({ path: prefix + '/graphs/graph/runs', body: { workflowId: child, includeChildren: false } })
   expect(state.data.rows[0].run.status).toBe('NOT RUN')
   pgOnly(state)
+})
+
+test('compact plan shows joins once, describes outcomes, and keeps details collapsed', async ({ page }) => {
+  const state = await setup(page)
+  const parent = (key, name, inPlan = true) => ({ key, name, inPlan, allow: true, success: true, warning: false, error: false, parentMustBeNewer: true })
+  const node = (key, name, parents = []) => ({ key, name, parents, mode: 'SEQUENTIAL', jobs: [], issues: [] })
+  state.plan = { rootKey: wf, nodes: [node(wf, 'WF1'), node('left', 'WF2', [parent(wf, 'WF1')]), node('right', 'WF3', [parent(wf, 'WF1')]),
+    node('join', 'WF4', [parent('left', 'WF2'), { ...parent('right', 'WF3'), warning: null }, parent('external', 'WF5', false)]),
+    node('failure', 'WF7', [{ ...parent('join', 'WF4'), success: false, error: true }])], omitted: [{ key: 'disabled', name: 'WF6' }], issues: [] }
+  await page.getByRole('button', { name: 'Run workflow WF1', exact: true }).click()
+  const plan = page.getByRole('region', { name: 'Execution plan', exact: true })
+  await expect(plan.locator('.run-plan-node')).toHaveCount(5)
+  await expect(plan.locator('.run-plan-node[open]')).toHaveCount(0)
+  await expect(plan.locator('.run-plan-heading > strong')).toHaveText(['WF1', 'WF2', 'WF3', 'WF4', 'WF7'])
+  const join = plan.locator('.run-plan-heading').filter({ has: page.getByText('WF4', { exact: true }) })
+  await expect(join).toContainText('WF2: On parent Success')
+  await expect(join).toContainText('WF3: On parent Success, ignore warnings')
+  await expect(join).toContainText('WF5 (existing result)')
+  await expect(plan.locator('.run-plan-heading').filter({ has: page.getByText('WF7', { exact: true }) })).toContainText('On parent Fail')
+  await join.click()
+  await expect(plan.getByRole('list', { name: 'Parents of WF4' })).toContainText('WF2')
+  await expect(plan.getByRole('list', { name: 'Parents of WF4' })).toContainText('WF3')
+  await expect(plan.getByRole('list', { name: 'Parents of WF4' })).toContainText('WF5Existing result · not rerun')
+  await expect(plan).toContainText('Disabled workflows omitted: WF6')
+  await expect(plan).toContainText('parent must finish after this workflow’s previous start')
+  expect(state.writes).toEqual([])
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  expect(state.writes).toEqual([])
+  pgOnly(state)
+})
+
+test('failed previews prevent submission and can be retried without starting work', async ({ page }) => {
+  const state = await setup(page)
+  state.rejectPreview = true
+  await page.getByRole('button', { name: 'Run workflow WF1', exact: true }).click()
+  await expect(page.getByRole('dialog')).toContainText('Plan temporarily unavailable')
+  await expect(page.getByRole('button', { name: 'Run workflow', exact: true })).toBeDisabled()
+  state.rejectPreview = false
+  await page.getByRole('button', { name: 'Retry preview', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Execution plan', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Run workflow', exact: true })).toBeEnabled()
+  expect(state.writes).toEqual([])
+  pgOnly(state)
+})
+
+test('changing scope discards a late response for the previous plan', async ({ page }) => {
+  const state = await setup(page)
+  let release
+  state.previewGate = new Promise(resolve => { release = resolve })
+  await page.getByRole('button', { name: 'Run workflow WF1', exact: true }).click()
+  await expect(page.getByRole('dialog')).toContainText('Loading execution plan')
+  await expect(page.getByRole('button', { name: 'Run workflow', exact: true })).toBeDisabled()
+  await page.getByLabel('Execution scope', { exact: true }).selectOption('WORKFLOW')
+  const plan = page.getByRole('region', { name: 'Execution plan', exact: true })
+  await expect(plan.locator('.run-plan-node')).toHaveCount(1)
+  release()
+  await expect(plan).toContainText('1 workflow')
+  await expect(plan.locator('.run-plan-node')).toHaveCount(1)
+  expect(state.writes).toEqual([])
 })
 
 test('related active work disables Run buttons with the blocker shown in the GUI', async ({ page }) => {

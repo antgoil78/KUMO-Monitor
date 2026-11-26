@@ -91,6 +91,28 @@ def execution_scope(definition, identity, include_children=True):
                 disabledKeys=sorted(keys[i] for i in (descendants if include_children else {identity}) if not workflows[i]['IS_ENABLED']))
 
 
+def execution_preview(definition, identity, include_children=True):
+    """Describe a manual scope without admitting work or exposing job commands."""
+    scope=execution_scope(definition,identity,include_children)
+    keys=definition['workflowKeys'];root=keys[identity]
+    workflows={keys[w['WORKFLOW_ID']]:w for w in definition['catalog']['workflows']}
+    compiled={n['key']:n for n in definition['nodes']}
+    nodes=[]
+    for key in scope['keys']:
+        workflow=workflows[key];node=compiled.get(key,{})
+        # Manual entry bypasses its parent outcome rules, exactly as admission does.
+        parents=[] if key==root else [dict(rule,name=workflows[rule['key']]['WORKFLOW_NAME'],
+            inPlan=rule['key'] in scope['keys']) for rule in node.get('parents',[])]
+        jobs=[dict(key=j['key'],name=j.get('name',j['key']),type=j.get('type','SQL'),
+            layer=j.get('layer','GENERAL'))
+            for j in node.get('plan',{}).get('jobs',[]) if j.get('enabled',True)]
+        nodes.append(dict(key=key,workflowId=workflow['WORKFLOW_ID'],name=workflow['WORKFLOW_NAME'],
+            mode=node.get('plan',{}).get('mode',workflow.get('JOB_EXECUTION_MODE','SEQUENTIAL')),
+            parents=parents,jobs=jobs,issues=definition['executionIssues'].get(workflow['WORKFLOW_ID'],[])))
+    return dict(rootKey=root,includeChildren=include_children,nodes=nodes,issues=scope['issues'],
+        omitted=[dict(key=key,name=workflows[key]['WORKFLOW_NAME']) for key in scope['disabledKeys']])
+
+
 def outstanding(conn, graph_id, keys, *, exclude=None):
     """Terminal nodes release their reservation even if siblings still execute."""
     return conn.execute('''SELECT n.*,c.snapshot,c.created_at,c.cancel_requested,r.state AS actual_state,r.started_at,
