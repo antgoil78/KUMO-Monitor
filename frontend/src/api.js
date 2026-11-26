@@ -75,6 +75,7 @@ export const api = {
   taskPrototypeSchedules: () => requestJson('/api/orchestration/task-engine/schedules'),
   taskPrototypeGraphs: () => requestJson('/api/orchestration/task-engine/graphs'),
   postgresMonitor: () => requestJson('/api/orchestration/task-engine/monitor'),
+  workflowRunPlan: (id, workflowId, includeChildren) => requestJson(`/api/orchestration/task-engine/graphs/${encodeURIComponent(id)}/plan?${new URLSearchParams({ workflowId, includeChildren })}`),
   postgresLog: (workflowId, runId, jobId = '') => requestJson(`/api/orchestration/task-engine/workflows/${encodeURIComponent(workflowId)}/runs/${encodeURIComponent(runId)}/log?${new URLSearchParams({ jobId })}`),
   startTaskPrototypeGraph: (id, body) => requestJson(`/api/orchestration/task-engine/graphs/${id}/runs`, { method: 'POST', body: JSON.stringify(body) }),
   taskPrototypeCascade: id => requestJson(`/api/orchestration/task-engine/cascades/${id}`),

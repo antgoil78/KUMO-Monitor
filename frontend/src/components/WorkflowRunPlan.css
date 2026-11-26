@@ -1,0 +1,32 @@
+.run-plan { min-width: 0; padding: 14px 16px; border: 1px solid #3b4657; border-radius: 5px; background: #192230; }
+.run-plan-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.run-plan-title h3 { margin: 0; font-size: 14px; }
+.run-plan-title > span { color: #a8c6eb; font-size: 11px; }
+.run-plan-tree, .run-plan-branches { list-style: none; margin: 0; padding: 0; }
+.run-plan-tree { max-height: 420px; overflow: auto; padding: 4px 0; }
+.run-plan-branches { margin-left: 7px; padding-left: 22px; border-left: 1px solid #40516a; }
+.run-plan-branches > li { position: relative; }
+.run-plan-branches > li::before { content: ''; position: absolute; top: 15px; left: -22px; width: 18px; border-top: 1px solid #40516a; }
+.run-plan-node { overflow-wrap: anywhere; font-size: 13px; }
+.run-plan-heading { padding: 5px 4px; line-height: 20px; cursor: pointer; border-radius: 3px; }
+.run-plan-heading:hover { background: #233044; }
+.run-plan-heading:focus-visible { outline: 2px solid #78a6de; outline-offset: -2px; }
+.run-plan-entry > summary > strong { color: #a8c6eb; }
+.run-plan-condition { color: #b0bed0; font-size: 12px; }
+.run-plan-details { padding: 3px 12px 10px 19px; }
+.run-plan-parents { list-style: none; padding: 0; margin: 4px 0 10px; font-size: 12px; }
+.run-plan-parents > li + li { margin-top: 7px; }
+.run-plan-parents small { display: block; margin-top: 3px; color: #b0bed0; line-height: 1.5; }
+.run-plan-external { display: inline-block; margin-left: 8px; color: #e1ba73; font-size: 11px; }
+.run-plan-jobs { color: #b0bed0; font-size: 12px; }
+.run-plan-jobs summary { cursor: pointer; width: fit-content; }
+.run-plan-jobs ol { padding-left: 20px; }
+.run-plan-jobs li { margin: 7px 0; }
+.run-plan-jobs li span { display: block; margin-top: 3px; font-size: 11px; }
+.run-plan-omitted { color: #b0bed0; font-size: 12px; line-height: 1.5; }
+.run-plan-issue { margin: 3px 0 6px 19px; color: #f1a7a7; font-size: 12px; }
+@media (max-width: 600px) {
+  .run-plan { padding: 10px; }
+  .run-plan-branches { padding-left: 14px; }
+  .run-plan-branches > li::before { left: -14px; width: 10px; }
+}
