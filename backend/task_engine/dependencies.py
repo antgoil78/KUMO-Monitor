@@ -246,7 +246,8 @@ class Graphs:
             snapshot=dict(key=snapshot['key'],name=snapshot['name'],enabled=True,version=1,
                 nodes=nodes,catalogRevision=graph['revision'],guards=selected['guards'],relationships=selected['relationships'],externalParents=external,externalBindings=bindings,trigger=trigger,includeChildren=body.get('includeChildren',True),
                 workflowNames={snapshot['workflowKeys'][w['WORKFLOW_ID']]:w['WORKFLOW_NAME'] for w in snapshot['catalog']['workflows']},
-                workflowIds={key:identity for identity,key in snapshot['workflowKeys'].items() if key in keys},requestedWorkflowId=body['workflowId'])
+                workflowIds={key:identity for identity,key in snapshot['workflowKeys'].items() if key in keys},
+                disabledWorkflowKeys=selected['disabledKeys'],requestedWorkflowId=body['workflowId'])
         elif body.get('workflowId') is not None:
             raise ValueError('Select a workflow through the complete PostgreSQL catalog')
         elif 'includeChildren' in body:
@@ -269,6 +270,7 @@ class Graphs:
             trigger=trigger,workflowId=body.get('workflowId'),includeChildren=body.get('includeChildren',True),
             selectedKeys=keys,guards=snapshot.get('guards',{}),
             externalParents=snapshot.get('externalParents',{}),externalBindings=snapshot.get('externalBindings',{}),
+            ignoredDisabledWorkflowKeys=snapshot.get('disabledWorkflowKeys',[]),
             manualEntryParentsBypassed=trigger=='MANUAL' and 'guards' in snapshot)
         return dict(ok=True, cascadeId=str(cascade_id), reused=False)
 
