@@ -26,6 +26,20 @@ selected service version and configuration.
 
 ### Complete PostgreSQL Monitor
 
+The local PostgreSQL table uses five columns: **Workflow**, **Status**, **Last
+run**, **Duration** and **Trigger**. Status contains one entry per workflow
+occurrence in an active plan, with its own job progress and direct-parent wait
+details. Each entry identifies its plan. Parent statuses belong to that plan's
+dependencies; overlap with another plan appears as a separate waiting reason.
+Completed workflow/job entries remain until their whole plan finishes;
+then they disappear. No active plan means an empty Status cell, even when a
+future schedule is enabled. Last run keeps the latest completed execution's
+start time, date and result together, with a Manual label for manually started
+executions. Duration distinguishes Last and Current. Trigger shows the current
+configured parent rules and schedules, including paused schedules and the next
+run for enabled schedules. History and execution controls retain their
+existing behavior.
+
 Use **Workflow / Monitor → PostgreSQL · DEV workflows**. The existing table,
 timeline, history and execution log read PostgreSQL. The complete catalog is
 the `dev-workflow-catalog` graph's `catalog` JSONB value in
@@ -50,6 +64,32 @@ installed master. It performs no Snowflake catalog or DDL writes. Existing
 Snowflake history remains available through the Snowflake source; it is not
 copied into PostgreSQL. Earlier PostgreSQL trial execution history remains
 visible under the original source workflow IDs.
+
+For local DBT testing, set `KUMO_PG_BUSINESS_JOBS_ENABLED=true` in the ignored
+`.env.postgres.local`, for both the Flask web process and standalone worker.
+An already imported catalog may still carry the earlier SQL-only capabilities.
+Refresh those from its existing PostgreSQL master, without importing Snowflake
+configuration again. From `backend/`, review the preview and its revision first:
+
+```bash
+python -m flask --env-file ../.env.postgres.local --app app task-engine recompile-catalog
+python -m flask --env-file ../.env.postgres.local --app app task-engine recompile-catalog --apply --expected-revision <preview-revision>
+```
+
+This updates derived capabilities only. Job commands, dependency rules, disabled
+workflows, paused schedules and accepted execution snapshots are retained.
+It creates no executions and contacts no Snowflake service. Repeating it with
+the current revision is a no-op when capabilities already match. SPCS already
+does this at runtime startup; this command supports the separate local web and
+worker processes. It does not deploy anything.
+
+DBT workflows use the same admission, overlap protection, ordered/parallel jobs,
+failure propagation, recovery and native-task cleanup as SQL workflows. Open
+Monitor or DAG View, review the Run dialog's scope, then start a workflow for a
+manual test. DBT still executes in a temporary Snowflake task when started;
+local preparation does not execute model builds. Native task success/failure is
+available now. DBT artifact-based warning classification and model/test-level
+progress are not yet integrated with the PostgreSQL engine.
 
 **Run workflow** is available on any supported workflow. Choose **Run only this
 workflow** or **Run workflow and dependencies**. The latter includes downstream

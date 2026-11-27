@@ -20,7 +20,7 @@ test('monitor shows queue blockers, snapshot age and live status changes', async
     waitingFor: [{ name: 'WF7', status: 'RUNNING' }] }
   monitor.submissions = [{ workflowId: monitor.rows[0].WORKFLOW_ID, requestId: 'current-request', status: 'INITIATING' }]
   await page.goto('/?page=orchestrationMonitor')
-  await expect(page.locator('.om-name-detail').first()).toContainText('Waiting for WF7 (RUNNING)')
+  await expect(page.locator('.om-name-detail').first()).toHaveText([monitor.rows[0].WORKFLOW_GROUP, monitor.rows[0].DESCRIPTION].filter(Boolean).join(' · '))
   await expect(page.locator('.om-parent').getByText('QUEUED', { exact: true })).toBeVisible()
   await expect(page.locator('.om-parent')).toContainText('Waiting to start · 17s')
   await expect(page.locator('.om-parent .om-time').nth(1)).toHaveText('—')

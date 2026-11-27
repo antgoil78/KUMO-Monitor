@@ -169,7 +169,7 @@ class PostgresMonitorTests(unittest.TestCase):
         self.assertEqual(during['WF10']['run']['status'],'RUNNING')
         self.assertEqual(during['WF10']['cascadeId'],leaf)
         self.assertEqual(during['WF10']['execution']['status'],'RUNNING')
-        self.assertEqual(during['WF10']['planning']['status'],'WAITING')
+        self.assertEqual(during['WF10']['planning']['status'],'RUNNING')
         self.assertEqual(during['WF10']['planning']['waitingCount'],1)
         self.assertEqual(during['WF10']['planning']['cascadeId'],group)
         self.assertEqual(during['WF10']['queuedCount'],0);self.assertEqual(during['WF10']['waitingCount'],1)
@@ -430,9 +430,11 @@ class PostgresMonitorTests(unittest.TestCase):
         self.assertEqual(self.monitor.log(self.ids['WF4'],row['execution']['runId'])['history']['STATUS'],'SUCCESS')
         self.assertEqual(self.monitor.history(dict(workflowId=self.ids['WF4']))['runs'][0]['status'],'BLOCKED')
 
-    def test_queued_request_preserves_last_result_until_native_start(self):
+    def test_last_result_is_preserved_through_running_and_review_until_completion(self):
         self.finish()
-        old=next(w['execution'] for w in self.monitor.payload()['rows'] if w['WORKFLOW_NAME']=='WF1')
+        before=next(w for w in self.monitor.payload()['rows'] if w['WORKFLOW_NAME']=='WF1')
+        old=before['execution'];result=before['lastResult'];job_result=before['jobs'][0]['lastResult']
+        self.assertEqual(result['status'],'SUCCESS')
         group=self.start(include_children=False);DependencyWorker(self.store).step()
         row=next(w for w in self.monitor.payload()['rows'] if w['WORKFLOW_NAME']=='WF1')
         self.assertEqual(row['execution'],old);self.assertEqual(row['planning']['status'],'QUEUED')
@@ -441,9 +443,63 @@ class PostgresMonitorTests(unittest.TestCase):
         with self.store.transaction() as conn:
             conn.execute("UPDATE kumo_task_engine.attempts SET state='RUNNING',native_started_at=clock_timestamp() WHERE run_id=%s",(native,));self.store.refresh(conn,native)
         row=next(w for w in self.monitor.payload()['rows'] if w['WORKFLOW_NAME']=='WF1')
-        self.assertEqual(row['execution']['status'],'RUNNING');self.assertEqual(row['planning']['status'],'EXECUTING')
+        self.assertEqual(row['execution']['status'],'RUNNING');self.assertEqual(row['planning']['status'],'RUNNING')
         self.assertEqual(row['jobs'][0]['run']['runId'],row['execution']['runId'])
         self.assertEqual(row['execution']['runId'],row['run']['runId'])
+        self.assertEqual(row['lastResult'],result);self.assertEqual(row['jobs'][0]['lastResult'],job_result)
+        with self.store.transaction() as conn:
+            conn.execute("UPDATE kumo_task_engine.attempts SET state='UNKNOWN' WHERE run_id=%s",(native,));self.store.refresh(conn,native)
+        row=next(w for w in self.monitor.payload()['rows'] if w['WORKFLOW_NAME']=='WF1')
+        self.assertEqual(row['planning']['status'],'NEEDS REVIEW');self.assertEqual(row['lastResult'],result)
+        self.complete(group,'WF1','FAILED');DependencyWorker(self.store).step()
+        row=next(w for w in self.monitor.payload()['rows'] if w['WORKFLOW_NAME']=='WF1')
+        self.assertEqual(row['lastResult']['status'],'FAILED');self.assertEqual(row['lastResult']['runId'],row['run']['runId'])
+        self.assertEqual(row['jobs'][0]['lastResult']['status'],'FAILED')
+
+    def test_first_running_execution_has_no_result_until_it_finishes(self):
+        group=self.start(include_children=False);DependencyWorker(self.store).step()
+        native=self.graphs.read(group)['nodes'][0]['run_id']
+        with self.store.transaction() as conn:
+            conn.execute("UPDATE kumo_task_engine.attempts SET state='RUNNING',native_started_at=clock_timestamp() WHERE run_id=%s",(native,));self.store.refresh(conn,native)
+        row=next(w for w in self.monitor.payload()['rows'] if w['WORKFLOW_NAME']=='WF1')
+        self.assertEqual(row['lastResult']['status'],'NO RESULT');self.assertEqual(row['planning']['status'],'RUNNING')
+        self.assertEqual(row['jobs'][0]['lastResult']['status'],'NO RESULT')
+        self.complete(group,'WF1');DependencyWorker(self.store).step()
+        row=next(w for w in self.monitor.payload()['rows'] if w['WORKFLOW_NAME']=='WF1')
+        self.assertEqual(row['lastResult']['status'],'SUCCESS');self.assertEqual(row['planning']['status'],'NO PLAN')
+
+    def test_cancellation_before_native_start_does_not_erase_a_completed_result(self):
+        self.finish()
+        before=next(w for w in self.monitor.payload()['rows'] if w['WORKFLOW_NAME']=='WF1')
+        group=self.start(include_children=False);DependencyWorker(self.store).step()
+        native=self.graphs.read(group)['nodes'][0]['run_id']
+        with self.store.transaction() as conn:
+            conn.execute("UPDATE kumo_task_engine.attempts SET state='CANCELLED',ended_at=clock_timestamp() WHERE run_id=%s",(native,));self.store.refresh(conn,native)
+        DependencyWorker(self.store).step()
+        row=next(w for w in self.monitor.payload()['rows'] if w['WORKFLOW_NAME']=='WF1')
+        self.assertEqual(row['lastResult'],before['lastResult'])
+        self.assertEqual(row['jobs'][0]['lastResult'],before['jobs'][0]['lastResult'])
+
+    def test_job_result_updates_while_other_jobs_are_still_running(self):
+        identity=self.ids['WF1'];second=str(uuid.uuid4())
+        first=next(r['JOB_ID'] for r in self.raw['raw_records'] if r['WORKFLOW_ID']==identity and r.get('JOB_ID'))
+        def add_job(raw):
+            raw['jobs'].append(dict(JOB_ID=second,JOB_NAME='Second SQL',JOB_TYPE='SQL',SQL_COMMAND='SELECT 2',IS_ENABLED=True,TIMEOUT_SECONDS=60))
+            raw['raw_records'].append(dict(WORKFLOW_ID=identity,JOB_ID=second,PARENT_ID=first,TRIGGER_TYPE='DEP',ALLOW=True))
+        self.config.change(dict(revision=self.config.read()['revision']),'EDITOR',add_job)
+        worker=DependencyWorker(self.store);old=self.start(include_children=False);worker.step()
+        self.complete(old,'WF1');worker.step()
+        before=next(w for w in self.monitor.payload()['rows'] if w['WORKFLOW_NAME']=='WF1')
+        new=self.start(include_children=False);worker.step();native=self.graphs.read(new)['nodes'][0]['run_id']
+        with self.store.transaction() as conn:
+            conn.execute("UPDATE kumo_task_engine.attempts SET state='SUCCESS',native_started_at=clock_timestamp(),ended_at=clock_timestamp() WHERE run_id=%s AND job_key=%s",(native,first))
+            conn.execute("UPDATE kumo_task_engine.attempts SET state='RUNNING',native_started_at=clock_timestamp() WHERE run_id=%s AND job_key=%s",(native,second))
+            self.store.refresh(conn,native)
+        row=next(w for w in self.monitor.payload()['rows'] if w['WORKFLOW_NAME']=='WF1')
+        self.assertEqual(row['lastResult'],before['lastResult']);self.assertEqual(row['planning']['status'],'RUNNING')
+        self.assertEqual(row['jobs'][0]['lastResult']['runId'],row['execution']['runId'])
+        self.assertEqual(row['jobs'][1]['lastResult'],before['jobs'][1]['lastResult'])
+        self.assertEqual(row['jobs'][1]['run']['status'],'RUNNING')
 
     def test_never_executed_blocked_plan_has_no_run_and_no_fake_job_results(self):
         group=self.start();worker=DependencyWorker(self.store);worker.step();self.complete(group,'WF1','FAILED')

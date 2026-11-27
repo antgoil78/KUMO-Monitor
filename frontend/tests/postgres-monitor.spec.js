@@ -25,15 +25,28 @@ function monitorRow(workflow) {
   const actual = workflow.execution || (run.start ? run : workflow.lastRun) || { status: 'NO RUN', runId: null, start: null, end: null, jobs: [] }
   const waitingCount = workflow.waitingCount || (run.status === 'WAITING' ? 1 : 0)
   const scheduled = workflow.IS_SCHEDULE_ENABLED && workflow.IS_ENABLED
-  const status = workflow.cancelRequested ? 'CANCELLING' : run.dispatch?.canRetry ? 'BLOCKED' : waitingCount ? 'WAITING'
+  const status = workflow.cancelRequested ? 'CANCELLING' : run.status === 'UNKNOWN' ? 'NEEDS REVIEW' : actual.status === 'RUNNING' ? 'RUNNING' : run.dispatch?.canRetry ? 'BLOCKED' : waitingCount ? 'WAITING'
     : run.status === 'QUEUED' ? 'QUEUED' : run.status === 'BLOCKED' ? 'BLOCKED' : run.status === 'UNKNOWN' ? 'NEEDS REVIEW'
-    : run.status === 'RUNNING' ? 'EXECUTING' : scheduled ? 'SCHEDULED' : 'NO PLAN'
+    : scheduled ? 'SCHEDULED' : 'NO PLAN'
   const planning = workflow.planning || { status, waitingCount, queuedCount: workflow.queuedCount,
     message: run.message, waitingFor: run.waitingFor, stopped: run.status === 'BLOCKED',
     scheduled, nextRun: workflow.scheduler?.nextRun, dispatch: run.dispatch, recovery: run.recovery }
+  const completedResult = runs => runs.filter(run => run?.start && run?.end && ['SUCCESS', 'WARNING', 'FAILED', 'CANCELLED', 'SKIPPED'].includes(run.status))
+    .sort((a, b) => Date.parse(b.end) - Date.parse(a.end))[0] || { status: 'NO RESULT', runId: null, start: null, end: null }
+  const lastResult = workflow.lastResult || completedResult([actual, workflow.lastRun, run])
   const jobs = workflow.jobs.map(job => ({ ...job, run: actual.jobs?.find(j => j.jobId === job.JOB_ID)
-    || (actual.runId ? job.run : { status: 'NO RUN', runId: null, start: null, end: null, message: '' }) }))
-  return { ...workflow, execution: actual, planning, jobs }
+    || (actual.runId ? job.run : { status: 'NO RUN', runId: null, start: null, end: null, message: '' }),
+    lastResult: job.lastResult || completedResult([job.run, job.lastRun, lastResult.jobs?.find(j => j.jobId === job.JOB_ID)]) }))
+  const active = ['RUNNING', 'UNKNOWN', 'WAITING', 'QUEUED', 'INITIATING', 'BLOCKED'].includes(run.status) || run.dispatch?.canRetry || workflow.activePlan
+  const request = (id, status, includeDetails = true) => ({ ...run, runId: id, requestId: id, status,
+    planStatus: workflow.planStatus || 'RUNNING', requestedAt: run.requestedAt || stamp, requestedBy: 'Tester',
+    cancelRequested: workflow.cancelRequested, trigger: { kind: 'MANUAL' },
+    waitingFor: includeDetails ? run.waitingFor || [] : [], message: includeDetails ? run.message : '',
+    jobs: workflow.jobs.map(job => ({ ...job.run, jobId: job.JOB_ID, type: job.JOB_TYPE, source: 'POSTGRES',
+      status: status === 'WAITING' || status === 'QUEUED' ? 'PENDING' : job.run.status })) })
+  const requests = active ? [request(run.runId || workflow.WORKFLOW_ID, run.status)] : []
+  for (let index = run.status === 'WAITING' ? 1 : 0; index < waitingCount; index++) requests.push(request(`waiting-${workflow.WORKFLOW_ID}-${index}`, 'WAITING', false))
+  return { ...workflow, execution: actual, lastResult, planning, jobs, requests: workflow.requests || requests }
 }
 
 async function setup(page, { started = false, healthUnavailable = false, waitForMonitor = true, hidden = false, primary = false } = {}) {
@@ -179,6 +192,76 @@ test('running PostgreSQL DBT jobs show native task execution without promising m
   pgOnly(state)
 })
 
+test('enabled PostgreSQL DBT workflows use the shared Run preview and show native completion', async ({ page }) => {
+  const state = await setup(page)
+  const workflow = state.data.rows[2]
+  workflow.canRun = true; workflow.canRunWithChildren = true; workflow.runUnavailable = ''
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  await page.getByRole('button', { name: 'Run workflow DBT workflow', exact: true }).click()
+  await page.getByLabel('Execution scope', { exact: true }).selectOption('WORKFLOW')
+  const plan = page.getByRole('region', { name: 'Execution plan', exact: true })
+  await expect(plan).toContainText('1 workflow')
+  await plan.locator('.run-plan-entry > summary').click()
+  await plan.getByText('1 job · Sequential', { exact: true }).click()
+  await expect(plan).toContainText('DBT · GENERAL')
+  await page.getByRole('dialog').getByRole('button', { name: 'Run workflow', exact: true }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  expect(state.writes).toHaveLength(1)
+  expect(state.writes[0]).toMatchObject({ path: prefix + '/graphs/graph/runs', body: { workflowId: dbt, includeChildren: false } })
+  workflow.run = { status: 'RUNNING', runId: 'dbt-native', start: stamp, source: 'POSTGRES' }
+  workflow.jobs[0].run = { ...workflow.run, jobId: dbt, type: 'DBT' }
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  await expect(page.getByRole('button', { name: 'Hide jobs for DBT workflow', exact: true })).toBeVisible()
+  await expect(page.getByRole('table')).toContainText('DBT task running')
+  workflow.run = { ...workflow.run, status: 'SUCCESS', end: '2026-11-23T14:01:00Z' }
+  workflow.jobs[0].run = { ...workflow.jobs[0].run, status: 'SUCCESS', end: workflow.run.end }
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  const display = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Execution history for DBT workflow', exact: true }) })
+  await expect(display.locator('.om-execution-status')).toContainText('SUCCESS')
+  await expect(display.locator('.om-planning-cell')).toBeEmpty()
+  pgOnly(state)
+})
+
+test('Last result keeps the previous outcome while State follows running, review and completion', async ({ page }) => {
+  const state = await setup(page, { started: true })
+  const workflow = state.data.rows[0], old = structuredClone(workflow.run)
+  const activeJob = { ...old.jobs[0], status: 'RUNNING', runId: 'new-run', start: stamp, end: null }
+  workflow.run = { ...old, status: 'RUNNING', runId: 'new-run', start: stamp, end: null, jobs: [activeJob] }
+  workflow.jobs[0].run = activeJob; workflow.canRun = false; workflow.waitingCount = 2
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  const display = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Execution history for WF1', exact: true }) })
+  await expect(page.getByRole('columnheader', { name: 'Last run', exact: true })).toBeVisible()
+  await expect(display.locator('.om-execution-status')).toHaveText(/SUCCESS/)
+  await expect(display.locator('.om-execution-status')).toHaveAttribute('title', /Last completed execution/)
+  await expect(display.locator('.om-planning-cell')).toContainText('STARTED')
+  await expect(display.locator('.om-planning-cell')).toContainText('PLANNED')
+  await expect(display.locator('.om-execution-status .om-spinner')).toHaveCount(0)
+  await expect(display.locator('.om-planning-cell .om-spinner')).toHaveCount(1)
+  await page.getByRole('button', { name: 'Show jobs for WF1', exact: true }).click()
+  const jobRow = page.locator('#om-jobs-' + wf).getByRole('row').first()
+  await expect(jobRow.locator('.om-execution-status')).toHaveText(/SUCCESS/)
+  await expect(jobRow.locator('.om-planning-cell')).toHaveText(/STARTED/)
+  await expect(page.getByLabel('Filter workflow result', { exact: true }).locator('option[value="RUNNING"]')).toHaveCount(0)
+  await page.getByLabel('Filter workflow result', { exact: true }).selectOption('SUCCESS')
+  await page.getByLabel('Filter workflow activity', { exact: true }).selectOption('STARTED')
+  await expect(display).toBeVisible()
+  await page.getByLabel('Filter workflow result', { exact: true }).selectOption('')
+  await page.getByLabel('Filter workflow activity', { exact: true }).selectOption('')
+  workflow.run.status = 'UNKNOWN'; activeJob.status = 'UNKNOWN'; workflow.waitingCount = 0
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  await expect(display.locator('.om-execution-status')).toHaveText(/SUCCESS/)
+  await expect(display.locator('.om-planning-cell')).toContainText('NEEDS REVIEW')
+  await expect(jobRow.locator('.om-planning-cell')).toHaveText(/NEEDS REVIEW/)
+  workflow.run = { ...workflow.run, status: 'FAILED', end: '2026-11-23T14:01:00Z', jobs: [{ ...activeJob, status: 'FAILED', end: '2026-11-23T14:01:00Z' }] }
+  workflow.jobs[0].run = workflow.run.jobs[0]; workflow.canRun = true
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  await expect(display.locator('.om-execution-status')).toHaveText(/FAILED/)
+  await expect(display.locator('.om-planning-cell')).toBeEmpty()
+  await expect(jobRow.locator('.om-execution-status')).toHaveText(/FAILED/)
+  expect(state.writes).toEqual([])
+  pgOnly(state)
+})
+
 function recoverableWorkflow(state) {
   const workflow = row('wf4', 'WF4')
   workflow.run = { status: 'UNKNOWN', runId: 'wf4-node', start: null,
@@ -271,8 +354,8 @@ test('retry a failed branch once, restore WAITING descendants and retain WF3 suc
   release()
   await expect(button).toHaveCount(0)
   const workflow = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Execution history for WF4', exact: true }) })
-  await expect(workflow).toContainText('WAITING')
-  await expect(workflow.locator('.om-planning')).toHaveAttribute('title', /Waiting for parent WF2/)
+  await expect(workflow).toContainText('PLANNED')
+  await expect(workflow.locator('.om-request').first()).toHaveAttribute('title', /Waiting for parent WF2/)
   await expect(page.getByText('WF2 retry accepted.', { exact: false })).toBeVisible()
   expect(sibling.run).toMatchObject({ status: 'SUCCESS', runId: 'successful-wf3' })
   expect(state.writes).toEqual([{ path: prefix + '/cascades/failed-group/nodes/failed-node/retry', body: null }])
@@ -332,7 +415,7 @@ test('dispatch errors remain visible across filters and retry retains successful
   await expect(page.locator('.om-engine-status')).toContainText('Dependency dispatch: 1 paused group')
   await expect(page.getByRole('table')).toContainText('SUCCESS')
   await expect(page.getByRole('table')).toContainText('Group dispatch paused')
-  await page.getByLabel('Filter workflow status', { exact: true }).selectOption('SUCCESS')
+  await page.getByLabel('Filter workflow result', { exact: true }).selectOption('SUCCESS')
   await expect(page.getByRole('button', { name: 'Run workflow WF2', exact: true })).toHaveCount(0)
   await expect(alert).toBeVisible()
   await page.getByRole('button', { name: 'Timeline', exact: true }).click()
@@ -390,7 +473,7 @@ test('existing Monitor shows every catalog job and uses PostgreSQL presence with
   await expect(page.locator('.om-notice')).toContainText('3 workflows · 4 jobs · 1 unassigned')
   await page.getByRole('button', { name: 'Expand all', exact: true }).click()
   await expect(page.getByRole('table')).toContainText('Unassigned SQL')
-  await expect(page.getByRole('table')).toContainText('DBT execution is not enabled')
+  await expect(page.getByRole('button', { name: 'Run workflow DBT workflow', exact: true })).toHaveAttribute('title', /DBT execution is not enabled/)
   await expect(page.getByRole('button', { name: 'Run workflow DBT workflow', exact: true })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Run WF1 job in WF1', exact: true })).toBeDisabled()
   await expect(page.getByRole('region', { name: 'Workflow dependency trial' })).toHaveCount(0)
@@ -436,7 +519,7 @@ test('root Run starts the full dependency group once and shows queued and waitin
   expect(Object.keys(state.writes[0].body).sort()).toEqual(['includeChildren', 'requestId', 'workflowId'])
   expect(state.writes[0].body.includeChildren).toBe(true)
   await expect(page.getByRole('button', { name: 'Run workflow WF1', exact: true })).toBeDisabled()
-  await expect(page.getByRole('table')).toContainText('WAITING')
+  await expect(page.getByRole('table')).toContainText('PLANNED')
   pgOnly(state)
 })
 
@@ -545,33 +628,33 @@ test('running WF10 allows WF1 and WF2 while adjacent WF8 and WF9 show waiting', 
   await expect(page.getByRole('button', { name: 'Run workflow WF9', exact: true })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Run workflow WF2', exact: true })).toBeEnabled()
   const running = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Execution history for WF10', exact: true }) })
-  await expect(running).toContainText('RUNNING')
-  await expect(running.locator('.om-planning-status')).toContainText('WAITING(2)')
-  await expect(running.locator('.status-count')).toHaveCSS('color', 'rgb(143, 194, 255)')
-  await expect(running.getByTitle('2 execution requests waiting for this workflow')).toBeVisible()
+  await expect(running).toContainText('STARTED')
+  await expect(running.locator('.om-planning-cell')).toContainText('PLANNED')
+  await expect(running.locator('.om-request')).toHaveCount(3)
+  await expect(running.locator('.om-request-meta')).toContainText(['#1', '#2', '#3'])
   await expect(running.locator('.om-name-detail')).not.toContainText('2 waiting')
   await expect(running.locator('.om-name-detail')).not.toContainText('queued')
   for (const name of ['WF8','WF9']) {
     const display = page.getByRole('row').filter({ has: page.getByRole('button', { name: `Execution history for ${name}`, exact: true }) })
-    await expect(display.locator('.om-planning-status')).toContainText('WAITING(1)')
+    await expect(display.locator('.om-planning-cell')).toContainText('PLANNED')
     await expect(display).not.toContainText('QUEUED')
     await expect(display.getByRole('img', { name: 'Preparing execution' })).toHaveCount(0)
   }
   await expect(page.locator('.om-planning-cell .om-dependency-item').filter({ hasText: 'Child WF10' })).toHaveCount(0)
   leaf.waitingCount = 1
   await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
-  await expect(running.locator('.om-planning-status')).toContainText('WAITING(1)')
+  await expect(running.locator('.om-planning-cell')).toContainText('PLANNED')
   leaf.waitingCount = 0
   await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
-  await expect(running.locator('.om-planning-status')).not.toContainText('WAITING')
-  await expect(running.locator('.om-live-status')).toContainText('RUNNING')
-  await expect(running.locator('.om-planning-cell')).toHaveText('')
-  await expect(page.getByLabel('Filter workflow state', { exact: true }).locator('option[value="EXECUTING"]')).toHaveCount(0)
+  await expect(running.locator('.om-planning-cell')).not.toContainText('PLANNED')
+  await expect(running.locator('.om-live-status')).toContainText('NO RESULT')
+  await expect(running.locator('.om-planning-cell')).toContainText('STARTED')
+  await expect(page.getByLabel('Filter workflow activity', { exact: true }).locator('option[value="EXECUTING"]')).toHaveCount(0)
   leaf.IS_SCHEDULE_ENABLED = true
   leaf.scheduler = { state: 'STARTED', nextRun: '2026-11-23T14:01:00Z' }
   await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
-  await expect(running.locator('.om-live-status')).toContainText('RUNNING')
-  await expect(running.locator('.om-planning-status')).toHaveText(/SCHEDULED/)
+  await expect(running.locator('.om-live-status')).toContainText('NO RESULT')
+  await expect(running.locator('.om-planning-cell')).toContainText('STARTED')
   await expect(running.locator('.om-planning-cell')).not.toContainText('EXECUTING')
   await expect(page.getByRole('button', { name: 'Run workflow WF1', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: 'Run workflow WF1', exact: true }).click()
@@ -591,14 +674,14 @@ test('WF4 State shows only direct parents while child waits still disable Run', 
   state.data.rows.push(waiting)
   await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
   const workflow = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Execution history for WF4', exact: true }) })
-  const detail = workflow.locator('.om-planning')
+  const detail = workflow.locator('.om-request').first()
   const button = page.getByRole('button', { name: 'Run workflow WF4', exact: true })
-  await expect(workflow.locator('.om-planning-status')).toContainText('WAITING(2)')
+  await expect(workflow.locator('.om-planning-cell')).toContainText('PLANNED')
   await expect(detail.locator('.om-dependency-item')).toHaveCount(2)
   await expect(detail).toContainText('Parent WF2RUNNING')
   await expect(detail).toContainText('Parent WF3RUNNING')
   await expect(detail).not.toContainText('WF5')
-  await expect(detail).not.toContainText('Waiting for')
+  await expect(detail).toContainText('Waiting for')
   await expect(detail).not.toContainText('to complete')
   await expect(button).toBeDisabled()
   await expect(button).toHaveAttribute('title', /parent WF2.*parent WF3.*child WF5/)
@@ -611,13 +694,13 @@ test('WF4 State shows only direct parents while child waits still disable Run', 
   await expect(detail).not.toContainText('WF5')
   await expect(button).toBeDisabled()
   await expect(button).toHaveAttribute('title', /child WF5/)
-  await expect(workflow.locator('.om-planning-status')).toContainText('WAITING(2)')
+  await expect(workflow.locator('.om-planning-cell')).toContainText('PLANNED')
   await expect(detail).not.toContainText('WF2')
   await expect(detail).not.toContainText('WF3')
   waiting.run.message = 'Waiting for child WF5 (needs review) to complete'
   waiting.run.waitingFor[0].status = 'UNKNOWN'
   await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
-  await expect(workflow).toContainText('WAITING')
+  await expect(workflow).toContainText('PLANNED')
   await expect(detail).not.toContainText('WF5')
   await expect(detail).not.toContainText('UNKNOWN')
   await expect(button).toBeDisabled()
@@ -627,7 +710,7 @@ test('WF4 State shows only direct parents while child waits still disable Run', 
   waiting.waitingCount = 0; waiting.queuedCount = 1
   await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
   await expect(workflow).toContainText('QUEUED')
-  await expect(workflow).not.toContainText('WAITING')
+  await expect(workflow).not.toContainText('PLANNED')
   await expect(detail).toContainText('QUEUED')
   await expect(detail).not.toContainText('1 waiting')
   await expect(workflow.getByRole('img', { name: 'Preparing execution' })).toBeVisible()
@@ -635,7 +718,7 @@ test('WF4 State shows only direct parents while child waits still disable Run', 
   waiting.queuedCount = 0
   waiting.runUnavailable = ''
   await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
-  await expect(workflow).toContainText('RUNNING')
+  await expect(workflow).toContainText('STARTED')
   await expect(detail).not.toContainText('Waiting')
   expect(state.writes).toEqual([])
   pgOnly(state)
@@ -651,9 +734,9 @@ test('a missing parent outcome is BLOCKED and explains why the join cannot execu
   await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
   const workflow = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Execution history for WF7', exact: true }) })
   await expect(workflow).toContainText('BLOCKED')
-  await expect(workflow.locator('.om-planning')).toHaveClass(/om-error/)
+  await expect(workflow.locator('.om-request').first()).toHaveClass(/om-error/)
   await expect(workflow).toContainText('Parent WF6MISSING')
-  await expect(workflow.locator('.om-planning')).toHaveAttribute('title', /No parent execution was available/)
+  await expect(workflow.locator('.om-request').first()).toHaveAttribute('title', /No parent execution was available/)
   await expect(workflow).not.toContainText('WF6 (null)')
   await expect(workflow).not.toContainText('Waiting to start')
   pgOnly(state)
@@ -676,8 +759,8 @@ test('compact waits deduplicate direct dependencies and keep execution count ind
   state.data.rows.push(waiting)
   await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
   const workflow = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Execution history for WF4', exact: true }) })
-  const detail = workflow.locator('.om-planning')
-  await expect(workflow.locator('.om-planning-status')).toContainText('WAITING(4)')
+  const detail = workflow.locator('.om-request').first()
+  await expect(workflow.locator('.om-planning-cell')).toContainText('PLANNED')
   await expect(detail.locator('.om-dependency-item')).toHaveCount(2)
   await expect(detail).toContainText('Parent WF2RUNNING')
   await expect(detail).toContainText('Parent WF3QUEUED')
@@ -689,7 +772,7 @@ test('compact waits deduplicate direct dependencies and keep execution count ind
   await expect(detail).not.toContainText('Full saved dependency explanation')
   await page.getByRole('button', { name: 'Show jobs for WF4', exact: true }).click()
   const jobRow = page.getByRole('row').filter({ has: page.getByText('WF4 job', { exact: true }) })
-  await expect(jobRow).toContainText('No executions yet')
+  await expect(jobRow.locator('.om-planning-cell')).toContainText('PLANNED')
   await expect(jobRow).not.toContainText('Full saved dependency explanation')
   pgOnly(state)
 })
@@ -702,8 +785,8 @@ test('an idle WF4 stays NO RUN while its manual button explains direct parent an
   state.data.rows.push(idle)
   await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
   const workflow = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Execution history for WF4', exact: true }) })
-  await expect(workflow).toContainText('NO RUN')
-  await expect(workflow.locator('.om-planning')).not.toContainText('WF5')
+  await expect(workflow.locator('.om-execution-status')).toContainText('NO RESULT')
+  await expect(workflow.locator('.om-planning-cell')).not.toContainText('WF5')
   await expect(workflow.locator('.om-name-detail')).not.toHaveClass(/om-error/)
   const button = page.getByRole('button', { name: 'Run workflow WF4', exact: true })
   await expect(button).toBeDisabled()
@@ -785,15 +868,15 @@ test('latest SUCCESS remains visible beside a newer BLOCKED plan with matching j
   await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
   const display = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Execution history for WF1', exact: true }) })
   await expect(display.locator('.om-execution-status')).toHaveText(/SUCCESS/)
-  await expect(display.locator('.om-planning-status')).toHaveText(/BLOCKED/)
-  await expect(display.locator('.om-planning')).toContainText('Parent WF2STALE')
+  await expect(display.locator('.om-planning-cell')).toContainText('BLOCKED')
+  await expect(display.locator('.om-planning-cell')).toContainText('Parent WF2STALE')
   await expect(display).toContainText('1m 00s')
   await expect(display.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100')
   await page.getByRole('button', { name: 'Show jobs for WF1', exact: true }).click()
   const jobRow = page.getByRole('row').filter({ has: page.getByText('WF1 job', { exact: true }) })
   await expect(jobRow.locator('.om-execution-status')).toHaveText(/SUCCESS/)
-  await page.getByLabel('Filter workflow status', { exact: true }).selectOption('SUCCESS')
-  await page.getByLabel('Filter workflow state', { exact: true }).selectOption('BLOCKED')
+  await page.getByLabel('Filter workflow result', { exact: true }).selectOption('SUCCESS')
+  await page.getByLabel('Filter workflow activity', { exact: true }).selectOption('BLOCKED')
   await expect(page.getByRole('button', { name: 'Run workflow WF1', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Run workflow WF2', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: 'Log for workflow WF1', exact: true }).click()
@@ -811,12 +894,13 @@ test('pending retry retains FAILED execution and scheduled idle work retains its
   await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
   const display = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Execution history for WF1', exact: true }) })
   await expect(display.locator('.om-execution-status')).toHaveText(/FAILED/)
-  await expect(display.locator('.om-planning-status')).toHaveText(/WAITING\(2\)/)
+  await expect(display.locator('.om-planning-cell')).toContainText('PLANNED')
   workflow.run = workflow.lastRun; workflow.waitingCount = 0; workflow.IS_SCHEDULE_ENABLED = true
+  workflow.SCHEDULE = '* * * * *'
   workflow.scheduler = { state: 'STARTED', nextRun: '2026-11-23T14:01:00Z' }
   await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
   await expect(display.locator('.om-execution-status')).toHaveText(/FAILED/)
-  await expect(display.locator('.om-planning-status')).toHaveText(/SCHEDULED/)
+  await expect(display.locator('.om-planning-cell')).toBeEmpty()
   await expect(display).toContainText('15:01:00')
   pgOnly(state)
 })
@@ -874,5 +958,158 @@ test('discovery can be retried immediately without reloading the page', async ({
   await expect(page.getByLabel('Configuration source', { exact: true })).toHaveValue('POSTGRES')
   await expect(page.getByRole('button', { name: 'Run workflow WF1', exact: true })).toBeVisible()
   expect(state.requests).not.toContain('/api/snowflake/ping')
+  pgOnly(state)
+})
+
+test('five columns show separate plan requests and clear completed plans without erasing Last run', async ({ page }) => {
+  const state = await setup(page, { started: true })
+  const workflow = state.data.rows[0]
+  const request = (id, parent, time) => ({ runId: id, requestId: id, cascadeId: id + '-plan', planStatus: 'RUNNING',
+    status: 'WAITING', requestedAt: time, requestedBy: 'Tester', start: null, end: null,
+    waitingFor: [{ name: parent, relationship: 'PARENT', status: 'RUNNING' }],
+    trigger: { kind: 'PARENT', parents: [{ name: parent, status: 'RUNNING' }] },
+    jobs: [{ jobId: job, status: 'PENDING', type: 'SQL', source: 'POSTGRES', start: null, end: null }] })
+  workflow.requests = [request('first', 'Parent A', stamp), request('second', 'Parent B', '2026-11-23T14:01:00Z')]
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  await expect(page.getByRole('columnheader')).toHaveText(['Workflow', 'Status', 'Last run', 'Duration', 'Trigger'])
+  const display = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Execution history for WF1', exact: true }) })
+  const status = display.locator('.om-planning-cell')
+  await expect(status.locator('.om-request')).toHaveCount(2)
+  await expect(status.locator('[data-request-id="first"]')).toContainText('Parent A')
+  await expect(status.locator('[data-request-id="first"]')).not.toContainText('Parent B')
+  await expect(status.locator('[data-request-id="second"]')).toContainText('Parent B')
+  await expect(display.locator('.om-last-run')).toContainText('14:58:00')
+  await expect(display.locator('.om-last-run')).toContainText('SUCCESS')
+  await page.getByRole('button', { name: 'Show jobs for WF1', exact: true }).click()
+  const child = page.locator('#om-jobs-' + wf).getByRole('row').first()
+  await expect(child.locator('.om-request')).toHaveCount(2)
+  workflow.requests[0].status = 'SUCCESS'; workflow.requests[0].jobs[0].status = 'SUCCESS'
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  await expect(status.locator('[data-request-id="first"]')).toContainText('SUCCEEDED')
+  await expect(child.locator('[data-request-id="first"]')).toContainText('SUCCEEDED')
+  workflow.requests[0].planStatus = 'SUCCESS'
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  await expect(status.locator('.om-request')).toHaveCount(1)
+  await expect(status).toContainText('Parent B')
+  await expect(status).not.toContainText('Parent A')
+  workflow.requests[1].planStatus = 'FAILED'
+  workflow.IS_SCHEDULE_ENABLED = true; workflow.SCHEDULE = '0 7 * * 1-5'
+  workflow.scheduler = { state: 'STARTED', nextRun: '2026-11-24T06:00:00Z' }
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  await expect(status).toBeEmpty()
+  await expect(child.locator('.om-planning-cell')).toBeEmpty()
+  await expect(display.locator('.om-last-run')).toContainText('14:58:00')
+  await expect(display.locator('.om-last-run')).toContainText('SUCCESS')
+  await expect(display.locator('.om-triggers')).toContainText('Next run')
+  await page.getByLabel('Filter workflow activity', { exact: true }).selectOption('NO PLAN')
+  await expect(display).toBeVisible()
+  expect(state.writes).toEqual([])
+  pgOnly(state)
+})
+
+test('Last run timing stays attached to its result while duration and progress follow the active request', async ({ page }) => {
+  const state = await setup(page, { started: true })
+  const workflow = state.data.rows[0]
+  workflow.requests = [{ runId: 'current', requestId: 'current', planStatus: 'RUNNING', status: 'RUNNING',
+    start: stamp, end: null, requestedAt: stamp, trigger: { kind: 'MANUAL' },
+    jobs: [{ jobId: job, status: 'SUCCESS' }, { jobId: 'another', status: 'RUNNING' }] }]
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  const display = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Execution history for WF1', exact: true }) })
+  await expect(display.locator('.om-last-run')).toContainText('14:58:00')
+  await expect(display.locator('.om-last-run')).not.toContainText('15:00:00')
+  await expect(display.locator('.om-last-run')).toContainText('SUCCESS')
+  await expect(display.locator('.om-durations')).toContainText('Last: 1m 00s')
+  await expect(display.locator('.om-durations')).toContainText('Current: 0m')
+  await expect(display.locator('.om-planning-cell')).toContainText('STARTED')
+  await expect(display.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50')
+  const elapsed = text => { const match = text.match(/Current: (\d+)m (\d+)s/); return Number(match[1]) * 60 + Number(match[2]) }
+  const before = elapsed(await display.locator('.om-durations').innerText())
+  await page.clock.runFor(5000)
+  await expect.poll(async () => elapsed(await display.locator('.om-durations').innerText())).toBeGreaterThanOrEqual(before + 5)
+  pgOnly(state)
+})
+
+test('Trigger shows current parent and paused schedule configuration while Manual belongs to Last run', async ({ page }) => {
+  const state = await setup(page, { started: true })
+  const workflow = state.data.rows[0]
+  workflow.configuredParents = [{ id: 'configured-parent', name: 'Configured parent', success: true, warning: false, error: false, parentMustBeNewer: true, enabled: true }]
+  workflow.SCHEDULE = '0 7 * * 1-5'; workflow.SCHEDULE_TIMEZONE = 'Europe/Stockholm'
+  workflow.lastResult = { ...workflow.run, triggerSource: 'MANUAL' }
+  workflow.jobs[0].lastResult = { ...workflow.jobs[0].run, triggerSource: 'MANUAL' }
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  const display = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Execution history for WF1', exact: true }) })
+  const trigger = display.locator('.om-triggers')
+  await expect(display.locator('.om-planning-cell')).toBeEmpty()
+  await expect(trigger).toContainText('Parent Configured parent')
+  await expect(trigger).toContainText('On success')
+  await expect(trigger).toContainText('Newer result required')
+  await expect(trigger).toContainText('0 7 * * 1-5')
+  await expect(trigger).toContainText('Europe/Stockholm · Paused')
+  await expect(trigger).not.toContainText('Next run')
+  await expect(trigger).not.toContainText('Manual')
+  await expect(display.locator('.om-last-run .om-manual-trigger')).toHaveText('Manual')
+  await page.getByRole('button', { name: 'Show jobs for WF1', exact: true }).click()
+  const child = page.locator('#om-jobs-' + wf).getByRole('row').first()
+  await expect(child.locator('.om-last-run .om-manual-trigger')).toHaveText('Manual')
+  await expect(child.locator('.om-triggers')).toContainText('With workflow')
+  await expect(child.locator('.om-triggers')).not.toContainText('Manual')
+  // A new manual request must not relabel the previous scheduled result.
+  workflow.lastResult.triggerSource = 'SCHEDULED'
+  workflow.jobs[0].lastResult.triggerSource = 'PARENT'
+  workflow.requests = [{ runId: 'new-manual', requestId: 'new-manual', planStatus: 'QUEUED', status: 'WAITING', requestedAt: stamp,
+    trigger: { kind: 'MANUAL', parents: [{ name: 'Old snapshot parent', status: 'RUNNING' }] }, jobs: [] }]
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  await expect(display.locator('.om-planning-cell')).toContainText('PLANNED')
+  await expect(display.locator('.om-last-run')).toContainText('SUCCESS')
+  await expect(display.locator('.om-last-run')).not.toContainText('Manual')
+  await expect(child.locator('.om-last-run')).not.toContainText('Manual')
+  await expect(trigger).toContainText('Configured parent')
+  await expect(trigger).not.toContainText('Old snapshot parent')
+  expect(state.writes).toEqual([])
+  pgOnly(state)
+})
+
+test('consecutive plans keep one workflow status and parent status per plan', async ({ page }) => {
+  const state = await setup(page, { started: true })
+  const workflow = state.data.rows[0]
+  const parent = { name: 'WF8', nodeKey: 'wf8', relationship: 'PARENT' }
+  workflow.requests = [
+    { runId: 'old-occurrence', requestId: 'old-request', cascadeId: '11111111-old', planStatus: 'RUNNING', status: 'RUNNING', start: stamp,
+      jobs: [{ jobId: job, status: 'RUNNING', start: stamp }] },
+    { runId: 'new-occurrence', requestId: 'new-request', cascadeId: '22222222-new', planStatus: 'QUEUED', status: 'WAITING', requestedAt: stamp,
+      waitingFor: [{ ...parent, status: 'RUNNING', cascadeId: '11111111-old', overlap: true },
+        { ...parent, status: 'WAITING', cascadeId: '22222222-new', overlap: false },
+        { name: 'WF9', relationship: 'CHILD', status: 'RUNNING', cascadeId: '11111111-old', overlap: true }],
+      jobs: [{ jobId: job, status: 'PENDING' }] }
+  ]
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  const display = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Execution history for WF1', exact: true }) })
+  const previous = display.locator('[data-plan-id="11111111-old"]')
+  const current = display.locator('[data-plan-id="22222222-new"]')
+  await expect(display.locator('.om-request')).toHaveCount(2)
+  await expect(previous.locator('.om-request-heading .status-badge')).toHaveCount(1)
+  await expect(previous.locator('.om-request-heading')).toContainText('STARTED')
+  await expect(current.locator('.om-request-heading .status-badge')).toHaveCount(1)
+  await expect(current.locator('.om-request-heading')).toContainText('PLANNED')
+  await expect(current.locator('.om-dependency-item')).toHaveCount(1)
+  await expect(current.locator('.om-dependency-item .status-badge')).toHaveCount(1)
+  await expect(current.locator('.om-dependency-item')).toContainText('Parent WF8WAITING')
+  await expect(current).not.toContainText('RUNNING')
+  await expect(current).not.toContainText('WF9')
+  await expect(current.locator('.om-plan-overlap')).toHaveText('Waiting for plan 11111111 · WF8')
+  await expect(current.locator('.om-request-meta')).toContainText('Plan 22222222')
+  await page.getByRole('button', { name: 'Show jobs for WF1', exact: true }).click()
+  const child = page.locator('#om-jobs-' + wf).getByRole('row').first()
+  await expect(child.locator('[data-plan-id="22222222-new"] .om-request-heading .status-badge')).toHaveCount(1)
+  await expect(child.locator('[data-plan-id="22222222-new"] .om-dependency-item')).toContainText('Parent WF8WAITING')
+  workflow.requests[0].planStatus = 'SUCCESS'
+  workflow.requests[1].waitingFor = [{ ...parent, status: 'WAITING', cascadeId: '22222222-new' }]
+  await page.getByRole('button', { name: 'Refresh', exact: false }).first().click()
+  await expect(previous).toHaveCount(0)
+  await expect(display.locator('.om-request')).toHaveCount(1)
+  await expect(current.locator('.om-request-meta')).toContainText('Plan 22222222')
+  await expect(current.locator('.om-plan-overlap')).toHaveCount(0)
+  await expect(current.locator('.om-request-heading')).toContainText('PLANNED')
+  expect(state.writes).toEqual([])
   pgOnly(state)
 })

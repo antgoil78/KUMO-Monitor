@@ -28,7 +28,7 @@ def workflow_key(identity):
 
 
 def compile_catalog(body):
-    """Keep every definition, compile only supported SQL, explain every exclusion."""
+    """Keep every definition, compile supported SQL/DBT, explain every exclusion."""
     if set(body)-{'key','name','enabled','catalog','version','nodes','workflowKeys','executionIssues'}:
         raise ValueError('Invalid catalog graph fields')
     raw=body['catalog']
@@ -185,12 +185,14 @@ class CatalogConfiguration:
     def read(self):
         with self.store.connect() as conn:return self.payload(conn,self.graph(conn))
 
-    def recompile(self,actor):
+    def recompile(self,actor,expected_revision=None):
         """Apply new engine capabilities to the master, retaining accepted snapshots."""
         from psycopg.types.json import Jsonb
         with self.store.transaction() as conn:
             graph=conn.execute('SELECT * FROM kumo_task_engine.dependency_graphs WHERE key=%s',(CATALOG_KEY,)).fetchone()
             if not graph:return None
+            if expected_revision is not None and graph['revision']!=expected_revision:
+                raise Conflict('Configuration changed since the capability preview. Preview again before applying.')
             definition=compile_catalog(dict(key=CATALOG_KEY,name=graph['name'],enabled=graph['enabled'],catalog=graph['definition']['catalog']))
             if digest(definition)!=graph['definition_hash']:
                 graph=conn.execute('''UPDATE kumo_task_engine.dependency_graphs SET definition=%s,definition_hash=%s,revision=revision+1,

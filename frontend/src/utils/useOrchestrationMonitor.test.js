@@ -41,3 +41,25 @@ test('PostgreSQL submission updates State without replacing execution results', 
   for (const key of ['run', 'execution', 'jobs', 'progress']) assert.equal(result[key], workflow[key])
   assert.equal(result.canRun, false)
 })
+
+test('a late PostgreSQL receipt preserves active state and the previous completed result', () => {
+  for (const status of ['RUNNING', 'NEEDS REVIEW', 'CANCELLING']) {
+    const workflow = { source: 'POSTGRES', WORKFLOW_ID: 'wf', run: { status: 'RUNNING', runId: 'active' },
+      lastResult: { status: 'SUCCESS', runId: 'finished' }, planning: { status, message: 'Current activity', waitingCount: 2 } }
+    const result = applySubmission(workflow, [{ workflowId: 'wf', requestId: 'new', status: 'INITIATING' }])
+    assert.equal(result.lastResult, workflow.lastResult)
+    assert.equal(result.run, workflow.run)
+    assert.equal(result.planning, workflow.planning)
+  }
+})
+
+test('PostgreSQL receipts add a separate plan entry and never duplicate a durable request', () => {
+  const workflow = { source: 'POSTGRES', WORKFLOW_ID: 'wf', run: { status: 'SUCCESS', runId: 'old' }, jobs: [],
+    requests: [{ requestId: 'existing', runId: 'active', status: 'RUNNING', planStatus: 'RUNNING' }] }
+  const receipt = { workflowId: 'wf', requestId: 'new', status: 'QUEUED', submittedAt: '2026-11-17T13:00:00Z' }
+  const optimistic = applySubmission(workflow, [receipt])
+  assert.equal(optimistic.requests.length, 2)
+  assert.equal(optimistic.requests[0], workflow.requests[0])
+  assert.equal(optimistic.requests[1].requestedAt, receipt.submittedAt)
+  assert.equal(applySubmission(optimistic, [receipt]), optimistic)
+})

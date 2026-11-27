@@ -1,7 +1,7 @@
 const groups = {
   success: ['DONE', 'SUCCESS', 'SUCCEEDED', 'COMPLETED', 'OK'],
-  running: ['RUNNING', 'IN_PROGRESS', 'EXECUTING', 'STARTING'],
-  queued: ['INITIATING', 'QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED'],
+  running: ['RUNNING', 'IN_PROGRESS', 'EXECUTING', 'STARTING', 'STARTED'],
+  queued: ['INITIATING', 'QUEUED', 'PENDING', 'REQUESTED', 'SCHEDULED', 'PLANNED'],
   failed: ['FAILED', 'FAILURE', 'ERROR'],
   warning: ['WARNING', 'WARNINGS', 'WARN', 'VARNING', 'VARNINGAR', 'UNKNOWN', 'BLOCKED', 'REVIEW'],
   info: ['INFO', 'DEBUG', 'TRACE', 'NOTICE'],

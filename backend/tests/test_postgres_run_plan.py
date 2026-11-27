@@ -73,3 +73,31 @@ class RunPlanTests(unittest.TestCase):
             self.assertEqual(client.get(url,query_string=dict(workflowId=self.ids['WF1'],includeChildren='invalid')).status_code,400)
             self.assertEqual(client.get(url).status_code,404)
             self.assertEqual(client.get(url.replace(str(self.graph['id']),str(uuid.uuid4())),query_string=dict(workflowId=self.ids['WF1'])).status_code,404)
+
+    def test_dag_reads_postgres_and_bypasses_disabled_workflows_like_the_plan(self):
+        self.config.workflow(self.ids['WF2'],dict(revision=self.config.read()['revision'],enabled=False),'EDITOR')
+        app=Flask(__name__);app.register_blueprint(blueprint)
+        with patch('task_engine.integration.store',return_value=self.store),patch('orchestration_configuration.sf.query_service',side_effect=AssertionError('No Snowflake reads')):
+            response=app.test_client().get('/api/orchestration/task-engine/flow')
+        self.assertEqual(response.status_code,200);flow=response.json
+        self.assertEqual(flow['configurationStore'],'POSTGRES')
+        self.assertNotIn(self.ids['WF2'],{w['WORKFLOW_ID'] for w in flow['workflows']})
+        self.assertIn('DBT workflow',{w['WORKFLOW_NAME'] for w in flow['workflows']})
+        self.assertEqual({e['PARENT_WORKFLOW_ID'] for e in flow['dependencies'] if e['CHILD_WORKFLOW_ID']==self.ids['WF4']},{self.ids['WF1'],self.ids['WF3']})
+        plan=self.preview();ids={n['workflowId'] for n in plan['nodes']};by_key={n['key']:n['workflowId'] for n in plan['nodes']}
+        self.assertEqual({(e['PARENT_WORKFLOW_ID'],e['CHILD_WORKFLOW_ID']) for e in flow['dependencies'] if e['PARENT_WORKFLOW_ID'] in ids and e['CHILD_WORKFLOW_ID'] in ids},
+            {(by_key[p['key']],n['workflowId']) for n in plan['nodes'] for p in n['parents'] if p['inPlan']})
+        self.assertFalse(self.store.status()['runs'])
+
+    def test_dag_job_edges_skip_disabled_jobs_without_changing_configuration(self):
+        identity=self.ids['WF1'];middle=str(uuid.uuid4());last=str(uuid.uuid4())
+        first=next(r['JOB_ID'] for r in self.raw['raw_records'] if r['WORKFLOW_ID']==identity and r.get('JOB_ID'))
+        def add_jobs(raw):
+            for job,parent,enabled in [(middle,first,False),(last,middle,True)]:
+                raw['jobs'].append(dict(JOB_ID=job,JOB_NAME=job,JOB_TYPE='SQL',SQL_COMMAND='SELECT 1',IS_ENABLED=enabled,TIMEOUT_SECONDS=60))
+                raw['raw_records'].append(dict(WORKFLOW_ID=identity,JOB_ID=job,PARENT_ID=parent,TRIGGER_TYPE='DEP',ALLOW=True))
+        self.config.change(dict(revision=self.config.read()['revision']),'EDITOR',add_jobs)
+        before=self.config.read();flow=self.monitor.flow()
+        self.assertEqual(self.config.read(),before)
+        self.assertNotIn(middle,{j['JOB_ID'] for j in flow['jobs']})
+        self.assertEqual(next(j['PARENT_JOB_ID'] for j in flow['jobs'] if j['JOB_ID']==last),first)
