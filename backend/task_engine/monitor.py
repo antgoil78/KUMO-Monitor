@@ -9,6 +9,7 @@ from .admission import execution_scope,outstanding,busy_message,blocker_message,
 from .recovery import recovery_stage
 
 ACTIVE={'QUEUED','RUNNING','UNKNOWN'}
+RESULTS=TERMINAL|{'WARNING'}
 
 
 def now():return datetime.now(timezone.utc)
@@ -17,6 +18,10 @@ def now():return datetime.now(timezone.utc)
 
 def task_state(value):
     return 'QUEUED' if value in ('CREATING','SUBMITTING','SUBMITTED','SCHEDULED') else value
+
+
+def no_result():
+    return dict(status='NO RESULT',runId=None,executionId=None,start=None,end=None)
 
 
 class Monitor:
@@ -32,7 +37,37 @@ class Monitor:
             plan=execution_preview(graph['definition'],workflow_id,include_children)
         return dict(ok=True,graphId=str(graph['id']),configurationRevision=graph['revision'],**plan)
 
-    def records(self,conn,filters=None,latest=False,started=False,node_id=None,workflow_id=None,planning=False):
+    def flow(self):
+        import orchestration_configuration as schema
+        from .admission import workflow_rules
+        with self.store.connect() as conn:
+            conn.execute('SET TRANSACTION READ ONLY')
+            graph=CatalogConfiguration(self.store).graph(conn)
+            raw=graph['definition']['catalog'];catalog=local_catalog(raw)
+        enabled={w['WORKFLOW_ID'] for w in raw['workflows'] if w['IS_ENABLED']}
+        # Use the same disabled-parent bypass as admission, also for workflows
+        # whose execution capabilities currently require operator attention.
+        rules=[rule for identity,items in workflow_rules(raw).items() if identity in enabled for rule in items]
+        effective=local_catalog(dict(workflows=raw['workflows'],jobs=raw['jobs'],raw_records=rules))
+        members=schema.assignments(catalog)
+        assignments={(j['WORKFLOW_ID'],j['JOB_ID']):j for j in members}
+        jobs=[]
+        for job in members:
+            if job['WORKFLOW_ID'] not in enabled or not job['JOB_IS_ENABLED']:continue
+            parent=job.get('PARENT_JOB_ID');seen=set()
+            while parent and parent not in seen:
+                seen.add(parent);previous=assignments.get((job['WORKFLOW_ID'],parent))
+                if not previous or previous['JOB_IS_ENABLED']:break
+                parent=previous.get('PARENT_JOB_ID')
+            jobs.append(dict(job,PARENT_JOB_ID=parent))
+        return dict(ok=True,source='PostgreSQL · DEV workflow catalog',configurationStore='POSTGRES',
+            graphId=str(graph['id']),configurationRevision=graph['revision'],generatedAt=now(),
+            workflows=[w for w in raw['workflows'] if w['WORKFLOW_ID'] in enabled],
+            jobs=jobs,
+            dependencies=[dict(r,DEPENDENCY_ID=r['WORKFLOW_DEPENDENCY_ID']) for r in effective['records']
+                if r.get('PARENT_WORKFLOW_ID') in enabled and r['CHILD_WORKFLOW_ID'] in enabled])
+
+    def records(self,conn,filters=None,latest=False,started=False,node_id=None,workflow_id=None,planning=False,active_plans=False):
         clauses=[];params=[];filters=filters or {}
         scheduled_sql="""EXISTS(SELECT 1 FROM kumo_task_engine.schedule_occurrences o JOIN kumo_task_engine.schedules s ON s.id=o.schedule_id
                 WHERE o.cascade_id=c.id AND s.plan->>'workflowId'=c.snapshot->'workflowIds'->>n.node_key)"""
@@ -41,6 +76,7 @@ class Monitor:
             clauses.append("COALESCE(c.snapshot->'workflowIds'->>n.node_key,g.source->'workflows'->>n.node_key,n.node_key)=%s")
             params.append(workflow_id or filters['workflowId'])
         if started:clauses.append('r.started_at IS NOT NULL')
+        if active_plans:clauses.append("c.state IN ('QUEUED','RUNNING','UNKNOWN')")
         if filters.get('start'):
             clauses.extend(['COALESCE(r.started_at,c.created_at)<= %s',"COALESCE(r.ended_at,CASE WHEN c.state IN ('QUEUED','RUNNING','UNKNOWN') THEN clock_timestamp() ELSE c.ended_at END)>= %s"])
             params.extend((datetime.fromisoformat(filters['end']),datetime.fromisoformat(filters['start'])))
@@ -81,6 +117,7 @@ class Monitor:
             sort="started_at DESC,id DESC" if started else "(cascade_state IN ('QUEUED','RUNNING','UNKNOWN')) DESC,COALESCE(actual_state IN ('QUEUED','RUNNING','UNKNOWN'),false) DESC,requested_at DESC,id DESC"
             if planning:sort="(cascade_state IN ('QUEUED','RUNNING','UNKNOWN') AND (COALESCE(actual_state IN ('QUEUED','RUNNING','UNKNOWN'),false) OR state='WAITING')) DESC,(state='WAITING') DESC,requested_at DESC,id DESC"
             sql='SELECT * FROM (SELECT v.*,row_number() OVER(PARTITION BY workflow_id ORDER BY '+sort+') AS rank FROM ('+sql+') v) ranked WHERE rank=1'
+        elif active_plans:sql+=' ORDER BY c.created_at,c.id,n.id'
         else:sql+=' ORDER BY c.created_at DESC,n.id DESC LIMIT '+str(int(filters.get('limit',100))+1)
         rows=conn.execute(sql,params).fetchall()
         ids=[r['run_id'] for r in rows if r['run_id']]
@@ -113,6 +150,7 @@ class Monitor:
         blockers=[]
         for saved in row['blockers']:
             blocker=dict(saved)
+            blocker['overlap']=saved.get('reason')=='Waiting for related execution to complete'
             if blocker.get('parent'):
                 key=blocker.get('nodeKey',blocker['parent'])
                 if key not in names:key=next((k for k,name in names.items() if name==key),key)
@@ -120,12 +158,13 @@ class Monitor:
                     relation=relationship(row['snapshot'],row['node_key'],key)
                     if relation=='RELATED':relation=relationship(row['current_definition'],row['node_key'],key)
                     blocker.update(relationship=relation,nodeKey=key)
+                binding=(row['snapshot'].get('externalBindings',{}).get(key) or row['siblings'].get(key)) if not blocker['overlap'] else None
+                target=(row['blocker_runs'].get(blocker.get('runId')) or
+                    row['blocker_groups'].get((blocker.get('cascadeId'),key)) or row['blocker_nodes'].get(binding))
+                if target:blocker['cascadeId']=str(target['cascade_id'])
                 # Show current native progress, retaining the last admission decision.
                 # Terminal decisions and freshness failures remain historical facts.
                 if row['state'] in {'WAITING','BLOCKED'} and blocker.get('state')!='STALE_PARENT':
-                    binding=(row['snapshot'].get('externalBindings',{}).get(key) or row['siblings'].get(key)) if saved.get('reason')!='Waiting for related execution to complete' else None
-                    target=(row['blocker_runs'].get(blocker.get('runId')) or
-                        row['blocker_groups'].get((blocker.get('cascadeId'),key)) or row['blocker_nodes'].get(binding))
                     if target:
                         state=target['actual_state'] or target['state']
                         if state=='RUNNING' and not target['started_at']:state='QUEUED'
@@ -136,7 +175,7 @@ class Monitor:
         message='; '.join(dict.fromkeys(blocker_message(b,names) for b in blockers))
         waiting_for=[dict(name=names.get(b['parent'],b['parent']),status=b.get('state'),
             relationship=b.get('relationship','RELATED'),reason=b.get('reason'),
-            nodeKey=b.get('nodeKey',b['parent']),runId=b.get('runId'),cascadeId=b.get('cascadeId'))
+            nodeKey=b.get('nodeKey',b['parent']),runId=b.get('runId'),cascadeId=b.get('cascadeId'),overlap=b['overlap'])
             for b in blockers if b.get('parent')]
         if row['cancel_requested'] and row['cascade_state'] in ACTIVE:message='Cancellation requested; awaiting task confirmation'
         dispatch=dict(state=row['dispatch_state'],attempts=row['dispatch_attempts'] or 0,
@@ -178,6 +217,54 @@ class Monitor:
                 parentExecutionId=str(parent['id']) if parent else root_id,source='POSTGRES'))
         return root
 
+    def results(self,conn):
+        """Latest finished executions; pending/ambiguous attempts never erase results."""
+        identity="COALESCE(c.snapshot->'workflowIds'->>n.node_key,g.source->'workflows'->>n.node_key,n.node_key)"
+        origin="c.snapshot->>'trigger' AS plan_trigger,c.snapshot->>'requestedWorkflowId' AS requested_workflow_id"
+        joins='''FROM kumo_task_engine.cascade_nodes n
+            JOIN kumo_task_engine.cascades c ON c.id=n.cascade_id
+            JOIN kumo_task_engine.dependency_graphs g ON g.id=c.graph_id
+            JOIN kumo_task_engine.runs r ON r.id=n.run_id'''
+        workflows=conn.execute(f'''SELECT DISTINCT ON (workflow_id) {identity} AS workflow_id,
+            n.id AS node_id,r.state,r.started_at,r.ended_at,{origin}
+            {joins} WHERE r.started_at IS NOT NULL AND r.ended_at IS NOT NULL AND r.state=ANY(%s)
+            ORDER BY workflow_id,r.ended_at DESC,n.id DESC''',(sorted(RESULTS),)).fetchall()
+        jobs=conn.execute(f'''SELECT DISTINCT ON (workflow_id,a.job_key) {identity} AS workflow_id,
+            n.id AS node_id,a.id AS attempt_id,a.job_key,a.state,a.native_started_at AS started_at,a.ended_at,{origin}
+            {joins} JOIN kumo_task_engine.attempts a ON a.run_id=r.id
+            WHERE a.native_started_at IS NOT NULL AND a.ended_at IS NOT NULL AND a.state=ANY(%s)
+            ORDER BY workflow_id,a.job_key,a.ended_at DESC,a.id DESC,n.id DESC''',(sorted(RESULTS),)).fetchall()
+        def result(row):
+            # The plan's manual origin applies only to its requested entry,
+            # never to downstream workflows or a newer, unrelated request.
+            trigger=(row['plan_trigger'] or 'POSTGRES') if row['requested_workflow_id']==row['workflow_id'] else 'PARENT' if row['requested_workflow_id'] else 'POSTGRES'
+            return dict(status=row['state'],runId=str(row['node_id']),executionId=str(row.get('attempt_id',row['node_id'])),
+                start=row['started_at'],end=row['ended_at'],triggerSource=trigger)
+        return ({r['workflow_id']:result(r) for r in workflows},
+                {(r['workflow_id'],r['job_key']):result(r) for r in jobs})
+
+    def plan_request(self,row):
+        """A workflow occurrence stays visible until its entire plan finishes."""
+        result=self.run(row)
+        result['planStatus']=row['cascade_state']
+        result['cancelRequested']=row['cancel_requested'] and result['status'] not in RESULTS
+        rules=row['definition']['parents']+row['snapshot'].get('externalParents',{}).get(row['node_key'],[])
+        names=dict(row['snapshot'].get('workflowNames',{}),**{n['key']:n['name'] for n in row['snapshot']['nodes']})
+        parents=[]
+        for rule in rules:
+            target=row['blocker_groups'].get((str(row['cascade_id']),rule['key']))
+            if not target:
+                binding=row['snapshot'].get('externalBindings',{}).get(rule['key'])
+                target=row['blocker_nodes'].get(binding)
+            state=(target['actual_state'] or target['state']) if target else None
+            if state=='ADMITTED' or (state=='RUNNING' and not target['started_at']):state='QUEUED'
+            parents.append(dict(name=names.get(rule['key'],rule['key']),status=state))
+        entry=row['snapshot'].get('requestedWorkflowId')==row['workflow_id']
+        kind=('SCHEDULED' if row['scheduled'] else row['snapshot'].get('trigger','MANUAL') if entry
+              else 'PARENT' if rules else row['snapshot'].get('trigger','MANUAL'))
+        result['trigger']=dict(kind=kind,parents=parents)
+        return result
+
     def payload(self):
         configuration=CatalogConfiguration(self.store)
         with self.store.connect() as conn:
@@ -185,6 +272,8 @@ class Monitor:
             graph=configuration.graph(conn);catalog=configuration.payload(conn,graph)
             records=self.records(conn,latest=True);last=self.records(conn,started=True)
             plans=self.records(conn,latest=True,planning=True)
+            plan_records=self.records(conn,active_plans=True)
+            workflow_results,job_results=self.results(conn)
             active_nodes=outstanding(conn,graph['id'],list(graph['definition']['workflowKeys'].values()))
             schedules=conn.execute("SELECT * FROM kumo_task_engine.schedules WHERE plan->>'graphId'=%s",(str(graph['id']),)).fetchall()
             workers=conn.execute('SELECT *,EXTRACT(EPOCH FROM clock_timestamp()-last_seen) AS age FROM kumo_task_engine.dependency_workers ORDER BY last_seen DESC LIMIT 1').fetchone()
@@ -197,8 +286,18 @@ class Monitor:
                 ORDER BY c.created_at,c.id''',(graph['id'],)).fetchall()
         current={r['workflow_id']:self.run(r) for r in records};previous={r['workflow_id']:self.run(r) for r in last}
         planned={r['workflow_id']:self.run(r) for r in plans}
+        requests={}
+        for record in plan_records:
+            requests.setdefault(record['workflow_id'],[]).append(self.plan_request(record))
         active={r['workflow_id']:str(r['cascade_id']) for r in records if r['cascade_state'] in ACTIVE}
         assignments=catalog['assignments'];rows=[]
+        workflow_config={w['WORKFLOW_ID']:w for w in catalog['workflows']}
+        configured_parents={}
+        for rule in catalog['rows']:
+            if rule['jobId'] or not rule['parentId']:continue
+            parent=workflow_config.get(rule['parentId'],{})
+            configured_parents.setdefault(rule['workflowId'],[]).append(dict(rule,
+                name=parent.get('WORKFLOW_NAME',rule['parentId']),enabled=parent.get('IS_ENABLED',False)))
         for wf in catalog['workflows']:
             identity=wf['WORKFLOW_ID'];scope=execution_scope(graph['definition'],identity);run=current.get(identity)
             own_scope=execution_scope(graph['definition'],identity,False)
@@ -214,9 +313,9 @@ class Monitor:
             for job in members:
                 state=saved.get(job['JOB_ID']) or dict(status='NOT SELECTED' if execution['runId'] else 'NO RUN',runId=execution['runId'],start=None,end=None,message='',selected=False)
                 old=next((j for j in previous.get(identity,{}).get('jobs',[]) if j['jobId']==job['JOB_ID']),None)
-                jobs.append(dict(job,run=state,lastRun=old,progress=None,runOnly=False,hasSqlCondition=bool(job.get('SQL_CONDITION'))))
+                jobs.append(dict(job,run=state,lastRun=old,lastResult=job_results.get((identity,job['JOB_ID']),no_result()),progress=None,runOnly=False,hasSqlCondition=bool(job.get('SQL_CONDITION'))))
             for job in execution['jobs']:
-                if not any(j['JOB_ID']==job['jobId'] for j in jobs):jobs.append(dict(JOB_ID=job['jobId'],JOB_NAME=job['name'],JOB_TYPE=job['type'],JOB_LAYER=job['layer'],JOB_IS_ENABLED=False,run=job,lastRun=job,progress=None,runOnly=True))
+                if not any(j['JOB_ID']==job['jobId'] for j in jobs):jobs.append(dict(JOB_ID=job['jobId'],JOB_NAME=job['name'],JOB_TYPE=job['type'],JOB_LAYER=job['layer'],JOB_IS_ENABLED=False,run=job,lastRun=job,lastResult=job_results.get((identity,job['jobId']),no_result()),progress=None,runOnly=True))
             counts={s:sum(j['status']==s for j in execution['jobs']) for s in ('SUCCESS','FAILED','SKIPPED','CANCELLED')};completed=sum(counts.values());total=len(execution['jobs'])
             schedule=next((s for s in schedules if s['plan'].get('workflowId')==identity),None)
             schedule_fields=dict(IS_SCHEDULE_ENABLED=bool(schedule and schedule['enabled']),SCHEDULE=schedule['cron'] if schedule else wf.get('SCHEDULE'),SCHEDULE_TIMEZONE=schedule['timezone'] if schedule else wf.get('SCHEDULE_TIMEZONE'))
@@ -226,18 +325,20 @@ class Monitor:
             plan=planned.get(identity,root)
             scheduled=bool(schedule and schedule['enabled'] and wf['IS_ENABLED'])
             state=('CANCELLING' if identity in active and next((r['cancel_requested'] for r in records if r['workflow_id']==identity),False)
+                else 'NEEDS REVIEW' if any(n['actual_state']=='UNKNOWN' for n in own)
+                else 'RUNNING' if any(n['actual_state']=='RUNNING' and n['started_at'] for n in own)
                 else 'BLOCKED' if plan.get('dispatch',{}).get('canRetry')
                 else 'WAITING' if waiting_count else 'QUEUED' if queued_count
                 else 'BLOCKED' if plan['status']=='BLOCKED'
                 else 'NEEDS REVIEW' if plan['status']=='UNKNOWN'
-                else 'EXECUTING' if identity in active and root['status']=='RUNNING'
                 else 'SCHEDULED' if scheduled else 'NO PLAN')
             planning=dict(status=state,waitingCount=waiting_count,queuedCount=queued_count,
                 cascadeId=plan.get('cascadeId'),requestId=plan.get('requestId'),requestedAt=plan.get('requestedAt'),
                 message=plan.get('message',''),waitingFor=plan.get('waitingFor',[]),scheduled=scheduled,
                 nextRun=schedule['next_fire_at'] if scheduled else None,
                 stopped=plan['status']=='BLOCKED',dispatch=plan.get('dispatch'),recovery=root.get('recovery'))
-            rows.append(dict(dict(wf,**schedule_fields),source='POSTGRES',run=root,execution=execution,planning=planning,lastRun=previous.get(identity),jobs=jobs,canRun=not message,runUnavailable=message,
+            rows.append(dict(dict(wf,**schedule_fields),source='POSTGRES',run=root,execution=execution,lastResult=workflow_results.get(identity,no_result()),planning=planning,requests=requests.get(identity,[]),lastRun=previous.get(identity),jobs=jobs,canRun=not message,runUnavailable=message,
+                configuredParents=configured_parents.get(identity,[]),
                 canRunWithChildren=not scope['issues'],runWithChildrenUnavailable='; '.join(scope['issues']),
                 runScope=scope['workflows'],graphId=str(graph['id']),configurationRevision=graph['revision'],cascadeId=root.get('cascadeId'),
                 dispatch=root.get('dispatch'),canCancel=identity in active,cancelRequested=next((r['cancel_requested'] for r in records if r['workflow_id']==identity),False),
@@ -249,16 +350,16 @@ class Monitor:
         assigned={a['JOB_ID'] for a in assignments};unassigned=[j for j in catalog['jobs'] if j['JOB_ID'] not in assigned]
         if unassigned:
             rows.append(dict(source='POSTGRES',isUnassigned=True,WORKFLOW_ID='unassigned',WORKFLOW_NAME='Unassigned jobs',WORKFLOW_GROUP='Unassigned jobs',IS_ENABLED=False,IS_SCHEDULE_ENABLED=False,
-                execution=dict(status='NO RUN',runId=None,start=None,end=None,message='No workflow assignment'),planning=dict(status='NO PLAN',waitingCount=0,queuedCount=0,waitingFor=[],scheduled=False),
+                execution=dict(status='NO RUN',runId=None,start=None,end=None,message='No workflow assignment'),lastResult=no_result(),planning=dict(status='NO PLAN',waitingCount=0,queuedCount=0,waitingFor=[],scheduled=False),requests=[],
                 JOB_EXECUTION_MODE='SEQUENTIAL',run=dict(status='NOT RUN',runId=None,start=None,end=None,message='Assign these jobs to a workflow before execution'),lastRun=None,
-                jobs=[dict(j,JOB_IS_ENABLED=j['IS_ENABLED'],JOB_SEQUENCE=i+1,run=dict(status='NOT RUN',runId=None,start=None,end=None,message='No workflow assignment'),lastRun=None,progress=None,runOnly=True) for i,j in enumerate(unassigned)],
+                jobs=[dict(j,JOB_IS_ENABLED=j['IS_ENABLED'],JOB_SEQUENCE=i+1,run=dict(status='NOT RUN',runId=None,start=None,end=None,message='No workflow assignment'),lastResult=no_result(),lastRun=None,progress=None,runOnly=True) for i,j in enumerate(unassigned)],
                 canRun=False,runUnavailable='These jobs have no workflow assignment',canCancel=False,progress=dict(total=0,succeeded=0,failed=0,skipped=0,percent=0),queuedCount=0,waitingCount=0))
         health='HEALTHY' if workers and workers['age']<=10 and workers['execution_enabled'] else 'DELAYED' if workers and workers['age']<=30 else 'UNAVAILABLE'
         return dict(ok=True,source='POSTGRES',rows=rows,workflowsCount=len(catalog['workflows']),jobsCount=len(catalog['jobs']),unassignedJobs=len(unassigned),
             dispatchErrors=[dict(cascadeId=str(e['id']),graphRevision=e['graph_revision'],requestedAt=e['created_at'],
                 workflowNames=e['workflow_names'],attempts=e['attempts'],error=e['error'],canRetry=True) for e in dispatch_errors],
             generatedAt=now(),configurationRevision=graph['revision'],refreshSeconds=2,runsEnabled=os.getenv('KUMO_ORCHESTRATION_RUNS_ENABLED','').lower()=='true',warnings=catalog['warnings'],submissions=[],
-            worker=dict(state=health,lastSeen=workers['last_seen'] if workers else None),scheduleMessage='Schedules are managed by the backend. Accepted workflows remain WAITING until dependencies permit execution; imported schedules stay paused until explicitly enabled.')
+            worker=dict(state=health,lastSeen=workers['last_seen'] if workers else None),scheduleMessage='Accepted requests appear as Planned until dependencies permit execution. Imported schedules stay paused until explicitly enabled.')
 
     def history(self,args):
         from orchestration_history import filters,encode_cursor

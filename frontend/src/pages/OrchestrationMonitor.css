@@ -127,3 +127,41 @@
 .om-dispatch-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .om-dispatch-error p { margin: 4px 0; }
 .om-dispatch-paused { color: #ed8c93; }
+
+/* PostgreSQL execution plans: one workflow row, with request entries in Status. */
+.om-page .om-compact-table { min-width: 1120px; }
+.om-page .om-compact-table .om-name-col { width: 33%; }
+.om-page .om-compact-table .om-state-col { width: 27%; }
+.om-page .om-compact-table .om-last-col { width: 16%; }
+.om-page .om-compact-table .om-duration-col { width: 10%; }
+.om-page .om-compact-table .om-trigger-col { width: 14%; }
+.om-compact-table tbody > tr > :is(th, td) { vertical-align: top; padding-top: 12px; padding-bottom: 12px; }
+.om-workflow-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.om-enabled { display: inline-block; flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; }
+.om-enabled.enabled { background: #36d78d; }
+.om-enabled.disabled { background: #ed8c93; }
+.om-compact-table .om-name-text { display: grid; grid-template-columns: minmax(0, 1fr); }
+.om-compact-table .om-workflow-heading { grid-column: 1 / -1; }
+.om-compact-table .om-recovery-actions:empty { display: none; }
+.om-recovery-actions { display: flex; gap: 6px; margin: 6px 0 0 36px; }
+.om-recovery-actions .button { padding: 3px 8px; font-size: 11px; }
+.om-request + .om-request { border-top: 1px solid #353a47; margin-top: 9px; padding-top: 9px; }
+.om-compact-table .om-request.om-error { margin: 0; padding-left: 0; }
+.om-compact-table .om-request.om-error + .om-request,
+.om-compact-table .om-request + .om-request.om-error { margin-top: 9px; }
+.om-request-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.om-request-heading .om-progress { min-width: 85px; flex: 1; max-width: 135px; }
+.om-request .om-request-meta { color: #8c96a8; }
+.om-request-number { color: #9abce5; font-variant-numeric: tabular-nums; }
+.om-request .om-plan-overlap { color: #c9b78f; }
+.om-last-run-line { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 10px; }
+.om-last-run-line .status-badge { font-size: 11px; }
+.om-durations > span { display: block; font-size: 11px; }
+.om-durations > small { color: #a7c8f5; }
+.om-configured-parent { font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.om-configured-parent + .om-configured-parent { margin-top: 6px; }
+.om-manual-trigger { color: #a9b8d2; font-size: 11px; }
+.om-next-schedule { margin-top: 6px; }
+.om-next-schedule:first-child { margin-top: 0; }
+.om-next-schedule small > span { display: inline; }
+.om-next-schedule small > span > small { display: inline; margin-left: 5px; }

@@ -8,9 +8,14 @@ export function applySubmission(workflow, submissions = []) {
   // A durable execution always wins, even before the asynchronous receipt has
   // learned its run ID. A late receipt must never hide RUNNING or SUCCESS.
   if (!submission || workflow.run.requestId === submission.requestId ||
-      (submission.runId && workflow.run.runId === submission.runId)) return workflow
+      (submission.runId && workflow.run.runId === submission.runId) ||
+      workflow.requests?.some(request => request.requestId === submission.requestId)) return workflow
   if (workflow.source === 'POSTGRES') return { ...workflow, canRun: false, runUnavailable: 'Workflow is being prepared.',
-    planning: { ...workflow.planning, status: submission.status === 'QUEUED' ? 'QUEUED' : 'INITIATING',
+    requests: [...(workflow.requests || []), { runId: submission.runId || submission.requestId, requestId: submission.requestId,
+      status: 'QUEUED', planStatus: 'QUEUED', requestedAt: submission.submittedAt, requestedBy: submission.requestedBy,
+      trigger: { kind: 'MANUAL' }, waitingFor: [], jobs: (workflow.jobs || []).filter(job => !job.runOnly).map(job => ({
+        jobId: job.JOB_ID, type: job.JOB_TYPE, source: 'POSTGRES', status: job.JOB_IS_ENABLED === false ? 'SKIPPED' : 'PENDING' })) }],
+    planning: ['RUNNING', 'NEEDS REVIEW', 'CANCELLING'].includes(workflow.planning?.status) ? workflow.planning : { ...workflow.planning, status: submission.status === 'QUEUED' ? 'QUEUED' : 'INITIATING',
       requestId: submission.requestId, requestedAt: submission.submittedAt, waitingFor: [], message: 'Workflow is being prepared.' } }
   const jobIndex = workflow.jobs.findIndex(job => job.JOB_ID === submission.jobId)
   let first = true

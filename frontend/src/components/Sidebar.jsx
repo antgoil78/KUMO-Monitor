@@ -7,7 +7,7 @@ const navItems = [
     { key: 'orchestrationHistory', label: 'History', icon: '↺' },
     { key: 'orchestrationDependencies', label: 'Dependencies', icon: '⌘' },
     { key: 'orchestrationWorkflow', label: 'Workflow', icon: '◇' },
-    { key: 'orchestrationFlow', label: 'Flow', icon: '⌁' }
+    { key: 'orchestrationFlow', label: 'DAG View', icon: '⌁' }
   ] },
   { key: 'lim', label: 'LIM', icon: '⇩', children: [
     { key: 'fileIngestion', label: 'Ingestion', icon: '⇩' },

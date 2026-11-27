@@ -119,6 +119,12 @@ def monitor():
     return jsonify(encode(Monitor(store()).payload()))
 
 
+@blueprint.route(PREFIX+'/flow')
+def flow():
+    from .monitor import Monitor
+    return jsonify(encode(Monitor(store()).flow()))
+
+
 @blueprint.route(PREFIX+'/ready')
 def ready():
     from .runtime import readiness
@@ -221,6 +227,29 @@ def register(app,actor_context):
         graph=import_catalog(db,raw,'LOCAL_DEV_CLI')['definition'] if apply else compile_catalog(dict(key='dev-workflow-catalog',name='DEV workflow catalog',catalog=raw))
         click.echo(json.dumps(dict(ok=True,applied=apply,workflows=len(raw['workflows']),jobs=len(raw['jobs']),executableWorkflows=len(graph['nodes']),
             blockedWorkflows={w['WORKFLOW_NAME']:graph['executionIssues'][w['WORKFLOW_ID']] for w in raw['workflows'] if graph['executionIssues'][w['WORKFLOW_ID']]}),indent=2))
+
+    @commands.command('recompile-catalog')
+    @click.option('--apply',is_flag=True,help='Save current execution capabilities to PostgreSQL; does not start jobs')
+    @click.option('--expected-revision',type=int,help='Revision reviewed in the preview; required with --apply')
+    def recompile_complete_catalog(apply,expected_revision):
+        from .catalog import CatalogConfiguration,compile_catalog,master
+        if apply and expected_revision is None:
+            raise click.ClickException('Preview first and supply --expected-revision with --apply')
+        db=store();before=master(db)
+        if not before:raise click.ClickException('The PostgreSQL master catalog is not installed')
+        if apply:
+            try:graph=CatalogConfiguration(db).recompile('LOCAL_DEV_CLI',expected_revision)
+            except Conflict as exc:raise click.ClickException(str(exc)) from None
+            definition=graph['definition']
+        else:
+            graph=before
+            definition=compile_catalog(dict(key=graph['key'],name=graph['name'],enabled=graph['enabled'],catalog=graph['definition']['catalog']))
+        raw=definition['catalog']
+        click.echo(json.dumps(dict(ok=True,applied=apply,revision=graph['revision'],
+            businessJobsEnabled=os.getenv('KUMO_PG_BUSINESS_JOBS_ENABLED','').lower()=='true',
+            workflows=len(raw['workflows']),jobs=len(raw['jobs']),executableWorkflows=len(definition['nodes']),
+            executableDBTWorkflows=[node['name'] for node in definition['nodes'] if any(job.get('type')=='DBT' and job['enabled'] for job in node['plan']['jobs'])],
+            blockedWorkflows={w['WORKFLOW_NAME']:definition['executionIssues'][w['WORKFLOW_ID']] for w in raw['workflows'] if definition['executionIssues'][w['WORKFLOW_ID']]}),indent=2))
 
     @commands.command('schedule')
     @click.option('--once',is_flag=True,help='Evaluate at most one due schedule')
