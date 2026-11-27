@@ -1,0 +1,61 @@
+{
+  "environment": "DEV",
+  "service": "KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE",
+  "status": "VERIFIED",
+  "appliedAt": "2026-11-27T14:12:41.219766+00:00",
+  "verifiedAt": "2026-11-27T14:13:50.538900+00:00",
+  "sourceCommit": "7d5b11f8d95b087f7638d79cea977826e1db7e43",
+  "pullRequest": "https://github.com/antgoil78/KUMO-Monitor/pull/21",
+  "build": "https://github.com/antgoil78/KUMO-Monitor/actions/runs/46013037560",
+  "endpoint": "https://mnztue-vymkbmw-ov24823.snowflakecomputing.app",
+  "image": "/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-236-1-7d5b11f8d95b",
+  "digest": "sha256:2566b0a7af13d170d12b02ebe352b2d5378180696438dd73fc9454666af6fb64",
+  "previousImage": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-234-1-9c16705be69d",
+  "previousDigest": "@sha256:c2515b6762e63ea3315d8e2077811125919ca6a7de274e732cb3933e8834589f",
+  "promotionQueryId": "01c8b154-010c-09cc-0004-a4f208b8a94a",
+  "validation": {
+    "backendTests": 597,
+    "expectedFailures": 2,
+    "frontendUnitTests": 50,
+    "browserTests": 86,
+    "ci": "https://github.com/antgoil78/KUMO-Monitor/actions/runs/46012099193"
+  },
+  "readinessProbe": "/api/orchestration/task-engine/ready",
+  "serviceContainers": [
+    {
+      "database_name": "KUMO_DEV",
+      "schema_name": "MONITOR_APP",
+      "service_name": "KUMO_MONITOR_SERVICE",
+      "service_status": "RUNNING",
+      "instance_id": "0",
+      "instance_status": "READY",
+      "container_name": "monitor",
+      "status": "READY",
+      "message": "Running",
+      "image_name": "vymkbmw-ov24823.registry.snowflakecomputing.com/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-236-1-7d5b11f8d95b",
+      "image_digest": "sha256:2566b0a7af13d170d12b02ebe352b2d5378180696438dd73fc9454666af6fb64",
+      "restart_count": 0,
+      "start_time": "2026-11-27T14:13:20Z",
+      "last_exit_code": null,
+      "last_restart_time": null
+    }
+  ],
+  "changes": {
+    "serviceFields": [
+      "image",
+      "sha256"
+    ],
+    "databaseMigration": false,
+    "postgresServiceChanged": false,
+    "scheduleChanges": false,
+    "workflowConfigurationChanges": false,
+    "tstChanged": false
+  },
+  "verification": {
+    "expectedImageAndDigest": true,
+    "serviceStatus": "RUNNING",
+    "containerStatus": "READY",
+    "restartCount": 0,
+    "businessRunsSubmitted": 0
+  }
+}

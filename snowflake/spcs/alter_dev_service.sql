@@ -6,8 +6,8 @@ ALTER SERVICE KUMO_DEV.MONITOR_APP.KUMO_MONITOR_SERVICE FROM SPECIFICATION $$
     "containers": [
       {
         "name": "monitor",
-        "image": "/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-234-1-9c16705be69d",
-        "sha256": "@sha256:c2515b6762e63ea3315d8e2077811125919ca6a7de274e732cb3933e8834589f",
+        "image": "/kumo_shared/monitor_app/monitor_repository/kumo-monitor:build-236-1-7d5b11f8d95b",
+        "sha256": "@sha256:2566b0a7af13d170d12b02ebe352b2d5378180696438dd73fc9454666af6fb64",
         "env": {
           "KUMO_ENVIRONMENT_TABLE": "KUMO_DEV.MONITOR_META.APPLICATION_PARAMETERS",
           "KUMO_ENV": "DEV",

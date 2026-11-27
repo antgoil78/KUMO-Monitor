@@ -149,7 +149,9 @@ rules. Do not rely on those notifications during this DEV trial.
 [`alter_dev_service.sql`](alter_dev_service.sql) updates that same DEV service
 for subsequent deployments. The create script records the initial published
 version `build-215-1-022ffedd2bf2`. The update script selects GitHub Actions image
-`build-229-1-7034518aaa10` and its verified digest for the PostgreSQL engine.
+`build-236-1-7d5b11f8d95b` and its verified digest for the Monitor and live DAG View.
+The 27 November 2026 image-only promotion is recorded in
+[`dev-monitor-plan-status-deployment-20261127.json`](../../review/dev-monitor-plan-status-deployment-20261127.json).
 The 25 November 2026 rollout preserves the endpoint and memory settings and
 reduces the app CPU reservation to share the existing pool with PostgreSQL.
 The database definition is
